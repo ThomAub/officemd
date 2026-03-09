@@ -1,0 +1,23 @@
+[package]
+name = "officemd_core"
+version = "0.1.0"
+edition.workspace = true
+description = "Shared IR, package reading, and relationships for OfficeMD"
+license = "MIT"
+authors = ["Thomas Aubry"]
+repository = "https://github.com/ThomAub/officemd"
+homepage = "https://github.com/ThomAub/officemd"
+documentation = "https://docs.rs/officemd_core"
+readme = "README.md"
+keywords = ["officemd", "office", "docx", "xlsx", "pptx"]
+categories = ["parser-implementations", "data-structures"]
+
+[dependencies]
+quick-xml = "0.37"
+zip = "2.2"
+thiserror = "2.0"
+serde = { version = "1", features = ["derive"] }
+regex = "1"
+
+[dev-dependencies]
+serde_json = "1"

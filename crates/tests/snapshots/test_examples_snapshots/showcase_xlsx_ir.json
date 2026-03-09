@@ -1,0 +1,20 @@
+{
+  "kind": "Xlsx",
+  "properties": null,
+  "sections": [],
+  "sheets": [
+    {
+      "formulas": [],
+      "hyperlinks": [],
+      "name": "Sales",
+      "tables": []
+    },
+    {
+      "formulas": [],
+      "hyperlinks": [],
+      "name": "Summary",
+      "tables": []
+    }
+  ],
+  "slides": []
+}

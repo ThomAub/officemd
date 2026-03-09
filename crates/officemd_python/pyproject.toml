@@ -1,0 +1,73 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "officemd"
+version = "0.1.0"
+description = "Native Python bindings for OfficeMD document extraction"
+readme = "README.md"
+license = { text = "MIT" }
+license-files = ["LICENSE"]
+authors = [{ name = "Thomas Aubry" }]
+requires-python = ">=3.12"
+dependencies = ["rich>=13.0"]
+keywords = ["markdown", "docx", "xlsx", "pptx", "pdf", "document", "extraction"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+]
+
+[project.urls]
+Repository = "https://github.com/ThomAub/officemd"
+Homepage = "https://github.com/ThomAub/officemd"
+
+[project.scripts]
+officemd = "officemd._cli:main"
+
+[tool.maturin]
+features = ["extension-module"]
+python-source = "python"
+module-name = "officemd._officemd"
+
+[dependency-groups]
+dev = [
+    "maturin>=1.7,<2.0",
+    "pytest>=9.0.0",
+    "pytest-regressions>=2.7.0",
+    "ruff>=0.14.0",
+    "tiktoken>=0.12.0",
+    "ty>=0.0.1a1",
+]
+bench = [
+    "markitdown[all]>=0.1.0",
+    "docling>=2.0.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+# officemd._officemd is a native Rust extension (maturin);
+# it only exists after `maturin develop`
+unresolved-import = "warn"
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true

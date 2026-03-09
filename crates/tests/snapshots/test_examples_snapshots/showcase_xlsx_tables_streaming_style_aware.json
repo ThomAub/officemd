@@ -1,0 +1,499 @@
+{
+  "kind": "Xlsx",
+  "properties": null,
+  "sections": [],
+  "sheets": [
+    {
+      "formulas": [
+        {
+          "cell_ref": "D2",
+          "formula": "B2*(1+C2)"
+        },
+        {
+          "cell_ref": "D3",
+          "formula": "B3*(1+C3)"
+        },
+        {
+          "cell_ref": "D4",
+          "formula": "B4*(1+C4)"
+        }
+      ],
+      "hyperlinks": [],
+      "name": "Sales",
+      "tables": [
+        {
+          "caption": "Table 1 (rows 1–6, cols A–E)",
+          "headers": [
+            "Col1",
+            "Col2",
+            "Col3",
+            "Col4",
+            "Col5"
+          ],
+          "rows": [
+            [
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "Product"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "BaseAmount"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "Rate"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "Total"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "Notes"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "Widget"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "$1,200.00"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "15.00%"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": ""
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "Primary SKU"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "Gadget"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "$850.00"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "10.00%"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": ""
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "Secondary SKU"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "Service"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "$600.00"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "20.00%"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": ""
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "Recurring"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": ""
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": ""
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": ""
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": ""
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": ""
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "Project Wiki"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": ""
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": ""
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": ""
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": ""
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "formulas": [
+        {
+          "cell_ref": "B4",
+          "formula": "AVERAGE(Sales!C2:C4)"
+        }
+      ],
+      "hyperlinks": [],
+      "name": "Summary",
+      "tables": [
+        {
+          "caption": "Table 2 (rows 1–4, cols A–B)",
+          "headers": [
+            "Col1",
+            "Col2"
+          ],
+          "rows": [
+            [
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "Metric"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "Value"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "ReportDate"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "2026-02-01"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "RunAt"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "2026-02-01 14:30"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": "AverageRate"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "content": [
+                  {
+                    "inlines": [
+                      {
+                        "Text": ""
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "slides": []
+}

@@ -1,0 +1,191 @@
+{
+  "kind": "Pptx",
+  "properties": null,
+  "sections": [],
+  "sheets": [],
+  "slides": [
+    {
+      "blocks": [
+        {
+          "Paragraph": {
+            "inlines": [
+              {
+                "Text": "Quarterly Review"
+              }
+            ]
+          }
+        },
+        {
+          "Paragraph": {
+            "inlines": [
+              {
+                "Text": "Revenue is up 12% quarter over quarter."
+              }
+            ]
+          }
+        },
+        {
+          "Table": {
+            "caption": null,
+            "headers": [
+              "Col1",
+              "Col2",
+              "Col3"
+            ],
+            "rows": [
+              [
+                {
+                  "content": [
+                    {
+                      "inlines": [
+                        {
+                          "Text": "Region"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "content": [
+                    {
+                      "inlines": [
+                        {
+                          "Text": "Revenue"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "content": [
+                    {
+                      "inlines": [
+                        {
+                          "Text": "Growth"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              [
+                {
+                  "content": [
+                    {
+                      "inlines": [
+                        {
+                          "Text": "EMEA"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "content": [
+                    {
+                      "inlines": [
+                        {
+                          "Text": "$1.2M"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "content": [
+                    {
+                      "inlines": [
+                        {
+                          "Text": "12%"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              [
+                {
+                  "content": [
+                    {
+                      "inlines": [
+                        {
+                          "Text": "NA"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "content": [
+                    {
+                      "inlines": [
+                        {
+                          "Text": "$0.98M"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "content": [
+                    {
+                      "inlines": [
+                        {
+                          "Text": "8%"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            ]
+          }
+        }
+      ],
+      "comments": [
+        {
+          "author": "Presenter",
+          "id": "c1",
+          "text": "Add one slide on operating margin."
+        }
+      ],
+      "notes": [
+        {
+          "inlines": [
+            {
+              "Text": "Speaker note: Call out that EMEA outperformed expectations."
+            }
+          ]
+        }
+      ],
+      "number": 1,
+      "title": "Quarterly Review"
+    },
+    {
+      "blocks": [
+        {
+          "Paragraph": {
+            "inlines": [
+              {
+                "Text": "Roadmap"
+              }
+            ]
+          }
+        },
+        {
+          "Paragraph": {
+            "inlines": [
+              {
+                "Text": "Next: launch SKU refresh and expand partner channels."
+              }
+            ]
+          }
+        }
+      ],
+      "comments": [],
+      "notes": null,
+      "number": 2,
+      "title": "Roadmap"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+[package]
+name = "officemd_docling"
+version = "0.1.0"
+edition.workspace = true
+description = "Docling JSON conversion for OfficeMD document IR"
+license = "MIT"
+authors = ["Thomas Aubry"]
+repository = "https://github.com/ThomAub/officemd"
+homepage = "https://github.com/ThomAub/officemd"
+documentation = "https://docs.rs/officemd_docling"
+readme = "README.md"
+keywords = ["officemd", "docling", "document", "docx", "xlsx"]
+categories = ["text-processing"]
+
+[dependencies]
+officemd_core = { version = "0.1.0", path = "../officemd_core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

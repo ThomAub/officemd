@@ -1,0 +1,13 @@
+[package]
+name = "officemd_examples"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+officemd_docx = { path = "../../crates/officemd_docx" }
+officemd_xlsx = { path = "../../crates/officemd_xlsx" }
+officemd_csv = { path = "../../crates/officemd_csv" }
+officemd_pptx = { path = "../../crates/officemd_pptx" }
+officemd_markdown = { path = "../../crates/officemd_markdown" }
+serde_json = "1"

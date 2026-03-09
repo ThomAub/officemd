@@ -1,0 +1,16 @@
+[package]
+name = "officemd_markdown"
+version = "0.1.0"
+edition.workspace = true
+description = "Markdown renderer for OfficeMD document IR"
+license = "MIT"
+authors = ["Thomas Aubry"]
+repository = "https://github.com/ThomAub/officemd"
+homepage = "https://github.com/ThomAub/officemd"
+documentation = "https://docs.rs/officemd_markdown"
+readme = "README.md"
+keywords = ["officemd", "markdown", "renderer", "docx", "xlsx"]
+categories = ["text-processing"]
+
+[dependencies]
+officemd_core = { version = "0.1.0", path = "../officemd_core" }
