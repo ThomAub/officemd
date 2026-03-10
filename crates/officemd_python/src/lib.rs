@@ -99,6 +99,7 @@ fn markdown_from_owned_bytes_impl(
     content: &[u8],
     format: Option<&str>,
     options: RenderOptions,
+    force_extract: bool,
 ) -> Result<String, String> {
     let format = resolve_format(content, format)?;
     match format {
@@ -110,8 +111,10 @@ fn markdown_from_owned_bytes_impl(
             .map_err(|e| e.to_string()),
         DocumentFormat::Pptx => officemd_pptx::markdown_from_bytes_with_options(content, options)
             .map_err(|e| e.to_string()),
-        DocumentFormat::Pdf => officemd_pdf::markdown_from_bytes_with_options(content, options)
-            .map_err(|e| e.to_string()),
+        DocumentFormat::Pdf => {
+            officemd_pdf::markdown_from_bytes_force(content, options, force_extract)
+                .map_err(|e| e.to_string())
+        }
     }
 }
 
@@ -146,6 +149,7 @@ fn extract_ir_json(py: Python<'_>, content: &[u8], format: Option<String>) -> Py
     use_first_row_as_header=true,
     include_headers_footers=true,
     markdown_style=None,
+    force_extract=false,
 ))]
 fn markdown_from_bytes(
     py: Python<'_>,
@@ -155,6 +159,7 @@ fn markdown_from_bytes(
     use_first_row_as_header: bool,
     include_headers_footers: bool,
     markdown_style: Option<String>,
+    force_extract: bool,
 ) -> PyResult<String> {
     let owned_content = content.to_vec();
     let markdown_profile = parse_markdown_style(markdown_style.as_deref()).map_err(to_py_err)?;
@@ -164,8 +169,10 @@ fn markdown_from_bytes(
         include_headers_footers,
         markdown_profile,
     };
-    py.detach(move || markdown_from_owned_bytes_impl(&owned_content, format.as_deref(), options))
-        .map_err(to_py_err)
+    py.detach(move || {
+        markdown_from_owned_bytes_impl(&owned_content, format.as_deref(), options, force_extract)
+    })
+    .map_err(to_py_err)
 }
 
 #[pyfunction(signature = (
@@ -199,7 +206,9 @@ fn markdown_from_bytes_batch(
         if worker_count <= 1 || contents.len() <= 1 {
             return contents
                 .into_iter()
-                .map(|content| markdown_from_owned_bytes_impl(&content, format.as_deref(), options))
+                .map(|content| {
+                    markdown_from_owned_bytes_impl(&content, format.as_deref(), options, false)
+                })
                 .collect::<Result<Vec<_>, _>>();
         }
 
@@ -210,7 +219,9 @@ fn markdown_from_bytes_batch(
         pool.install(|| {
             contents
                 .into_par_iter()
-                .map(|content| markdown_from_owned_bytes_impl(&content, format.as_deref(), options))
+                .map(|content| {
+                    markdown_from_owned_bytes_impl(&content, format.as_deref(), options, false)
+                })
                 .collect::<Result<Vec<_>, _>>()
         })
     })
@@ -463,6 +474,7 @@ mod tests {
                 true,
                 true,
                 Some("compact".to_string()),
+                false,
             )
         })
         .expect("markdown");
@@ -506,6 +518,7 @@ mod tests {
                 true,
                 true,
                 Some("human".to_string()),
+                false,
             )
         })
         .expect("markdown");

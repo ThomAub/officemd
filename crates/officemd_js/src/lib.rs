@@ -152,6 +152,7 @@ fn markdown_from_bytes_impl(
     content: &[u8],
     format: Option<&str>,
     options: officemd_markdown::RenderOptions,
+    force_extract: bool,
 ) -> Result<String> {
     let format = resolve_format(content, format)?;
     match format {
@@ -173,8 +174,10 @@ fn markdown_from_bytes_impl(
                 &doc, options,
             ))
         }
-        DocumentFormat::Pdf => officemd_pdf::markdown_from_bytes_with_options(content, options)
-            .map_err(|err| internal_error(ERR_PDF_EXTRACT, err)),
+        DocumentFormat::Pdf => {
+            officemd_pdf::markdown_from_bytes_force(content, options, force_extract)
+                .map_err(|err| internal_error(ERR_PDF_EXTRACT, err))
+        }
     }
 }
 
@@ -192,7 +195,7 @@ fn markdown_from_bytes_batch_impl(
     if worker_count <= 1 || contents.len() <= 1 {
         return contents
             .into_iter()
-            .map(|content| markdown_from_bytes_impl(&content, format.as_deref(), options))
+            .map(|content| markdown_from_bytes_impl(&content, format.as_deref(), options, false))
             .collect();
     }
 
@@ -204,7 +207,7 @@ fn markdown_from_bytes_batch_impl(
     pool.install(|| {
         contents
             .into_par_iter()
-            .map(|content| markdown_from_bytes_impl(&content, format.as_deref(), options))
+            .map(|content| markdown_from_bytes_impl(&content, format.as_deref(), options, false))
             .collect()
     })
 }
@@ -314,6 +317,7 @@ pub fn markdown_from_bytes(
     use_first_row_as_header: Option<bool>,
     include_headers_footers: Option<bool>,
     markdown_style: Option<String>,
+    force_extract: Option<bool>,
 ) -> Result<String> {
     let markdown_profile = parse_markdown_style(markdown_style.as_deref())?;
     let options = officemd_markdown::RenderOptions {
@@ -322,7 +326,12 @@ pub fn markdown_from_bytes(
         include_headers_footers: include_headers_footers.unwrap_or(true),
         markdown_profile,
     };
-    markdown_from_bytes_impl(content.as_ref(), format.as_deref(), options)
+    markdown_from_bytes_impl(
+        content.as_ref(),
+        format.as_deref(),
+        options,
+        force_extract.unwrap_or(false),
+    )
 }
 
 /// Render multiple documents as Markdown with Rust-side parallel workers.
@@ -556,6 +565,7 @@ mod tests {
             bytes,
             Some(".csv"),
             officemd_markdown::RenderOptions::default(),
+            false,
         )
         .expect("markdown");
         assert!(markdown.contains("## Sheet: Sheet1"));
@@ -615,6 +625,7 @@ mod tests {
                 markdown_profile: officemd_markdown::MarkdownProfile::Human,
                 ..Default::default()
             },
+            false,
         )
         .expect("markdown");
         assert!(markdown.contains("### Document Properties"));
@@ -628,6 +639,7 @@ mod tests {
             &bytes,
             Some(".xlsx"),
             officemd_markdown::RenderOptions::default(),
+            false,
         )
         .expect("markdown");
         assert!(!markdown.contains("### Document Properties"));

@@ -12,7 +12,7 @@
  *   --sheets <selector>      - XLSX/CSV sheet names/indices (e.g. Summary,1-2)
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +26,72 @@ const here = dirname(fileURLToPath(import.meta.url));
 const PDF_PAGE_HEADING_RE = /^## Page:\s*(\d+)\s*$/;
 const PPTX_SLIDE_HEADING_RE = /^## Slide\s+(\d+)(?:\s+-\s+.*)?\s*$/;
 const SHEET_HEADING_RE = /^## Sheet:\s*(.+)\s*$/;
+
+// ANSI color helpers for stderr output
+const BOLD_RED = "\x1b[1;31m";
+const BOLD_YELLOW = "\x1b[1;33m";
+const BOLD_BLUE = "\x1b[1;34m";
+const BOLD = "\x1b[1m";
+const RESET = "\x1b[0m";
+
+const SUPPORTED_FORMATS = ".docx, .xlsx, .csv, .pptx, .pdf";
+
+function formatError(err, filePath) {
+  const msg = err?.message || String(err);
+
+  if (err?.code === "ENOENT" || msg.includes("ENOENT")) {
+    return `File not found: ${filePath || msg}`;
+  }
+
+  if (msg.includes("ZIP error") || msg.includes("EOCD") || msg.includes("invalid Zip archive")) {
+    return (
+      "This file appears to be encrypted or not a valid OOXML document. " +
+      "If the file is password-protected, remove the password and try again."
+    );
+  }
+
+  if (msg.includes("Could not detect format")) {
+    return `Could not detect document format. Supported formats: ${SUPPORTED_FORMATS}`;
+  }
+
+  return msg;
+}
+
+function warnScannedPdf(content, force, inspectPdfJson) {
+  if (!inspectPdfJson) return;
+
+  let diag;
+  try {
+    diag = JSON.parse(inspectPdfJson(content));
+  } catch {
+    return;
+  }
+
+  const classification = diag.classification;
+  if (classification !== "Scanned" && classification !== "ImageBased") return;
+
+  const confidence = diag.confidence || 0;
+  const pageCount = diag.page_count || 0;
+  const pagesNeedingOcr = diag.pages_needing_ocr || [];
+
+  if (force) {
+    process.stderr.write(
+      `${BOLD_BLUE}Info:${RESET} PDF classified as ${BOLD}${classification}${RESET}` +
+      ` (confidence: ${(confidence * 100).toFixed(0)}%, ${pageCount} page(s)). ` +
+      `Forced extraction attempted - output may be empty or incomplete.\n`
+    );
+  } else {
+    const ocrSummary = pagesNeedingOcr.length > 0
+      ? `pages needing OCR: ${pagesNeedingOcr.join(", ")}`
+      : `${pageCount} page(s)`;
+    process.stderr.write(
+      `${BOLD_YELLOW}Warning:${RESET} PDF classified as ${BOLD}${classification}${RESET}` +
+      ` (confidence: ${(confidence * 100).toFixed(0)}%, ${ocrSummary}). ` +
+      `No text could be extracted - this document likely needs OCR.\n` +
+      `Hint: use ${BOLD}--force${RESET} to attempt extraction anyway.\n`
+    );
+  }
+}
 
 function isMusl() {
   if (!process.report || typeof process.report.getReport !== "function") {
@@ -140,7 +206,8 @@ function loadNativeBinding() {
   );
 }
 
-const { markdownFromBytes } = loadNativeBinding();
+const nativeBinding = loadNativeBinding();
+const { markdownFromBytes, inspectPdfJson } = nativeBinding;
 
 function parseOptions(args) {
   const flags = {
@@ -148,6 +215,7 @@ function parseOptions(args) {
     useFirstRowAsHeader: true,
     includeHeadersFooters: true,
     markdownStyle: "compact",
+    force: false,
   };
   const rest = [];
 
@@ -197,6 +265,9 @@ function parseOptions(args) {
           throw new Error("Error: --sheets requires a selector value");
         }
         flags.sheets = args[i];
+        break;
+      case "--force":
+        flags.force = true;
         break;
       case "--html":
         rest.push(arg);
@@ -470,6 +541,16 @@ function applySelection(markdown, format, selection) {
 
 function extractMarkdown(filePath, opts, selection = {}) {
   const absPath = resolve(filePath);
+
+  // Pre-flight checks
+  if (!existsSync(absPath)) {
+    throw Object.assign(new Error(`File not found: ${absPath}`), { code: "ENOENT" });
+  }
+  const stat = statSync(absPath);
+  if (stat.size === 0) {
+    throw new Error(`File is empty: ${absPath}`);
+  }
+
   const content = readFileSync(absPath);
   const inferredFormat = resolveFormat(absPath, opts.format);
   const markdown = markdownFromBytes(
@@ -478,8 +559,15 @@ function extractMarkdown(filePath, opts, selection = {}) {
     opts.includeDocumentProperties,
     opts.useFirstRowAsHeader,
     opts.includeHeadersFooters,
-    opts.markdownStyle
+    opts.markdownStyle,
+    opts.force || false,
   );
+
+  // Post-hoc scanned PDF warning
+  if (inferredFormat === ".pdf" && markdown.trim().length < 50) {
+    warnScannedPdf(content, opts.force, inspectPdfJson);
+  }
+
   return applySelection(markdown, inferredFormat, selection);
 }
 
@@ -515,6 +603,7 @@ Options:
   --markdown-style <compact|human> Markdown profile (default: compact)
   --pages <selector>                Select PDF pages/PPTX slides or XLSX/CSV sheet indices (e.g. 1,3-5)
   --sheets <selector>               Select XLSX/CSV sheets by name/index (e.g. Summary,1-2)
+  --force                           Force extraction even for scanned/image-based PDFs
 
 Diff-specific options:
   --html                           Generate HTML diff and open in browser
@@ -602,6 +691,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err.message || err);
+  const message = formatError(err);
+  process.stderr.write(`${BOLD_RED}Error:${RESET} ${message}\n`);
   process.exit(1);
 });

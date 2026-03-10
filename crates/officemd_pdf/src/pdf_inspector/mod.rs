@@ -103,6 +103,10 @@ pub struct PdfOptions {
     pub markdown: MarkdownOptions,
     /// Optional set of 1-indexed pages to process.  `None` = all pages.
     pub page_filter: Option<HashSet<u32>>,
+    /// When `true`, attempt text extraction even for Scanned/ImageBased PDFs
+    /// instead of returning `None` immediately.  Extraction failure is treated
+    /// as non-fatal (like Mixed PDFs).
+    pub force_extract: bool,
 }
 
 impl Default for PdfOptions {
@@ -112,6 +116,7 @@ impl Default for PdfOptions {
             detection: DetectionConfig::default(),
             markdown: MarkdownOptions::default(),
             page_filter: None,
+            force_extract: false,
         }
     }
 }
@@ -151,6 +156,12 @@ impl PdfOptions {
     /// Limit processing to specific 1-indexed pages.
     pub fn pages(mut self, pages: impl IntoIterator<Item = u32>) -> Self {
         self.page_filter = Some(pages.into_iter().collect());
+        self
+    }
+
+    /// Force text extraction even for Scanned/ImageBased PDFs.
+    pub fn force_extract(mut self, force: bool) -> Self {
+        self.force_extract = force;
         self
     }
 }
@@ -323,8 +334,8 @@ fn process_document(
         });
     }
 
-    // Scanned / ImageBased → nothing to extract
-    if matches!(pdf_type, PdfType::Scanned | PdfType::ImageBased) {
+    // Scanned / ImageBased → nothing to extract (unless force_extract is set)
+    if matches!(pdf_type, PdfType::Scanned | PdfType::ImageBased) && !options.force_extract {
         return Ok(PdfProcessResult {
             pdf_type,
             markdown: None,
@@ -344,8 +355,10 @@ fn process_document(
         extractor::extract_positioned_text_from_doc(&doc, &font_cmaps, options.page_filter.as_ref())
     };
 
-    // For Mixed PDFs, extraction failure is non-fatal
-    let extracted = if pdf_type == PdfType::Mixed {
+    // For Mixed PDFs (or forced Scanned/ImageBased), extraction failure is non-fatal
+    let non_fatal = pdf_type == PdfType::Mixed
+        || (options.force_extract && matches!(pdf_type, PdfType::Scanned | PdfType::ImageBased));
+    let extracted = if non_fatal {
         extracted.ok()
     } else {
         Some(extracted?)

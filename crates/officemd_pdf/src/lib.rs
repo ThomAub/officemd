@@ -58,7 +58,7 @@ pub fn looks_like_pdf_header(content: &[u8]) -> bool {
 ///
 /// Returns `OoxmlPdfError::Pdf` when the content is not a valid PDF.
 pub fn inspect_pdf(content: &[u8]) -> Result<PdfDiagnostics, OoxmlPdfError> {
-    let result = process_pdf_mem_with_options(content, default_pdf_options())?;
+    let result = process_pdf_mem_with_options(content, default_pdf_options(false))?;
     Ok(map_diagnostics(&result))
 }
 
@@ -69,7 +69,7 @@ pub fn inspect_pdf(content: &[u8]) -> Result<PdfDiagnostics, OoxmlPdfError> {
 /// Returns `OoxmlPdfError::Pdf` when the content is not a valid PDF, or
 /// `OoxmlPdfError::Lopdf` when the low-level PDF structure cannot be parsed.
 pub fn inspect_pdf_fonts(content: &[u8]) -> Result<PdfFontInspection, OoxmlPdfError> {
-    let result = process_pdf_mem_with_options(content, default_pdf_options())?;
+    let result = process_pdf_mem_with_options(content, default_pdf_options(false))?;
     let diagnostics = map_diagnostics(&result);
 
     let doc = load_lopdf_document(content)?;
@@ -161,7 +161,18 @@ pub fn inspect_pdf_fonts_json(content: &[u8]) -> Result<String, OoxmlPdfError> {
 /// Returns `OoxmlPdfError::Pdf` when the content is not a valid PDF or
 /// extraction fails.
 pub fn extract_ir(content: &[u8]) -> Result<OoxmlDocument, OoxmlPdfError> {
-    let options = default_pdf_options();
+    extract_ir_force(content, false)
+}
+
+/// Extract PDF content as the shared officemd IR, optionally forcing
+/// extraction on scanned/image-based PDFs.
+///
+/// # Errors
+///
+/// Returns `OoxmlPdfError::Pdf` when the content is not a valid PDF or
+/// extraction fails.
+pub fn extract_ir_force(content: &[u8], force_extract: bool) -> Result<OoxmlDocument, OoxmlPdfError> {
+    let options = default_pdf_options(force_extract);
     let result = process_pdf_mem_with_options(content, options)?;
 
     let diagnostics = map_diagnostics(&result);
@@ -195,6 +206,18 @@ pub fn extract_ir_json(content: &[u8]) -> Result<String, OoxmlPdfError> {
     Ok(serde_json::to_string(&doc)?)
 }
 
+/// Extract PDF content as IR JSON, optionally forcing extraction on
+/// scanned/image-based PDFs.
+///
+/// # Errors
+///
+/// Returns `OoxmlPdfError::Pdf` when extraction fails, or
+/// `OoxmlPdfError::Json` when serialization fails.
+pub fn extract_ir_json_force(content: &[u8], force_extract: bool) -> Result<String, OoxmlPdfError> {
+    let doc = extract_ir_force(content, force_extract)?;
+    Ok(serde_json::to_string(&doc)?)
+}
+
 /// Render PDF bytes directly to markdown with shared render options.
 ///
 /// # Errors
@@ -205,7 +228,22 @@ pub fn markdown_from_bytes_with_options(
     content: &[u8],
     render: RenderOptions,
 ) -> Result<String, OoxmlPdfError> {
-    let doc = extract_ir(content)?;
+    markdown_from_bytes_force(content, render, false)
+}
+
+/// Render PDF bytes directly to markdown, optionally forcing extraction on
+/// scanned/image-based PDFs.
+///
+/// # Errors
+///
+/// Returns `OoxmlPdfError::Pdf` when the content is not a valid PDF or
+/// extraction fails.
+pub fn markdown_from_bytes_force(
+    content: &[u8],
+    render: RenderOptions,
+    force_extract: bool,
+) -> Result<String, OoxmlPdfError> {
+    let doc = extract_ir_force(content, force_extract)?;
     Ok(render_document_with_options(&doc, render))
 }
 
@@ -224,11 +262,13 @@ fn strip_bom_and_whitespace(bytes: &[u8]) -> &[u8] {
     &b[start..]
 }
 
-fn default_pdf_options() -> PdfOptions {
-    PdfOptions::new().markdown(MarkdownOptions {
-        include_page_numbers: true,
-        ..Default::default()
-    })
+fn default_pdf_options(force_extract: bool) -> PdfOptions {
+    PdfOptions::new()
+        .markdown(MarkdownOptions {
+            include_page_numbers: true,
+            ..Default::default()
+        })
+        .force_extract(force_extract)
 }
 
 #[derive(Debug, Default)]

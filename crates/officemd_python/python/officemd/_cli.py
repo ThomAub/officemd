@@ -3,21 +3,83 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from officemd import detect_format, markdown_from_bytes
+from rich.console import Console
+
+from officemd import detect_format, inspect_pdf_json, markdown_from_bytes
 
 _PAGE_HEADING_RE = re.compile(r"^##\s+Page:\s+(\d+)\s*$")
 _SLIDE_HEADING_RE = re.compile(r"^##\s+Slide\s+(\d+)\b.*$")
 _SHEET_HEADING_RE = re.compile(r"^##\s+Sheet:\s+(.+?)\s*$")
 _RANGE_TOKEN_RE = re.compile(r"^(\d+)\s*-\s*(\d+)$")
 
+_stderr = Console(stderr=True)
+
+_SUPPORTED_FORMATS = ".docx, .xlsx, .csv, .pptx, .pdf"
+
 
 class CliUsageError(ValueError):
     """Raised for user-facing CLI usage errors."""
+
+
+def _format_error(exc: Exception, path: Path | None = None) -> str:
+    """Return a user-friendly error message for common extraction failures."""
+    msg = str(exc)
+
+    if isinstance(exc, FileNotFoundError):
+        return f"File not found: {path or msg}"
+
+    if "ZIP error" in msg or "EOCD" in msg or "invalid Zip archive" in msg:
+        return (
+            "This file appears to be encrypted or not a valid OOXML document. "
+            "If the file is password-protected, remove the password and try again."
+        )
+
+    if "Could not detect format" in msg:
+        return f"Could not detect document format. Supported formats: {_SUPPORTED_FORMATS}"
+
+    return msg
+
+
+def _warn_scanned_pdf(content: bytes, *, force: bool) -> None:
+    """Warn on stderr when a PDF is scanned/image-based."""
+    try:
+        raw = inspect_pdf_json(content)
+        diag = json.loads(raw)
+    except Exception:
+        return
+
+    classification = diag.get("classification", "")
+    if classification not in ("Scanned", "ImageBased"):
+        return
+
+    confidence = diag.get("confidence", 0)
+    page_count = diag.get("page_count", 0)
+    pages_needing_ocr = diag.get("pages_needing_ocr", [])
+
+    if force:
+        _stderr.print(
+            f"[bold blue]Info:[/bold blue] PDF classified as [bold]{classification}[/bold] "
+            f"(confidence: {confidence:.0%}, {page_count} page(s)). "
+            "Forced extraction attempted - output may be empty or incomplete."
+        )
+    else:
+        ocr_summary = (
+            f"pages needing OCR: {', '.join(str(p) for p in pages_needing_ocr)}"
+            if pages_needing_ocr
+            else f"{page_count} page(s)"
+        )
+        _stderr.print(
+            f"[bold yellow]Warning:[/bold yellow] PDF classified as [bold]{classification}[/bold] "
+            f"(confidence: {confidence:.0%}, {ocr_summary}). "
+            "No text could be extracted - this document likely needs OCR.\n"
+            "Hint: use [bold]--force[/bold] to attempt extraction anyway."
+        )
 
 
 def _build_render_options(args: argparse.Namespace) -> dict:
@@ -29,6 +91,8 @@ def _build_render_options(args: argparse.Namespace) -> dict:
     opts["use_first_row_as_header"] = args.use_first_row_as_header
     opts["include_headers_footers"] = args.include_headers_footers
     opts["markdown_style"] = args.markdown_style
+    if getattr(args, "force", False):
+        opts["force_extract"] = True
     return opts
 
 
@@ -78,6 +142,12 @@ def _add_shared_flags(parser: argparse.ArgumentParser) -> None:
         default="compact",
         help="Markdown profile (default: compact)",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Force extraction even for scanned/image-based PDFs",
+    )
 
 
 def _resolve_format(path: Path, explicit_format: str | None, content: bytes) -> str | None:
@@ -95,12 +165,24 @@ def _resolve_format(path: Path, explicit_format: str | None, content: bytes) -> 
 
 def _extract_markdown(path: Path, opts: dict) -> tuple[str, str | None]:
     """Read a file and extract markdown plus resolved format."""
+    if not path.exists():
+        raise FileNotFoundError(path)
+    if path.stat().st_size == 0:
+        raise ValueError(f"File is empty: {path}")
+
     content = path.read_bytes()
     merged_opts = dict(opts)
     fmt = _resolve_format(path, merged_opts.get("format"), content)
     if fmt is not None:
         merged_opts["format"] = fmt
-    return markdown_from_bytes(content, **merged_opts), fmt
+    md = markdown_from_bytes(content, **merged_opts)
+
+    # Post-hoc scanned PDF warning
+    force = merged_opts.get("force_extract", False)
+    if fmt == "pdf" and len(md.strip()) < 50:
+        _warn_scanned_pdf(content, force=force)
+
+    return md, fmt
 
 
 def _infer_format_from_path(path: Path) -> str | None:
@@ -342,6 +424,12 @@ def main() -> None:
         args.func(args)
     except CliUsageError as exc:
         parser.error(str(exc))
+    except Exception as exc:
+        path = getattr(args, "file", None) or getattr(args, "file_a", None)
+        path = Path(path) if path else None
+        message = _format_error(exc, path)
+        _stderr.print(f"[bold red]Error:[/bold red] {message}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
