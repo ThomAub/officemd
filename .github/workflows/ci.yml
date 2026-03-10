@@ -26,10 +26,29 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: astral-sh/setup-uv@v7
       - name: rustfmt
         run: cargo fmt --all --check
       - name: clippy
         run: cargo clippy --workspace --all-targets --exclude officemd_pdf -- -D warnings
+      - name: oxlint
+        working-directory: crates/officemd_js
+        run: npx oxlint .
+      - name: oxfmt
+        working-directory: crates/officemd_js
+        run: npx oxfmt --check .
+      - name: ruff check
+        working-directory: crates/officemd_python
+        run: uv run ruff check .
+      - name: ruff format
+        working-directory: crates/officemd_python
+        run: uv run ruff format --check .
+      - name: ty check
+        working-directory: crates/officemd_python
+        run: uv run ty check python
 
   test:
     name: test (${{ matrix.os }})

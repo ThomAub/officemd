@@ -4,6 +4,7 @@ use officemd_core::opc::OpcPackage;
 use officemd_pptx::PptxExtractOptions;
 use officemd_xlsx::{SheetFilter, XlsxExtractOptions, inspect_sheet_summaries};
 use serde::Serialize;
+use similar::{ChangeTag, TextDiff};
 use std::fmt::{Display, Formatter, Write as _};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -43,9 +44,17 @@ struct CommonOptions {
     #[arg(long)]
     sheets: Option<String>,
 
+    /// Select PDF pages/PPTX slides or XLSX/CSV sheet indices (e.g. "1,3-5").
+    #[arg(long)]
+    pages: Option<String>,
+
     /// Filter PPTX slides by number or range (e.g. "1-3,5").
     #[arg(long)]
     slides: Option<String>,
+
+    /// Force extraction even for scanned/image-based PDFs.
+    #[arg(long, default_value_t = false)]
+    force: bool,
 
     /// Use style-aware cell values for XLSX.
     #[arg(long, default_value_t = false)]
@@ -70,6 +79,36 @@ struct CommonOptions {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Extract markdown, print to stdout.
+    Markdown {
+        /// Path to an input document.
+        file: PathBuf,
+
+        #[command(flatten)]
+        common: CommonOptions,
+    },
+
+    /// Extract markdown, render to terminal with ANSI formatting.
+    Render {
+        /// Path to an input document.
+        file: PathBuf,
+
+        #[command(flatten)]
+        common: CommonOptions,
+    },
+
+    /// Diff markdown output of two documents.
+    Diff {
+        /// Path to first input document.
+        file_a: PathBuf,
+
+        /// Path to second input document.
+        file_b: PathBuf,
+
+        #[command(flatten)]
+        common: CommonOptions,
+    },
+
     /// Convert a document file to an output file.
     Convert {
         /// Input document path (.docx/.xlsx/.csv/.pptx/.pdf).
@@ -295,16 +334,18 @@ fn extract_ir_document(
                 .map_err(|e| e.to_string())?
         }
         DocumentFormat::Pptx => {
-            let slide_numbers = common
-                .slides
-                .as_deref()
+            // --pages and --slides both select slides for PPTX
+            let slides_spec = common.slides.as_deref().or(common.pages.as_deref());
+            let slide_numbers = slides_spec
                 .map(parse_number_ranges)
                 .transpose()?
                 .map(|values| values.into_iter().collect());
             let options = PptxExtractOptions { slide_numbers };
             officemd_pptx::extract_ir_with_options(content, options).map_err(|e| e.to_string())?
         }
-        DocumentFormat::Pdf => officemd_pdf::extract_ir(content).map_err(|e| e.to_string())?,
+        DocumentFormat::Pdf => {
+            officemd_pdf::extract_ir_force(content, common.force).map_err(|e| e.to_string())?
+        }
     };
 
     // Warn about XLSX-specific flags used with non-XLSX formats
@@ -648,12 +689,160 @@ fn default_output_path(input: &Path, output_format: OutputFormatArg) -> PathBuf 
     out
 }
 
+// --- Helpers for markdown/render/diff ---
+
+fn extract_markdown_from_file(path: &Path, common: &CommonOptions) -> Result<String, String> {
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("failed to read '{}': {e}", path.display()))?;
+    let resolved = resolve_format(&bytes, Some(path), common.format)?;
+    let doc = extract_ir_document(&bytes, resolved, common)?;
+
+    // Force markdown output regardless of --output-format
+    let markdown_profile = match common.markdown_style {
+        MarkdownStyleArg::Compact => officemd_markdown::MarkdownProfile::LlmCompact,
+        MarkdownStyleArg::Human => officemd_markdown::MarkdownProfile::Human,
+    };
+    let options = officemd_markdown::RenderOptions {
+        include_document_properties: common.include_document_properties,
+        use_first_row_as_header: !common.no_first_row_header,
+        include_headers_footers: !common.no_headers_footers,
+        markdown_profile,
+    };
+    let md = officemd_markdown::render_document_with_options(&doc, options);
+
+    // --pages for XLSX/CSV acts as sheet index selector: hint users to use --sheets
+    if common.pages.is_some()
+        && (resolved == DocumentFormat::Xlsx || resolved == DocumentFormat::Csv)
+    {
+        eprintln!(
+            "Hint: use --sheets for sheet selection with {} files",
+            resolved
+        );
+    }
+
+    // Warn about scanned PDFs
+    if resolved == DocumentFormat::Pdf && md.trim().len() < 50 {
+        warn_scanned_pdf(&bytes, common.force);
+    }
+
+    Ok(md)
+}
+
+fn warn_scanned_pdf(content: &[u8], force: bool) {
+    let diagnostics = match officemd_pdf::inspect_pdf(content) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+
+    let class = format!("{:?}", diagnostics.classification);
+    if class != "Scanned" && class != "ImageBased" {
+        return;
+    }
+
+    if force {
+        eprintln!(
+            "Info: PDF classified as {} (confidence: {:.0}%, {} page(s)). \
+             Forced extraction attempted - output may be empty or incomplete.",
+            class,
+            diagnostics.confidence * 100.0,
+            diagnostics.page_count,
+        );
+    } else {
+        let ocr_summary = if diagnostics.pages_needing_ocr.is_empty() {
+            format!("{} page(s)", diagnostics.page_count)
+        } else {
+            format!(
+                "pages needing OCR: {}",
+                diagnostics
+                    .pages_needing_ocr
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        eprintln!(
+            "Warning: PDF classified as {} (confidence: {:.0}%, {}). \
+             No text could be extracted - this document likely needs OCR.\n\
+             Hint: use --force to attempt extraction anyway.",
+            class,
+            diagnostics.confidence * 100.0,
+            ocr_summary,
+        );
+    }
+}
+
+fn render_colored_diff(text_a: &str, text_b: &str, label_a: &str, label_b: &str) -> String {
+    let diff = TextDiff::from_lines(text_a, text_b);
+    let mut out = String::new();
+
+    // ANSI colors
+    const RED: &str = "\x1b[31m";
+    const GREEN: &str = "\x1b[32m";
+    const CYAN: &str = "\x1b[36m";
+    const RESET: &str = "\x1b[0m";
+
+    for hunk in diff.unified_diff().header(label_a, label_b).iter_hunks() {
+        for change in hunk.iter_changes() {
+            let (color, sign) = match change.tag() {
+                ChangeTag::Delete => (RED, "-"),
+                ChangeTag::Insert => (GREEN, "+"),
+                ChangeTag::Equal => ("", " "),
+            };
+            if color.is_empty() {
+                let _ = write!(out, "{sign}{change}");
+            } else {
+                let _ = write!(out, "{color}{sign}{change}{RESET}");
+            }
+            if change.missing_newline() {
+                out.push('\n');
+            }
+        }
+        let _ = writeln!(out, "{CYAN}---{RESET}");
+    }
+
+    if out.is_empty() {
+        out.push_str("(no differences)\n");
+    }
+
+    out
+}
+
 // --- Main ---
 
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Markdown { file, common } => {
+            let md = extract_markdown_from_file(&file, &common)?;
+            let mut stdout = std::io::stdout().lock();
+            stdout
+                .write_all(md.as_bytes())
+                .map_err(|e| format!("failed to write stdout: {e}"))?;
+        }
+        Command::Render { file, common } => {
+            let md = extract_markdown_from_file(&file, &common)?;
+            let mut stdout = std::io::stdout().lock();
+            stdout
+                .write_all(md.as_bytes())
+                .map_err(|e| format!("failed to write stdout: {e}"))?;
+        }
+        Command::Diff {
+            file_a,
+            file_b,
+            common,
+        } => {
+            let md_a = extract_markdown_from_file(&file_a, &common)?;
+            let md_b = extract_markdown_from_file(&file_b, &common)?;
+            let label_a = file_a.display().to_string();
+            let label_b = file_b.display().to_string();
+            let output = render_colored_diff(&md_a, &md_b, &label_a, &label_b);
+            let mut stdout = std::io::stdout().lock();
+            stdout
+                .write_all(output.as_bytes())
+                .map_err(|e| format!("failed to write stdout: {e}"))?;
+        }
         Command::Convert {
             input,
             output,
@@ -815,7 +1004,9 @@ mod tests {
             output_format: OutputFormatArg::Markdown,
             pretty: false,
             sheets: None,
+            pages: None,
             slides: None,
+            force: false,
             style_aware: false,
             streaming: false,
             no_headers_footers: false,
