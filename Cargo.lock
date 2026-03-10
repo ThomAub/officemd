@@ -846,7 +846,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "officemd_core",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "quick-xml",
  "regex",
@@ -875,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_csv"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "csv",
  "officemd_core",
@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_docling"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "officemd_core",
  "serde",
@@ -895,7 +895,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_docx"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "officemd_core",
  "officemd_markdown",
@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_js"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "napi",
  "napi-build",
@@ -940,14 +940,14 @@ dependencies = [
 
 [[package]]
 name = "officemd_markdown"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "officemd_core",
 ]
 
 [[package]]
 name = "officemd_pdf"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "log",
  "lopdf",
@@ -963,7 +963,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_pptx"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "officemd_core",
  "officemd_markdown",
@@ -975,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_python"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "officemd_core",
  "officemd_csv",
@@ -994,7 +994,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_xlsx"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "officemd_core",
  "officemd_markdown",

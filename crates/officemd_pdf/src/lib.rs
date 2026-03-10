@@ -171,7 +171,10 @@ pub fn extract_ir(content: &[u8]) -> Result<OoxmlDocument, OoxmlPdfError> {
 ///
 /// Returns `OoxmlPdfError::Pdf` when the content is not a valid PDF or
 /// extraction fails.
-pub fn extract_ir_force(content: &[u8], force_extract: bool) -> Result<OoxmlDocument, OoxmlPdfError> {
+pub fn extract_ir_force(
+    content: &[u8],
+    force_extract: bool,
+) -> Result<OoxmlDocument, OoxmlPdfError> {
     let options = default_pdf_options(force_extract);
     let result = process_pdf_mem_with_options(content, options)?;
 

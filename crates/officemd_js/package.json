@@ -2,34 +2,68 @@
   "name": "office-md",
   "version": "0.1.1",
   "description": "Native Node/Bun bindings for OfficeMD document extraction",
-  "license": "MIT",
-  "author": "Thomas Aubry",
+  "keywords": [
+    "csv",
+    "docx",
+    "markdown",
+    "office",
+    "officemd",
+    "pdf",
+    "xlsx"
+  ],
   "homepage": "https://github.com/ThomAub/officemd",
   "bugs": {
     "url": "https://github.com/ThomAub/officemd/issues"
   },
+  "license": "MIT",
+  "author": "Thomas Aubry",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ThomAub/officemd.git",
     "directory": "crates/officemd_js"
   },
-  "keywords": [
-    "officemd",
-    "office",
-    "docx",
-    "xlsx",
-    "csv",
-    "pdf",
-    "markdown"
-  ],
   "bin": {
     "office-md": "cli.js"
   },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "cli.js",
+    "lib",
+    "README.md",
+    "package.json"
+  ],
   "type": "module",
   "main": "index.js",
   "types": "index.d.ts",
-  "engines": {
-    "node": ">=18"
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "artifacts": "napi artifacts",
+    "prepublishOnly": "napi prepublish -t npm",
+    "test:cli": "node --test tests/cli-selection.test.mjs",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check ."
+  },
+  "dependencies": {
+    "diff": "^7.0.0"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.4",
+    "oxfmt": "^0.35.0",
+    "oxlint": "^1.50.0"
+  },
+  "optionalDependencies": {
+    "office-md-darwin-arm64": "0.1.1",
+    "office-md-darwin-x64": "0.1.1",
+    "office-md-linux-arm64-gnu": "0.1.1",
+    "office-md-linux-arm64-musl": "0.1.1",
+    "office-md-linux-x64-gnu": "0.1.1",
+    "office-md-linux-x64-musl": "0.1.1",
+    "office-md-win32-arm64-msvc": "0.1.1",
+    "office-md-win32-x64-msvc": "0.1.1"
   },
   "napi": {
     "name": "office-md",
@@ -44,41 +78,7 @@
       ]
     }
   },
-  "scripts": {
-    "build": "napi build --platform --release",
-    "build:debug": "napi build --platform",
-    "artifacts": "napi artifacts",
-    "prepublishOnly": "napi prepublish -t npm",
-    "test:cli": "node --test tests/cli-selection.test.mjs",
-    "lint": "oxlint .",
-    "lint:fix": "oxlint --fix .",
-    "format": "oxfmt --write .",
-    "format:check": "oxfmt --check ."
-  },
-  "files": [
-    "index.js",
-    "index.d.ts",
-    "cli.js",
-    "lib",
-    "README.md",
-    "package.json"
-  ],
-  "dependencies": {
-    "diff": "^7.0.0"
-  },
-  "devDependencies": {
-    "@napi-rs/cli": "^2.18.4",
-    "oxfmt": "^0.35.0",
-    "oxlint": "^1.50.0"
-  },
-  "optionalDependencies": {
-    "office-md-win32-x64-msvc": "0.1.1",
-    "office-md-darwin-x64": "0.1.1",
-    "office-md-linux-x64-gnu": "0.1.1",
-    "office-md-darwin-arm64": "0.1.1",
-    "office-md-linux-arm64-gnu": "0.1.1",
-    "office-md-linux-arm64-musl": "0.1.1",
-    "office-md-win32-arm64-msvc": "0.1.1",
-    "office-md-linux-x64-musl": "0.1.1"
+  "engines": {
+    "node": ">=18"
   }
 }

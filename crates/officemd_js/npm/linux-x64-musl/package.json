@@ -1,41 +1,41 @@
 {
   "name": "office-md-linux-x64-musl",
   "version": "0.1.1",
+  "description": "Native Node/Bun bindings for OfficeMD document extraction",
+  "keywords": [
+    "csv",
+    "docx",
+    "markdown",
+    "office",
+    "officemd",
+    "pdf",
+    "xlsx"
+  ],
+  "homepage": "https://github.com/ThomAub/officemd",
+  "bugs": {
+    "url": "https://github.com/ThomAub/officemd/issues"
+  },
+  "license": "MIT",
+  "author": "Thomas Aubry",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThomAub/officemd.git",
+    "directory": "crates/officemd_js"
+  },
+  "files": [
+    "office-md.linux-x64-musl.node"
+  ],
   "os": [
     "linux"
   ],
   "cpu": [
     "x64"
   ],
-  "main": "office-md.linux-x64-musl.node",
-  "files": [
-    "office-md.linux-x64-musl.node"
-  ],
-  "description": "Native Node/Bun bindings for OfficeMD document extraction",
-  "keywords": [
-    "officemd",
-    "office",
-    "docx",
-    "xlsx",
-    "csv",
-    "pdf",
-    "markdown"
-  ],
-  "author": "Thomas Aubry",
-  "homepage": "https://github.com/ThomAub/officemd",
-  "license": "MIT",
-  "engines": {
-    "node": ">=18"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ThomAub/officemd.git",
-    "directory": "crates/officemd_js"
-  },
-  "bugs": {
-    "url": "https://github.com/ThomAub/officemd/issues"
-  },
   "libc": [
     "musl"
-  ]
+  ],
+  "main": "office-md.linux-x64-musl.node",
+  "engines": {
+    "node": ">=18"
+  }
 }

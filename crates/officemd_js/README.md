@@ -60,13 +60,13 @@ console.log(doclingFromBytes(content, "docx"));
 
 ## Supported Formats
 
-| Format | Extension | Markdown | JSON IR | Docling |
-|--------|-----------|----------|---------|---------|
-| Word | .docx | yes | yes | yes |
-| Excel | .xlsx | yes | yes | yes |
-| CSV | .csv | yes | yes | - |
-| PowerPoint | .pptx | yes | yes | yes |
-| PDF | .pdf | yes | yes | - |
+| Format     | Extension | Markdown | JSON IR | Docling |
+| ---------- | --------- | -------- | ------- | ------- |
+| Word       | .docx     | yes      | yes     | yes     |
+| Excel      | .xlsx     | yes      | yes     | yes     |
+| CSV        | .csv      | yes      | yes     | -       |
+| PowerPoint | .pptx     | yes      | yes     | yes     |
+| PDF        | .pdf      | yes      | yes     | -       |
 
 ## License
 

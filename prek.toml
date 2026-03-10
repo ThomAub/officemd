@@ -1,0 +1,29 @@
+# Configuration file for prek, a git hook framework written in Rust.
+# See https://prek.j178.dev for more information.
+#:schema https://www.schemastore.org/prek.json
+
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "check-added-large-files", args = ["--maxkb=500"] },
+    { id = "check-merge-conflict" },
+]
+
+[[repos]]
+repo = "local"
+hooks = [
+    # -- Rust --
+    { id = "cargo-fmt", name = "cargo fmt", language = "system", entry = "cargo fmt --all -- --check", files = "\\.rs$", pass_filenames = false },
+    { id = "clippy", name = "cargo clippy", language = "system", entry = "cargo clippy --workspace --all-targets --exclude officemd_pdf --quiet -- -D warnings", files = "\\.rs$", pass_filenames = false },
+
+    # -- JS (oxlint + oxfmt) --
+    { id = "oxlint", name = "oxlint", language = "system", entry = "sh -c 'cd crates/officemd_js && npx oxlint .'", files = "crates/officemd_js/.*\\.(js|ts)$", pass_filenames = false },
+    { id = "oxfmt", name = "oxfmt check", language = "system", entry = "sh -c 'cd crates/officemd_js && npx oxfmt --check .'", files = "crates/officemd_js/.*\\.(js|ts)$", pass_filenames = false },
+
+    # -- Python (ruff + ty) --
+    { id = "ruff-check", name = "ruff check", language = "system", entry = "sh -c 'cd crates/officemd_python && uv run ruff check .'", files = "crates/officemd_python/.*\\.py$", pass_filenames = false },
+    { id = "ruff-format", name = "ruff format check", language = "system", entry = "sh -c 'cd crates/officemd_python && uv run ruff format --check .'", files = "crates/officemd_python/.*\\.py$", pass_filenames = false },
+    { id = "ty", name = "ty check", language = "system", entry = "sh -c 'cd crates/officemd_python && uv run ty check python'", files = "crates/officemd_python/.*\\.py$", pass_filenames = false },
+]

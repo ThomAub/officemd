@@ -215,9 +215,7 @@ def _parse_numeric_selector(selector: str, *, flag: str) -> set[int]:
             start = _parse_positive_int(range_match.group(1), flag=flag)
             end = _parse_positive_int(range_match.group(2), flag=flag)
             if start > end:
-                raise CliUsageError(
-                    f"Invalid `{flag}` token `{token}`: start must be <= end"
-                )
+                raise CliUsageError(f"Invalid `{flag}` token `{token}`: start must be <= end")
             selected.update(range(start, end + 1))
             continue
         selected.add(_parse_positive_int(token, flag=flag))
@@ -239,9 +237,7 @@ def _parse_sheet_selector(selector: str) -> tuple[set[int], set[str]]:
             start = _parse_positive_int(range_match.group(1), flag="--sheets")
             end = _parse_positive_int(range_match.group(2), flag="--sheets")
             if start > end:
-                raise CliUsageError(
-                    f"Invalid `--sheets` token `{token}`: start must be <= end"
-                )
+                raise CliUsageError(f"Invalid `--sheets` token `{token}`: start must be <= end")
             indices.update(range(start, end + 1))
             continue
         if token.isdigit():
@@ -342,8 +338,7 @@ def _apply_selectors(
     resolved_format = doc_format or "unknown"
     if sheets_selector is not None:
         raise CliUsageError(
-            "`--sheets` is only supported for XLSX/CSV input "
-            f"(resolved format: {resolved_format})"
+            f"`--sheets` is only supported for XLSX/CSV input (resolved format: {resolved_format})"
         )
     raise CliUsageError(
         "`--pages` is supported for PDF/PPTX and XLSX/CSV input "

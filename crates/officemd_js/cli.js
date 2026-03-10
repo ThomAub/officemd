@@ -77,18 +77,19 @@ function warnScannedPdf(content, force, inspectPdfJson) {
   if (force) {
     process.stderr.write(
       `${BOLD_BLUE}Info:${RESET} PDF classified as ${BOLD}${classification}${RESET}` +
-      ` (confidence: ${(confidence * 100).toFixed(0)}%, ${pageCount} page(s)). ` +
-      `Forced extraction attempted - output may be empty or incomplete.\n`
+        ` (confidence: ${(confidence * 100).toFixed(0)}%, ${pageCount} page(s)). ` +
+        `Forced extraction attempted - output may be empty or incomplete.\n`,
     );
   } else {
-    const ocrSummary = pagesNeedingOcr.length > 0
-      ? `pages needing OCR: ${pagesNeedingOcr.join(", ")}`
-      : `${pageCount} page(s)`;
+    const ocrSummary =
+      pagesNeedingOcr.length > 0
+        ? `pages needing OCR: ${pagesNeedingOcr.join(", ")}`
+        : `${pageCount} page(s)`;
     process.stderr.write(
       `${BOLD_YELLOW}Warning:${RESET} PDF classified as ${BOLD}${classification}${RESET}` +
-      ` (confidence: ${(confidence * 100).toFixed(0)}%, ${ocrSummary}). ` +
-      `No text could be extracted - this document likely needs OCR.\n` +
-      `Hint: use ${BOLD}--force${RESET} to attempt extraction anyway.\n`
+        ` (confidence: ${(confidence * 100).toFixed(0)}%, ${ocrSummary}). ` +
+        `No text could be extracted - this document likely needs OCR.\n` +
+        `Hint: use ${BOLD}--force${RESET} to attempt extraction anyway.\n`,
     );
   }
 }
@@ -202,7 +203,7 @@ function loadNativeBinding() {
   const details = loadErrors.map((err) => (err?.message ? err.message : String(err))).join("\n");
   throw new Error(
     `Failed to load office-md native binding for ${process.platform}/${process.arch}` +
-      (details ? `\n${details}` : "")
+      (details ? `\n${details}` : ""),
   );
 }
 
@@ -336,7 +337,7 @@ function parseNumberSelector(raw, label) {
     }
 
     throw new Error(
-      `Error: invalid ${label} selector token "${token}" (expected integer or range like 3-5)`
+      `Error: invalid ${label} selector token "${token}" (expected integer or range like 3-5)`,
     );
   }
 
@@ -482,7 +483,7 @@ function filterSheetSections(markdown, sheets) {
   }
 
   const selected = allSections.filter(
-    (section) => sheets.parsed.indices.has(section.index) || sheets.parsed.names.has(section.name)
+    (section) => sheets.parsed.indices.has(section.index) || sheets.parsed.names.has(section.name),
   );
 
   if (selected.length === 0) {
@@ -503,7 +504,7 @@ function applySelection(markdown, format, selection) {
 
   if (!normalizedFormat) {
     throw new Error(
-      "Error: cannot determine input format for selectors; pass --format when using --pages or --sheets"
+      "Error: cannot determine input format for selectors; pass --format when using --pages or --sheets",
     );
   }
 

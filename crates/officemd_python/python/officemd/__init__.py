@@ -1,4 +1,4 @@
-from officemd._officemd import (
+from officemd._officemd import (  # type: ignore[unresolved-import]
     detect_format,
     docling_from_bytes,
     extract_csv_tables_ir_json,
@@ -7,9 +7,10 @@ from officemd._officemd import (
     extract_tables_ir_json,
     inspect_pdf_fonts_json,
     inspect_pdf_json,
-    markdown_from_bytes_batch,
     markdown_from_bytes,
+    markdown_from_bytes_batch,
 )
+
 
 def _missing_rich(*_args, **_kwargs):
     raise ModuleNotFoundError(
@@ -21,9 +22,9 @@ try:
     from officemd.diff import diff_markdown, render_diff
     from officemd.render import render_markdown
 except ModuleNotFoundError:
-    diff_markdown = _missing_rich
-    render_diff = _missing_rich
-    render_markdown = _missing_rich
+    diff_markdown = _missing_rich  # type: ignore[invalid-assignment]
+    render_diff = _missing_rich  # type: ignore[invalid-assignment]
+    render_markdown = _missing_rich  # type: ignore[invalid-assignment]
 
 __all__ = [
     "detect_format",
@@ -35,8 +36,8 @@ __all__ = [
     "extract_tables_ir_json",
     "inspect_pdf_fonts_json",
     "inspect_pdf_json",
-    "markdown_from_bytes_batch",
     "markdown_from_bytes",
+    "markdown_from_bytes_batch",
     "render_diff",
     "render_markdown",
 ]

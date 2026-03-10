@@ -1,6 +1,30 @@
 {
   "name": "office-md-win32-x64-msvc",
   "version": "0.1.1",
+  "description": "Native Node/Bun bindings for OfficeMD document extraction",
+  "keywords": [
+    "csv",
+    "docx",
+    "markdown",
+    "office",
+    "officemd",
+    "pdf",
+    "xlsx"
+  ],
+  "homepage": "https://github.com/ThomAub/officemd",
+  "bugs": {
+    "url": "https://github.com/ThomAub/officemd/issues"
+  },
+  "license": "MIT",
+  "author": "Thomas Aubry",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThomAub/officemd.git",
+    "directory": "crates/officemd_js"
+  },
+  "files": [
+    "office-md.win32-x64-msvc.node"
+  ],
   "os": [
     "win32"
   ],
@@ -8,31 +32,7 @@
     "x64"
   ],
   "main": "office-md.win32-x64-msvc.node",
-  "files": [
-    "office-md.win32-x64-msvc.node"
-  ],
-  "description": "Native Node/Bun bindings for OfficeMD document extraction",
-  "keywords": [
-    "officemd",
-    "office",
-    "docx",
-    "xlsx",
-    "csv",
-    "pdf",
-    "markdown"
-  ],
-  "author": "Thomas Aubry",
-  "homepage": "https://github.com/ThomAub/officemd",
-  "license": "MIT",
   "engines": {
     "node": ">=18"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ThomAub/officemd.git",
-    "directory": "crates/officemd_js"
-  },
-  "bugs": {
-    "url": "https://github.com/ThomAub/officemd/issues"
   }
 }
