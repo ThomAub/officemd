@@ -73,7 +73,9 @@ jobs:
         run: npm install
       - name: build
         working-directory: crates/officemd_js
-        run: npm run build
+        run: |
+          npm run build
+          git checkout -- index.js index.d.ts
       - name: node tests
         working-directory: crates/officemd_js
         run: node --test tests/cli-selection.test.mjs

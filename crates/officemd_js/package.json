@@ -40,8 +40,7 @@
         "aarch64-unknown-linux-gnu",
         "aarch64-unknown-linux-musl",
         "aarch64-pc-windows-msvc",
-        "x86_64-unknown-linux-musl",
-        "armv7-unknown-linux-gnueabihf"
+        "x86_64-unknown-linux-musl"
       ]
     }
   },
@@ -80,7 +79,6 @@
     "office-md-linux-arm64-gnu": "0.1.0",
     "office-md-linux-arm64-musl": "0.1.0",
     "office-md-win32-arm64-msvc": "0.1.0",
-    "office-md-linux-x64-musl": "0.1.0",
-    "office-md-linux-arm-gnueabihf": "0.1.0"
+    "office-md-linux-x64-musl": "0.1.0"
   }
 }

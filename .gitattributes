@@ -1,0 +1,7 @@
+# Binary files - do not convert line endings
+*.pdf binary
+*.docx binary
+*.xlsx binary
+*.pptx binary
+*.node binary
+*.whl binary
