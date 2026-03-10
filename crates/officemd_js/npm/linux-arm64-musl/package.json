@@ -1,0 +1,41 @@
+{
+  "name": "office-md-linux-arm64-musl",
+  "version": "0.1.0",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "office-md.linux-arm64-musl.node",
+  "files": [
+    "office-md.linux-arm64-musl.node"
+  ],
+  "description": "Native Node/Bun bindings for OfficeMD document extraction",
+  "keywords": [
+    "officemd",
+    "office",
+    "docx",
+    "xlsx",
+    "csv",
+    "pdf",
+    "markdown"
+  ],
+  "author": "Thomas Aubry",
+  "homepage": "https://github.com/ThomAub/officemd",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThomAub/officemd.git",
+    "directory": "crates/officemd_js"
+  },
+  "bugs": {
+    "url": "https://github.com/ThomAub/officemd/issues"
+  },
+  "libc": [
+    "musl"
+  ]
+}

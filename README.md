@@ -1,5 +1,10 @@
 # OfficeMD
 
+[![CI](https://github.com/ThomAub/officemd/actions/workflows/ci.yml/badge.svg)](https://github.com/ThomAub/officemd/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/officemd_cli)](https://crates.io/crates/officemd_cli)
+[![PyPI](https://img.shields.io/pypi/v/officemd)](https://pypi.org/project/officemd/)
+[![npm](https://img.shields.io/npm/v/office-md)](https://www.npmjs.com/package/office-md)
+
 Fast Office document extraction for LLMs and agents. Converts DOCX, XLSX, CSV, PPTX, and PDF into clean markdown, structured JSON IR, and Docling output.
 
 - Native Rust core - fast, no runtime dependencies
@@ -128,8 +133,8 @@ officemd_core = "0.1"
 ## Development
 
 ```bash
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+cargo nextest run --workspace
+cargo clippy --workspace --all-targets --exclude officemd_pdf -- -D warnings
 ```
 
 For JS and Python tests, see [examples/README.md](examples/README.md).

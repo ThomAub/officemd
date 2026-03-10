@@ -44,8 +44,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - name: Install cargo-nextest
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-nextest
+          locked: true
       - name: test
-        run: cargo test --workspace
+        run: cargo nextest run --workspace --cargo-quiet --failure-output final --status-level fail --no-fail-fast
       - name: cargo package dry-run
         if: matrix.os == 'ubuntu-latest'
         run: cargo package --workspace --exclude officemd_examples --exclude officemd_js --exclude officemd_python --allow-dirty --no-verify

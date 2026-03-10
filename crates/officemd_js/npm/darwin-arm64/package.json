@@ -1,0 +1,38 @@
+{
+  "name": "office-md-darwin-arm64",
+  "version": "0.1.0",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "office-md.darwin-arm64.node",
+  "files": [
+    "office-md.darwin-arm64.node"
+  ],
+  "description": "Native Node/Bun bindings for OfficeMD document extraction",
+  "keywords": [
+    "officemd",
+    "office",
+    "docx",
+    "xlsx",
+    "csv",
+    "pdf",
+    "markdown"
+  ],
+  "author": "Thomas Aubry",
+  "homepage": "https://github.com/ThomAub/officemd",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThomAub/officemd.git",
+    "directory": "crates/officemd_js"
+  },
+  "bugs": {
+    "url": "https://github.com/ThomAub/officemd/issues"
+  }
+}
