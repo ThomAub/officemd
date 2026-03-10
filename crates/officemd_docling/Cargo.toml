@@ -1,6 +1,6 @@
 [package]
 name = "officemd_docling"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 description = "Docling JSON conversion for OfficeMD document IR"
 license = "MIT"
@@ -13,6 +13,6 @@ keywords = ["officemd", "docling", "document", "docx", "xlsx"]
 categories = ["text-processing"]
 
 [dependencies]
-officemd_core = { version = "0.1.0", path = "../officemd_core" }
+officemd_core = { version = "0.1.1", path = "../officemd_core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
