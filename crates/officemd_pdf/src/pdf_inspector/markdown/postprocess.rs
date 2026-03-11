@@ -14,6 +14,9 @@ pub(crate) fn clean_markdown(mut text: String, options: &MarkdownOptions) -> Str
         text = fix_hyphenation(&text);
     }
 
+    text = remove_chart_noise_lines(&text);
+    text = split_dense_bold_metric_lines(&text);
+
     // Remove standalone page numbers
     if options.remove_page_numbers {
         text = remove_page_numbers(&text);
@@ -63,6 +66,116 @@ fn fix_hyphenation(text: &str) -> String {
         .to_string();
 
     result
+}
+
+fn is_numeric_tick_token(token: &str) -> bool {
+    let trimmed = token.trim_matches(|c: char| matches!(c, ',' | ';' | ':' | '.'));
+    let trimmed = trimmed.strip_prefix('-').unwrap_or(trimmed);
+    !trimmed.is_empty() && trimmed.chars().all(|c| c.is_ascii_digit())
+}
+
+fn is_year_marker_token(token: &str) -> bool {
+    let trimmed = token.trim_matches(|c: char| matches!(c, ',' | ';' | ':' | '.'));
+    trimmed.eq_ignore_ascii_case("exercice") || matches!(trimmed, "N" | "N-1" | "N-2" | "N-3" | "E")
+}
+
+fn is_chart_noise_line(trimmed: &str) -> bool {
+    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+    if tokens.len() < 5 {
+        return false;
+    }
+
+    let numeric_tokens = tokens.iter().filter(|t| is_numeric_tick_token(t)).count();
+    let year_marker_tokens = tokens.iter().filter(|t| is_year_marker_token(t)).count();
+    let alpha_tokens = tokens
+        .iter()
+        .filter(|token| token.chars().any(|c| c.is_alphabetic()))
+        .count();
+    let short_or_abbrev_tokens = tokens
+        .iter()
+        .filter(|token| {
+            let cleaned: String = token.chars().filter(|c| c.is_alphabetic()).collect();
+            !cleaned.is_empty() && (cleaned.chars().count() <= 5 || token.contains('.'))
+        })
+        .count();
+
+    (year_marker_tokens >= 2 && numeric_tokens >= 8)
+        || (numeric_tokens >= 14 && alpha_tokens <= 6)
+        || (numeric_tokens == 0
+            && alpha_tokens >= 5
+            && short_or_abbrev_tokens >= alpha_tokens.saturating_sub(1))
+}
+
+fn remove_chart_noise_lines(text: &str) -> String {
+    text.lines()
+        .filter(|line| !is_chart_noise_line(line.trim()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn split_dense_bold_metric_lines(text: &str) -> String {
+    use once_cell::sync::Lazy;
+
+    static BOLD_SEGMENT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\*\*\*[^*].*?\*\*\*").unwrap());
+
+    fn strip_bold(segment: &str) -> &str {
+        segment
+            .strip_prefix("***")
+            .and_then(|s| s.strip_suffix("***"))
+            .unwrap_or(segment)
+            .trim()
+    }
+
+    fn is_numeric_heavy(segment: &str) -> bool {
+        let text = strip_bold(segment);
+        let digits = text.chars().filter(|c| c.is_ascii_digit()).count();
+        let alpha = text.chars().filter(|c| c.is_alphabetic()).count();
+        digits >= 3 && alpha <= 4
+    }
+
+    fn is_metric_label(segment: &str) -> bool {
+        let text = strip_bold(segment).to_lowercase();
+        text.starts_with("% sur ") || text.contains("capacité") || text.contains("résultat")
+    }
+
+    text.lines()
+        .flat_map(|line| {
+            let trimmed = line.trim();
+            let segments: Vec<&str> = BOLD_SEGMENT_RE
+                .find_iter(trimmed)
+                .map(|m| m.as_str())
+                .collect();
+            let should_split = segments.len() >= 3
+                && trimmed.len() >= 80
+                && trimmed.chars().any(|c| c.is_ascii_digit());
+
+            if !should_split {
+                return vec![line.to_string()];
+            }
+
+            let mut rebuilt = Vec::new();
+            let mut i = 0usize;
+            while i < segments.len() {
+                if i + 1 < segments.len()
+                    && is_metric_label(segments[i])
+                    && is_numeric_heavy(segments[i + 1])
+                {
+                    rebuilt.push(format!("{} {}", segments[i], segments[i + 1]));
+                    i += 2;
+                } else {
+                    rebuilt.push(segments[i].to_string());
+                    i += 1;
+                }
+            }
+
+            if rebuilt.is_empty() {
+                vec![line.to_string()]
+            } else {
+                rebuilt
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Remove standalone page numbers (lines that are just 1-4 digit numbers)
@@ -272,4 +385,32 @@ fn format_urls(text: &str) -> String {
         result.push_str(&text[safe_last_end..]);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remove_chart_noise_lines_filters_axis_rows() {
+        let input = "Rotations (en jours)\nExercice N-2 34 000 N-1 32 000 Exercice N 30 000 28 000 26 000 24 000\nCrédit clients 161,77 193,50\nC.A. Marge M.B.P. V.A. E.B.E. Résultat C.A.F.";
+        let cleaned = remove_chart_noise_lines(input);
+        assert!(cleaned.contains("Rotations (en jours)"));
+        assert!(cleaned.contains("Crédit clients 161,77 193,50"));
+        assert!(!cleaned.contains("Exercice N-2 34 000"));
+        assert!(!cleaned.contains("C.A. Marge"));
+    }
+
+    #[test]
+    fn split_dense_bold_metric_lines_breaks_blob_into_rows() {
+        let input = "***Marge brute de production (282) (9 682) 9 400-97,08*** ***% sur production-818,17 N/S*** ***Valeur ajoutée (14 071) (24 490) 10 419-42,54***";
+        let cleaned = split_dense_bold_metric_lines(input);
+        let lines: Vec<&str> = cleaned.lines().collect();
+        assert!(lines.len() >= 3);
+        assert_eq!(
+            lines[0],
+            "***Marge brute de production (282) (9 682) 9 400-97,08***"
+        );
+        assert_eq!(lines[1], "***% sur production-818,17 N/S***");
+    }
 }

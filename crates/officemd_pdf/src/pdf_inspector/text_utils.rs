@@ -141,6 +141,73 @@ pub(crate) fn expand_ligatures(text: &str) -> String {
             _ => result.push(ch),
         }
     }
+    collapse_doubled_glyph_runs(&result)
+}
+
+fn same_letter_fold(a: char, b: char) -> bool {
+    a.to_lowercase().to_string() == b.to_lowercase().to_string()
+}
+
+fn collapse_doubled_token(token: &str) -> Option<String> {
+    let chars: Vec<char> = token.chars().collect();
+    if chars.len() < 6 || !chars.iter().all(|c| c.is_alphabetic()) {
+        return None;
+    }
+
+    let mut collapsed = String::with_capacity(chars.len());
+    let mut duplicate_pairs = 0usize;
+    let mut singles = 0usize;
+    let mut i = 0usize;
+
+    while i < chars.len() {
+        let ch = chars[i];
+        if i + 1 < chars.len() && same_letter_fold(ch, chars[i + 1]) {
+            collapsed.push(ch);
+            duplicate_pairs += 1;
+            i += 2;
+        } else {
+            collapsed.push(ch);
+            singles += 1;
+            i += 1;
+        }
+    }
+
+    let collapsed_len = collapsed.chars().count();
+    let unit_count = duplicate_pairs + singles;
+    if collapsed_len < 4 || duplicate_pairs < 2 || unit_count == 0 {
+        return None;
+    }
+
+    let duplicate_ratio = duplicate_pairs as f32 / unit_count as f32;
+    (duplicate_ratio >= 0.60).then_some(collapsed)
+}
+
+fn collapse_doubled_glyph_runs(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut token = String::new();
+
+    let flush_token = |token: &mut String, result: &mut String| {
+        if token.is_empty() {
+            return;
+        }
+        if let Some(collapsed) = collapse_doubled_token(token) {
+            result.push_str(&collapsed);
+        } else {
+            result.push_str(token);
+        }
+        token.clear();
+    };
+
+    for ch in text.chars() {
+        if ch.is_alphabetic() {
+            token.push(ch);
+        } else {
+            flush_token(&mut token, &mut result);
+            result.push(ch);
+        }
+    }
+    flush_token(&mut token, &mut result);
+
     result
 }
 
@@ -410,6 +477,17 @@ mod tests {
     #[test]
     fn ligatures_still_expand() {
         assert_eq!(expand_ligatures("\u{FB00}\u{FB01}\u{FB02}"), "fffifl");
+    }
+
+    #[test]
+    fn collapse_doubled_glyph_runs_on_stutter_token() {
+        assert_eq!(expand_ligatures("Exxeerrcciiccee"), "Exercice");
+    }
+
+    #[test]
+    fn keep_normal_double_letters() {
+        assert_eq!(expand_ligatures("bookkeeper"), "bookkeeper");
+        assert_eq!(expand_ligatures("committee"), "committee");
     }
 
     #[test]

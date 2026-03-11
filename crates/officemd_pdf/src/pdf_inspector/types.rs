@@ -98,6 +98,8 @@ pub struct TextItem {
     pub font_size: f32,
     /// Page number (1-indexed)
     pub page: u32,
+    /// Whether the text baseline is rotated away from normal horizontal reading order.
+    pub is_rotated: bool,
     /// Whether the font is bold
     pub is_bold: bool,
     /// Whether the font is italic

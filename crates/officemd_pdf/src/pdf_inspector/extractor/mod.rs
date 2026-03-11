@@ -4,12 +4,13 @@
 
 mod content_stream;
 mod fonts;
+mod interpreter;
 mod layout;
 mod links;
 mod xobjects;
 
 use crate::pdf_inspector::PdfError;
-use crate::pdf_inspector::text_utils::is_rtl_text;
+use crate::pdf_inspector::text_utils::{expand_ligatures, is_rtl_text};
 use crate::pdf_inspector::tounicode::FontCMaps;
 use crate::pdf_inspector::types::{PdfRect, TextItem};
 use log::debug;
@@ -261,6 +262,11 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
         let mut i = 0;
         while i < group.len() {
             let first = group[i];
+            if first.is_rotated {
+                merged.push(first.clone());
+                i += 1;
+                continue;
+            }
             let mut text = first.text.clone();
             let mut end_x = first.x + first.width;
             let x_gap_max = first.font_size * 0.5;
@@ -268,6 +274,9 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
             let mut j = i + 1;
             while j < group.len() {
                 let next = group[j];
+                if next.is_rotated {
+                    break;
+                }
                 // Must be similar font size (within 20%)
                 if (next.font_size - first.font_size).abs() > first.font_size * 0.20 {
                     break;
@@ -289,7 +298,7 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
             }
 
             merged.push(TextItem {
-                text,
+                text: expand_ligatures(&text),
                 x: first.x,
                 y: first.y,
                 width: end_x - first.x,
@@ -297,6 +306,7 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
                 font: first.font.clone(),
                 font_size: first.font_size,
                 page: first.page,
+                is_rotated: false,
                 is_bold: first.is_bold,
                 is_italic: first.is_italic,
                 item_type: first.item_type.clone(),
@@ -307,6 +317,130 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
     }
 
     merged
+}
+
+fn same_item_type(a: &ItemType, b: &ItemType) -> bool {
+    matches!(
+        (a, b),
+        (ItemType::Text, ItemType::Text)
+            | (ItemType::Image, ItemType::Image)
+            | (ItemType::FormField, ItemType::FormField)
+            | (ItemType::Link(_), ItemType::Link(_))
+    )
+}
+
+fn is_overlapping_duplicate_text_item(existing: &TextItem, candidate: &TextItem) -> bool {
+    if existing.page != candidate.page
+        || existing.is_rotated != candidate.is_rotated
+        || existing.font != candidate.font
+        || !same_item_type(&existing.item_type, &candidate.item_type)
+        || existing.text.trim() != candidate.text.trim()
+    {
+        return false;
+    }
+
+    let x_tol = existing.font_size.max(candidate.font_size) * 0.18 + 1.0;
+    let y_tol = existing.font_size.max(candidate.font_size) * 0.15 + 1.0;
+    let width_tol = existing.width.max(candidate.width) * 0.25 + 1.0;
+    let height_tol = existing.height.max(candidate.height) * 0.25 + 1.0;
+
+    (existing.x - candidate.x).abs() <= x_tol
+        && (existing.y - candidate.y).abs() <= y_tol
+        && (existing.width - candidate.width).abs() <= width_tol
+        && (existing.height - candidate.height).abs() <= height_tol
+}
+
+fn prefer_duplicate_replacement(existing: &TextItem, candidate: &TextItem) -> bool {
+    let existing_has_width = existing.width > 0.0;
+    let candidate_has_width = candidate.width > 0.0;
+    if candidate_has_width != existing_has_width {
+        return candidate_has_width;
+    }
+
+    if (candidate.width - existing.width).abs() > 0.5 {
+        return candidate.width > existing.width;
+    }
+
+    candidate.height > existing.height
+}
+
+pub(crate) fn deduplicate_overlapping_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
+    if items.len() < 2 {
+        return items;
+    }
+
+    let mut kept: Vec<TextItem> = Vec::with_capacity(items.len());
+    'outer: for item in items {
+        for existing in kept.iter_mut().rev() {
+            if existing.page != item.page {
+                break;
+            }
+            if (existing.y - item.y).abs() > existing.font_size.max(item.font_size) * 0.6 + 2.0 {
+                continue;
+            }
+            if is_overlapping_duplicate_text_item(existing, &item) {
+                if prefer_duplicate_replacement(existing, &item) {
+                    *existing = item;
+                }
+                continue 'outer;
+            }
+        }
+        kept.push(item);
+    }
+
+    kept
+}
+
+/// Check whether the combined text matrix represents rotated text (> 15 degrees).
+pub(crate) fn is_rotated_text_transform(matrix: &[f32; 6]) -> bool {
+    let angle = matrix[1]
+        .atan2(matrix[0])
+        .to_degrees()
+        .abs()
+        .rem_euclid(180.0);
+    let deviation = angle.min((180.0 - angle).abs());
+    deviation > 15.0
+}
+
+/// Parse a 6-element matrix from operator operands (used by `cm`).
+pub(crate) fn parse_matrix_from_operands(operands: &[Object]) -> Option<[f32; 6]> {
+    if operands.len() < 6 {
+        return None;
+    }
+    Some([
+        get_number(&operands[0]).unwrap_or(1.0),
+        get_number(&operands[1]).unwrap_or(0.0),
+        get_number(&operands[2]).unwrap_or(0.0),
+        get_number(&operands[3]).unwrap_or(1.0),
+        get_number(&operands[4]).unwrap_or(0.0),
+        get_number(&operands[5]).unwrap_or(0.0),
+    ])
+}
+
+/// Parse a rectangle from `re` operator operands and transform to device space.
+pub(crate) fn parse_rect_operator(
+    operands: &[Object],
+    ctm: &[f32; 6],
+    page: u32,
+) -> Option<crate::pdf_inspector::types::PdfRect> {
+    if operands.len() < 4 {
+        return None;
+    }
+    let rx = get_number(&operands[0]).unwrap_or(0.0);
+    let ry = get_number(&operands[1]).unwrap_or(0.0);
+    let rw = get_number(&operands[2]).unwrap_or(0.0);
+    let rh = get_number(&operands[3]).unwrap_or(0.0);
+    let x_dev = rx * ctm[0] + ry * ctm[2] + ctm[4];
+    let y_dev = rx * ctm[1] + ry * ctm[3] + ctm[5];
+    let w_dev = rw * ctm[0];
+    let h_dev = rh * ctm[3];
+    Some(crate::pdf_inspector::types::PdfRect {
+        x: x_dev,
+        y: y_dev,
+        width: w_dev,
+        height: h_dev,
+        page,
+    })
 }
 
 /// Helper to get f32 from Object
@@ -339,6 +473,7 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -352,6 +487,7 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -365,6 +501,7 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -375,6 +512,44 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].text(), "Hello World");
         assert_eq!(lines[1].text(), "Next line");
+    }
+
+    #[test]
+    fn test_deduplicate_overlapping_text_items() {
+        let items = vec![
+            TextItem {
+                text: "Exercice".into(),
+                x: 100.0,
+                y: 700.0,
+                width: 50.0,
+                height: 12.0,
+                font: "F1".into(),
+                font_size: 12.0,
+                page: 1,
+                is_rotated: false,
+                is_bold: false,
+                is_italic: false,
+                item_type: ItemType::Text,
+            },
+            TextItem {
+                text: "Exercice".into(),
+                x: 100.4,
+                y: 700.2,
+                width: 50.5,
+                height: 12.1,
+                font: "F1".into(),
+                font_size: 12.0,
+                page: 1,
+                is_rotated: false,
+                is_bold: false,
+                is_italic: false,
+                item_type: ItemType::Text,
+            },
+        ];
+
+        let deduped = deduplicate_overlapping_text_items(items);
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].text, "Exercice");
     }
 
     #[test]
@@ -418,6 +593,7 @@ mod tests {
                 font: "C2_0".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -431,6 +607,7 @@ mod tests {
                 font: "C2_0".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -444,6 +621,7 @@ mod tests {
                 font: "C2_0".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -468,6 +646,7 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -481,6 +660,7 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -494,6 +674,7 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -520,6 +701,7 @@ mod tests {
                 font: "F4".into(),
                 font_size: 13.3,
                 page: 1,
+                is_rotated: false,
                 is_bold: true,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -553,6 +735,7 @@ mod tests {
                 font: "F5".into(),
                 font_size: 13.3,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -587,6 +770,7 @@ mod tests {
                 font: "C2_0".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -600,6 +784,7 @@ mod tests {
                 font: "C2_0".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -613,6 +798,7 @@ mod tests {
                 font: "C2_0".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -634,6 +820,7 @@ mod tests {
             font: "F1".into(),
             font_size: 12.0,
             page: 1,
+            is_rotated: false,
             is_bold: false,
             is_italic: false,
             item_type: ItemType::Text,
@@ -745,6 +932,7 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -758,6 +946,7 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -781,6 +970,7 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -794,6 +984,7 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -832,6 +1023,7 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -864,6 +1056,7 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
@@ -896,6 +1089,7 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page,
+                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,

@@ -371,9 +371,11 @@ fn process_document(
             let md = if options.mode == ProcessMode::Analyze {
                 None
             } else {
+                let mut markdown_options = options.markdown.clone();
+                markdown_options.include_page_numbers = true;
                 Some(to_markdown_from_items_with_rects(
                     items,
-                    options.markdown,
+                    markdown_options,
                     &rects,
                 ))
             };

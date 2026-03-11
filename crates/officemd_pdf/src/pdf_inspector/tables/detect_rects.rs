@@ -106,10 +106,96 @@ pub(crate) fn cluster_rects(
 /// from being merged into the table.
 #[derive(Debug, Clone)]
 pub struct RectHintRegion {
+    /// X coordinate of the left edge.
+    pub x_left: f32,
+    /// X coordinate of the right edge.
+    pub x_right: f32,
     /// Y coordinate of the top edge (highest value in PDF space)
     pub y_top: f32,
     /// Y coordinate of the bottom edge (lowest value in PDF space)
     pub y_bottom: f32,
+    /// Number of cell-sized rects contributing to this hint.
+    pub rect_count: usize,
+}
+
+#[derive(Clone)]
+struct RectClusterGroup {
+    rects: Vec<(f32, f32, f32, f32)>,
+    x_left: f32,
+    x_right: f32,
+    y_top: f32,
+    y_bottom: f32,
+}
+
+impl RectClusterGroup {
+    fn from_rects(rects: Vec<(f32, f32, f32, f32)>) -> Option<Self> {
+        let x_left = rects.iter().map(|(x, _, _, _)| *x).reduce(f32::min)?;
+        let x_right = rects.iter().map(|(x, _, w, _)| *x + *w).reduce(f32::max)?;
+        let y_bottom = rects.iter().map(|(_, y, _, _)| *y).reduce(f32::min)?;
+        let y_top = rects.iter().map(|(_, y, _, h)| *y + *h).reduce(f32::max)?;
+        Some(Self {
+            rects,
+            x_left,
+            x_right,
+            y_top,
+            y_bottom,
+        })
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.rects.extend(other.rects);
+        self.x_left = self.x_left.min(other.x_left);
+        self.x_right = self.x_right.max(other.x_right);
+        self.y_bottom = self.y_bottom.min(other.y_bottom);
+        self.y_top = self.y_top.max(other.y_top);
+    }
+}
+
+fn merge_rect_cluster_bands(groups: Vec<RectClusterGroup>) -> Vec<RectClusterGroup> {
+    if groups.len() < 2 {
+        return groups;
+    }
+
+    let mut sorted = groups;
+    sorted.sort_by(|a, b| {
+        b.y_top
+            .partial_cmp(&a.y_top)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                a.x_left
+                    .partial_cmp(&b.x_left)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    });
+
+    let mut merged: Vec<RectClusterGroup> = Vec::new();
+    for group in sorted {
+        let should_merge = merged.last_mut().is_some_and(|prev| {
+            let overlap =
+                (prev.y_top.min(group.y_top) - prev.y_bottom.max(group.y_bottom)).max(0.0);
+            let prev_h = (prev.y_top - prev.y_bottom).max(1.0);
+            let group_h = (group.y_top - group.y_bottom).max(1.0);
+            let overlap_ratio = overlap / prev_h.min(group_h);
+            let horizontal_gap = if prev.x_right < group.x_left {
+                group.x_left - prev.x_right
+            } else if group.x_right < prev.x_left {
+                prev.x_left - group.x_right
+            } else {
+                0.0
+            };
+            let combined_width = prev.x_right.max(group.x_right) - prev.x_left.min(group.x_left);
+
+            overlap_ratio >= 0.65 && horizontal_gap <= 90.0 && combined_width <= 620.0
+        });
+
+        if should_merge {
+            merged.last_mut().unwrap().merge(group);
+        } else {
+            merged.push(group);
+        }
+    }
+
+    merged
 }
 
 /// Detect tables from explicit rectangle (`re`) operators in the PDF.
@@ -150,50 +236,62 @@ pub fn detect_tables_from_rects(
     }
 
     debug!(
-        "page {}: {} rects after size filter (from {} raw)",
+        "page {}: {} rects after size filter",
         page,
         page_rects.len(),
-        rects.iter().filter(|r| r.page == page).count(),
     );
 
     let mut tables = Vec::new();
     let mut hint_regions = Vec::new();
 
-    // Full grid detection requires ≥ 6 rects
-    if page_rects.len() >= 6 {
-        let clusters = cluster_rects(&page_rects, 3.0, 6);
-        debug!("page {}: {} clusters with >= 6 rects", page, clusters.len());
-
-        for cluster_indices in &clusters {
-            let group_rects: Vec<(f32, f32, f32, f32)> =
-                cluster_indices.iter().map(|&i| page_rects[i]).collect();
-            if let Some(table) = detect_table_from_rect_group(items, &group_rects, page) {
-                tables.push(table);
-            } else if let Some(table) = detect_row_stripe_table(items, &group_rects, page) {
-                tables.push(table);
-            }
-        }
-    }
-
-    // On rect-sparse pages (≤ 6 rects), a few cell-border rects may define the
-    // table region even though they can't form a full grid (e.g. only horizontal
-    // row borders, no column dividers).  Extract a hint region so the heuristic
-    // detector can be scoped to just that area, preventing nearby graph labels
-    // or other content from being merged into the table.
-    if tables.is_empty() && page_rects.len() >= 4 && page_rects.len() <= 6 {
+    // Single clustering pass with min_size=4; large clusters (>= 6) attempt
+    // full grid detection first, smaller ones produce hint regions only.
+    if page_rects.len() >= 4 {
         let clusters = cluster_rects(&page_rects, 3.0, 4);
-        for cluster_indices in &clusters {
-            let group_rects: Vec<(f32, f32, f32, f32)> =
-                cluster_indices.iter().map(|&i| page_rects[i]).collect();
+        debug!("page {}: {} clusters with >= 4 rects", page, clusters.len());
+
+        let merged_groups = merge_rect_cluster_bands(
+            clusters
+                .iter()
+                .filter_map(|cluster_indices| {
+                    let group_rects: Vec<(f32, f32, f32, f32)> =
+                        cluster_indices.iter().map(|&i| page_rects[i]).collect();
+                    RectClusterGroup::from_rects(group_rects)
+                })
+                .collect(),
+        );
+
+        for group in merged_groups {
+            let group_rects = group.rects;
+
+            if group_rects.len() >= 6 {
+                // Large cluster: attempt full grid detection
+                if let Some(table) = detect_table_from_rect_group(items, &group_rects, page) {
+                    tables.push(table);
+                    continue;
+                } else if let Some(table) = detect_row_stripe_table(items, &group_rects, page) {
+                    tables.push(table);
+                    continue;
+                }
+            }
+
+            // Cluster too small for grid, or grid detection failed: extract hint region
             if let Some(hint) = extract_hint_region(&group_rects) {
                 debug!(
-                    "page {}: hint region y={:.1}..{:.1}",
-                    page, hint.y_bottom, hint.y_top
+                    "page {}: hint region x={:.1}..{:.1} y={:.1}..{:.1} ({} rects)",
+                    page,
+                    hint.x_left,
+                    hint.x_right,
+                    hint.y_bottom,
+                    hint.y_top,
+                    group_rects.len()
                 );
                 hint_regions.push(hint);
             }
         }
     }
+
+    merge_hint_regions(&mut hint_regions);
 
     (tables, hint_regions)
 }
@@ -207,9 +305,9 @@ pub fn detect_tables_from_rects(
 /// Filters out oversized "bounding box" rects (height > 4× the median height),
 /// then computes the Y bounding box of the remaining cell-sized rects.
 fn extract_hint_region(group_rects: &[(f32, f32, f32, f32)]) -> Option<RectHintRegion> {
-    // Only produce hints from small clusters — large clusters that fail grid
-    // validation are likely form-style decorative rects, not table cell borders.
-    if group_rects.len() < 2 || group_rects.len() > 8 {
+    // Ignore tiny clusters. Large failed clusters can still be useful when their
+    // cell-sized rects bound a table region on a busy page.
+    if group_rects.len() < 2 {
         return None;
     }
 
@@ -228,20 +326,196 @@ fn extract_hint_region(group_rects: &[(f32, f32, f32, f32)]) -> Option<RectHintR
         return None;
     }
 
-    // Compute Y bounding box of cell-sized rects
+    // Compute bounding box of cell-sized rects
+    let x_left = cell_rects.iter().map(|(x, _, _, _)| *x).reduce(f32::min)?;
+    let x_right = cell_rects
+        .iter()
+        .map(|(x, _, w, _)| *x + *w)
+        .reduce(f32::max)?;
     let y_bottom = cell_rects.iter().map(|(_, y, _, _)| *y).reduce(f32::min)?;
     let y_top = cell_rects
         .iter()
         .map(|(_, y, _, h)| *y + *h)
         .reduce(f32::max)?;
 
-    // The region must have meaningful height but not span an unreasonable area
+    // The region must have meaningful size but not span an unreasonable area.
+    let region_width = x_right - x_left;
     let region_height = y_top - y_bottom;
-    if !(10.0..=300.0).contains(&region_height) {
+    if !(40.0..=560.0).contains(&region_width) || !(10.0..=500.0).contains(&region_height) {
         return None;
     }
 
-    Some(RectHintRegion { y_top, y_bottom })
+    Some(RectHintRegion {
+        x_left,
+        x_right,
+        y_top,
+        y_bottom,
+        rect_count: cell_rects.len(),
+    })
+}
+
+fn looks_like_overflowed_sparse_table(
+    cells: &[Vec<String>],
+    rect_count: usize,
+    long_cell_threshold: usize,
+) -> bool {
+    if rect_count >= 10 {
+        return false;
+    }
+
+    let mut saw_non_empty = false;
+    let mut saw_long = false;
+    for cell in cells.iter().flat_map(|row| row.iter()) {
+        if cell.trim().is_empty() {
+            continue;
+        }
+        saw_non_empty = true;
+        if cell.chars().count() >= long_cell_threshold {
+            saw_long = true;
+            break;
+        }
+    }
+
+    saw_non_empty && saw_long
+}
+
+fn merge_hint_regions(hints: &mut Vec<RectHintRegion>) {
+    if hints.len() < 2 {
+        return;
+    }
+
+    hints.sort_by(|a, b| {
+        b.y_top
+            .partial_cmp(&a.y_top)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut merged: Vec<RectHintRegion> = Vec::with_capacity(hints.len());
+    for hint in hints.drain(..) {
+        let overlaps = merged.last_mut().is_some_and(|prev| {
+            hint.x_left <= prev.x_right + 12.0
+                && hint.x_right >= prev.x_left - 12.0
+                && hint.y_bottom <= prev.y_top + 12.0
+                && hint.y_top >= prev.y_bottom - 12.0
+        });
+
+        if overlaps {
+            let prev = merged.last_mut().unwrap();
+            prev.x_left = prev.x_left.min(hint.x_left);
+            prev.x_right = prev.x_right.max(hint.x_right);
+            prev.y_bottom = prev.y_bottom.min(hint.y_bottom);
+            prev.y_top = prev.y_top.max(hint.y_top);
+            prev.rect_count += hint.rect_count;
+        } else {
+            merged.push(hint);
+        }
+    }
+
+    *hints = merged;
+}
+
+fn finalize_rect_backed_table(
+    mut cells: Vec<Vec<String>>,
+    item_indices: Vec<usize>,
+    col_edges: &[f32],
+    row_edges: &[f32],
+    rect_count: usize,
+    debug_prefix: &str,
+) -> Option<Table> {
+    if item_indices.is_empty() {
+        debug!("  {}rejected: no text items assigned to grid", debug_prefix);
+        return None;
+    }
+
+    let mut trimmed_col_edges: Vec<f32> = col_edges.to_vec();
+    while cells.first().is_some_and(|row| row.len() > 2)
+        && cells
+            .iter()
+            .all(|row| row.first().is_some_and(|c| c.trim().is_empty()))
+    {
+        for row in &mut cells {
+            row.remove(0);
+        }
+        trimmed_col_edges.remove(0);
+    }
+    while cells.first().is_some_and(|row| row.len() > 2)
+        && cells
+            .iter()
+            .all(|row| row.last().is_some_and(|c| c.trim().is_empty()))
+    {
+        for row in &mut cells {
+            row.pop();
+        }
+        trimmed_col_edges.pop();
+    }
+
+    let non_empty_rows = cells
+        .iter()
+        .filter(|row| row.iter().any(|c| !c.trim().is_empty()))
+        .count();
+    if non_empty_rows < 2 {
+        debug!(
+            "  {}rejected: only {} non-empty rows",
+            debug_prefix, non_empty_rows
+        );
+        return None;
+    }
+
+    let total_cells = (cells.len() * cells.first().map_or(0, Vec::len)) as f32;
+    let non_empty_cells = cells
+        .iter()
+        .flat_map(|row| row.iter())
+        .filter(|c| !c.trim().is_empty())
+        .count();
+    let content_ratio = if total_cells > 0.0 {
+        non_empty_cells as f32 / total_cells
+    } else {
+        0.0
+    };
+    if content_ratio < 0.25 {
+        debug!(
+            "  {}rejected: content ratio {:.2} < 0.25 ({} non-empty / {} total)",
+            debug_prefix, content_ratio, non_empty_cells, total_cells as u32
+        );
+        return None;
+    }
+
+    for col in 0..cells.first().map_or(0, Vec::len) {
+        let col_has_content = cells
+            .iter()
+            .any(|row| row.get(col).is_some_and(|c| !c.trim().is_empty()));
+        if !col_has_content {
+            debug!(
+                "  {}rejected: column {} is completely empty",
+                debug_prefix, col
+            );
+            return None;
+        }
+    }
+
+    if looks_like_overflowed_sparse_table(&cells, rect_count, 80) {
+        debug!(
+            "  {}rejected: sparse rect table has overflowed cells",
+            debug_prefix
+        );
+        return None;
+    }
+
+    let columns: Vec<f32> = trimmed_col_edges
+        .windows(2)
+        .map(|pair| (pair[0] + pair[1]) / 2.0)
+        .collect();
+    let rows: Vec<f32> = row_edges
+        .windows(2)
+        .map(|pair| (pair[0] + pair[1]) / 2.0)
+        .collect();
+
+    Some(Table {
+        columns,
+        rows,
+        cells,
+        item_indices,
+    })
 }
 
 /// Detect a single table from a cluster of spatially connected rects.
@@ -338,63 +612,14 @@ pub(crate) fn detect_table_from_rect_group(
     // should have their text collected into the first sub-row.
     propagate_merged_cells(&mut cells, &col_edges, &row_edges, group_rects);
 
-    // Compute column centers and row centers for the Table struct
-    let columns: Vec<f32> = (0..num_cols)
-        .map(|c| (col_edges[c] + col_edges[c + 1]) / 2.0)
-        .collect();
-    let rows: Vec<f32> = (0..num_rows)
-        .map(|r| (row_edges[r] + row_edges[r + 1]) / 2.0)
-        .collect();
-
-    // Skip if no text was assigned
-    if item_indices.is_empty() {
-        debug!("  rejected: no text items assigned to grid");
-        return None;
-    }
-
-    // Skip tables with only 1 row of content (header-only)
-    let non_empty_rows = cells
-        .iter()
-        .filter(|row| row.iter().any(|c| !c.trim().is_empty()))
-        .count();
-    if non_empty_rows < 2 {
-        debug!("  rejected: only {} non-empty rows", non_empty_rows);
-        return None;
-    }
-
-    // Content density check: reject tables where most cells are empty.
-    // Real tables have content in most cells; form layouts produce sparse grids.
-    let non_empty_cells = cells
-        .iter()
-        .flat_map(|row| row.iter())
-        .filter(|c| !c.trim().is_empty())
-        .count();
-    let content_ratio = non_empty_cells as f32 / total_cells;
-    if content_ratio < 0.25 {
-        debug!(
-            "  rejected: content ratio {:.2} < 0.25 ({} non-empty / {} total)",
-            content_ratio, non_empty_cells, total_cells as u32
-        );
-        return None;
-    }
-
-    // Reject tables with any completely empty column — indicates a bad grid.
-    for col in 0..num_cols {
-        let col_has_content = cells
-            .iter()
-            .any(|row| row.get(col).is_some_and(|c| !c.trim().is_empty()));
-        if !col_has_content {
-            debug!("  rejected: column {} is completely empty", col);
-            return None;
-        }
-    }
-
-    Some(Table {
-        columns,
-        rows,
+    finalize_rect_backed_table(
         cells,
         item_indices,
-    })
+        &col_edges,
+        &row_edges,
+        group_rects.len(),
+        "",
+    )
 }
 
 /// Deduplicate nearby edge values within a tolerance, returning sorted unique edges.
@@ -434,6 +659,9 @@ pub(crate) fn assign_items_to_grid(
 
     for (idx, item) in items.iter().enumerate() {
         if item.page != page {
+            continue;
+        }
+        if item.is_rotated {
             continue;
         }
         // Use item center for assignment
@@ -619,6 +847,7 @@ fn detect_row_stripe_table(
         .enumerate()
         .filter(|(_, item)| {
             item.page == page
+                && !item.is_rotated
                 && item.y >= y_bottom - 2.0
                 && item.y <= y_top + 2.0
                 && item.x >= x_left - 5.0
@@ -687,66 +916,14 @@ fn detect_row_stripe_table(
         return None;
     }
 
-    // Validate: >=2 non-empty rows
-    let non_empty_rows = cells
-        .iter()
-        .filter(|row| row.iter().any(|c| !c.trim().is_empty()))
-        .count();
-    if non_empty_rows < 2 {
-        debug!(
-            "  row-stripe rejected: only {} non-empty rows",
-            non_empty_rows
-        );
-        return None;
-    }
-
-    // Content density: >=25%
-    let total_cells = (num_cols * num_rows) as f32;
-    let non_empty_cells = cells
-        .iter()
-        .flat_map(|row| row.iter())
-        .filter(|c| !c.trim().is_empty())
-        .count();
-    let content_ratio = non_empty_cells as f32 / total_cells;
-    if content_ratio < 0.25 {
-        debug!(
-            "  row-stripe rejected: content ratio {:.2} < 0.25",
-            content_ratio
-        );
-        return None;
-    }
-
-    // No empty columns
-    for col in 0..num_cols {
-        let col_has_content = cells
-            .iter()
-            .any(|row| row.get(col).is_some_and(|c| !c.trim().is_empty()));
-        if !col_has_content {
-            debug!("  row-stripe rejected: column {} is empty", col);
-            return None;
-        }
-    }
-
-    let column_centers: Vec<f32> = (0..num_cols)
-        .map(|c| (col_edges[c] + col_edges[c + 1]) / 2.0)
-        .collect();
-    let row_centers: Vec<f32> = (0..num_rows)
-        .map(|r| (row_edges[r] + row_edges[r + 1]) / 2.0)
-        .collect();
-
-    debug!(
-        "  row-stripe table accepted: {}x{}, {:.0}% density",
-        num_rows,
-        num_cols,
-        content_ratio * 100.0
-    );
-
-    Some(Table {
-        columns: column_centers,
-        rows: row_centers,
+    finalize_rect_backed_table(
         cells,
         item_indices,
-    })
+        &col_edges,
+        &row_edges,
+        group_rects.len(),
+        "row-stripe ",
+    )
 }
 
 /// Cluster text item X positions into column centers with a given minimum threshold.
@@ -771,20 +948,21 @@ fn cluster_x_positions(items: &[(usize, &TextItem)], min_threshold: f32) -> Vec<
     let cluster_threshold = avg_gap.clamp(min_threshold, 50.0);
 
     let mut columns = Vec::new();
-    let mut cluster_items: Vec<f32> = vec![x_positions[0]];
+    let mut cluster_sum = x_positions[0];
+    let mut cluster_count = 1usize;
 
     for &x in &x_positions[1..] {
-        let cluster_center = cluster_items.iter().sum::<f32>() / cluster_items.len() as f32;
+        let cluster_center = cluster_sum / cluster_count as f32;
         if x - cluster_center > cluster_threshold {
             columns.push(cluster_center);
-            cluster_items = vec![x];
+            cluster_sum = x;
+            cluster_count = 1;
         } else {
-            cluster_items.push(x);
+            cluster_sum += x;
+            cluster_count += 1;
         }
     }
-    if !cluster_items.is_empty() {
-        columns.push(cluster_items.iter().sum::<f32>() / cluster_items.len() as f32);
-    }
+    columns.push(cluster_sum / cluster_count as f32);
 
     // Filter: each column needs multiple items
     let min_items_per_col = (items.len() / columns.len().max(1) / 4).max(2);

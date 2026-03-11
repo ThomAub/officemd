@@ -17,11 +17,371 @@ pub use convert::to_markdown_from_lines;
 use std::collections::{HashMap, HashSet};
 
 use crate::pdf_inspector::extractor::group_into_lines;
-use crate::pdf_inspector::types::TextItem;
+use crate::pdf_inspector::types::{TextItem, TextLine};
 
+use crate::pdf_inspector::tables::Table;
 use analysis::calculate_font_stats_from_items;
 use classify::{format_list_item, is_code_like, is_list_item};
 use convert::{merge_continuation_tables, to_markdown_from_lines_with_tables_and_images};
+
+fn item_in_hint_region(
+    item: &TextItem,
+    hint: &crate::pdf_inspector::tables::RectHintRegion,
+    padding: f32,
+) -> bool {
+    item.x + item.width >= hint.x_left - padding
+        && item.x <= hint.x_right + padding
+        && item.y >= hint.y_bottom - padding
+        && item.y <= hint.y_top + padding
+}
+
+fn merge_hint_regions_into_bands(
+    hints: &[crate::pdf_inspector::tables::RectHintRegion],
+) -> Vec<crate::pdf_inspector::tables::RectHintRegion> {
+    if hints.len() < 2 {
+        return hints.to_vec();
+    }
+
+    let mut sorted = hints.to_vec();
+    sorted.sort_by(|a, b| {
+        b.y_top
+            .partial_cmp(&a.y_top)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut merged: Vec<crate::pdf_inspector::tables::RectHintRegion> = Vec::new();
+    for hint in sorted {
+        let vertical_overlap =
+            |a: &crate::pdf_inspector::tables::RectHintRegion,
+             b: &crate::pdf_inspector::tables::RectHintRegion| {
+                (a.y_top.min(b.y_top) - a.y_bottom.max(b.y_bottom)).max(0.0)
+            };
+        let horizontal_gap =
+            |a: &crate::pdf_inspector::tables::RectHintRegion,
+             b: &crate::pdf_inspector::tables::RectHintRegion| {
+                if a.x_right < b.x_left {
+                    b.x_left - a.x_right
+                } else if b.x_right < a.x_left {
+                    a.x_left - b.x_right
+                } else {
+                    0.0
+                }
+            };
+
+        let should_merge = merged.last_mut().is_some_and(|prev| {
+            let overlap = vertical_overlap(prev, &hint);
+            let min_height = (prev.y_top - prev.y_bottom)
+                .min(hint.y_top - hint.y_bottom)
+                .max(1.0);
+            let same_band = overlap >= min_height * 0.45
+                || (prev.y_bottom - hint.y_top).abs() <= 14.0
+                || (hint.y_bottom - prev.y_top).abs() <= 14.0;
+            same_band && horizontal_gap(prev, &hint) <= 60.0
+        });
+
+        if should_merge {
+            let prev = merged.last_mut().unwrap();
+            prev.x_left = prev.x_left.min(hint.x_left);
+            prev.x_right = prev.x_right.max(hint.x_right);
+            prev.y_bottom = prev.y_bottom.min(hint.y_bottom);
+            prev.y_top = prev.y_top.max(hint.y_top);
+            prev.rect_count += hint.rect_count;
+        } else {
+            merged.push(hint);
+        }
+    }
+
+    merged
+}
+
+fn is_probably_rotated_or_decorative(item: &TextItem) -> bool {
+    if item.is_rotated {
+        return true;
+    }
+
+    let trimmed = item.text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let char_count = trimmed.chars().count();
+    let alpha_count = trimmed.chars().filter(|c| c.is_alphabetic()).count();
+    let width = item.width.abs();
+    let font_size = item.font_size.max(1.0);
+    let tiny_width = width <= font_size * 0.35;
+
+    if char_count >= 2 {
+        return tiny_width && alpha_count > 0;
+    }
+
+    char_count == 1 && tiny_width && trimmed.chars().all(|c| c.is_ascii_uppercase())
+}
+
+fn is_probably_table_margin_noise(item: &TextItem) -> bool {
+    let trimmed = item.text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    if trimmed == "SPNPRNRORR" {
+        return true;
+    }
+
+    if trimmed.chars().count() == 1 && trimmed.chars().all(|c| c.is_ascii_uppercase()) {
+        return item.font_size >= 16.0 || item.x < 120.0;
+    }
+
+    trimmed.len() >= 8
+        && trimmed.chars().all(|c| c.is_ascii_uppercase())
+        && !trimmed.contains(' ')
+        && item.x < 220.0
+}
+
+fn salvage_boxed_section_table(page_items: &[TextItem], subset_indices: &[usize]) -> Option<Table> {
+    let subset: Vec<(usize, &TextItem)> = subset_indices
+        .iter()
+        .copied()
+        .filter_map(|idx| {
+            let item = page_items.get(idx)?;
+            (!is_probably_rotated_or_decorative(item)
+                && !is_probably_table_margin_noise(item)
+                && !item.text.trim().is_empty())
+            .then_some((idx, item))
+        })
+        .collect();
+
+    if subset.len() < 6 {
+        return None;
+    }
+
+    let mut sorted_by_y = subset.clone();
+    sorted_by_y.sort_by(|a, b| {
+        b.1.y
+            .partial_cmp(&a.1.y)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                a.1.x
+                    .partial_cmp(&b.1.x)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    });
+
+    let row_tolerance = sorted_by_y
+        .iter()
+        .map(|(_, item)| item.font_size)
+        .fold(7.0f32, |acc, size| acc.max(size * 0.85))
+        .clamp(7.0, 14.0);
+
+    let mut row_groups: Vec<Vec<(usize, &TextItem)>> = Vec::new();
+    let mut row_centers: Vec<f32> = Vec::new();
+    for (idx, item) in sorted_by_y {
+        if let Some((row_idx, _)) = row_centers
+            .iter()
+            .enumerate()
+            .find(|(_, center)| (item.y - **center).abs() <= row_tolerance)
+        {
+            let group = &mut row_groups[row_idx];
+            let count = group.len() as f32;
+            row_centers[row_idx] = ((row_centers[row_idx] * count) + item.y) / (count + 1.0);
+            group.push((idx, item));
+        } else {
+            row_centers.push(item.y);
+            row_groups.push(vec![(idx, item)]);
+        }
+    }
+
+    if row_groups.len() < 2 {
+        return None;
+    }
+
+    for group in &mut row_groups {
+        group.sort_by(|a, b| {
+            a.1.x
+                .partial_cmp(&b.1.x)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    let mut x_positions: Vec<f32> = subset.iter().map(|(_, item)| item.x).collect();
+    x_positions.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let x_range =
+        x_positions.last().copied().unwrap_or(0.0) - x_positions.first().copied().unwrap_or(0.0);
+    let avg_gap = if x_positions.len() > 1 {
+        x_range / (x_positions.len() - 1) as f32
+    } else {
+        40.0
+    };
+    let col_tolerance = avg_gap.clamp(24.0, 70.0);
+
+    let mut col_centers: Vec<f32> = Vec::new();
+    let mut col_counts: Vec<usize> = Vec::new();
+    for x in x_positions {
+        if let Some((col_idx, _)) = col_centers
+            .iter()
+            .enumerate()
+            .find(|(_, center)| (x - **center).abs() <= col_tolerance)
+        {
+            let count = col_counts[col_idx] as f32;
+            col_centers[col_idx] = ((col_centers[col_idx] * count) + x) / (count + 1.0);
+            col_counts[col_idx] += 1;
+        } else {
+            col_centers.push(x);
+            col_counts.push(1);
+        }
+    }
+
+    let min_items_per_col = (row_groups.len() / 3).max(2);
+    let mut filtered_cols: Vec<f32> = col_centers
+        .into_iter()
+        .zip(col_counts)
+        .filter_map(|(center, count)| (count >= min_items_per_col).then_some(center))
+        .collect();
+    filtered_cols.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    if filtered_cols.len() < 2 || filtered_cols.len() > 6 {
+        return None;
+    }
+
+    let mut cells = vec![vec![String::new(); filtered_cols.len()]; row_groups.len()];
+    let mut item_indices = Vec::new();
+    let assignment_tolerance = col_tolerance * 1.35;
+
+    for (row_idx, group) in row_groups.iter().enumerate() {
+        for (item_idx, item) in group {
+            let Some((col_idx, _)) = filtered_cols.iter().enumerate().min_by(|a, b| {
+                (item.x - *a.1)
+                    .abs()
+                    .partial_cmp(&(item.x - *b.1).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }) else {
+                continue;
+            };
+
+            if (item.x - filtered_cols[col_idx]).abs() > assignment_tolerance {
+                continue;
+            }
+
+            let cell = &mut cells[row_idx][col_idx];
+            if !cell.is_empty() {
+                cell.push(' ');
+            }
+            cell.push_str(item.text.trim());
+            item_indices.push(*item_idx);
+        }
+    }
+
+    item_indices.sort_unstable();
+    item_indices.dedup();
+
+    let non_empty_rows = cells
+        .iter()
+        .filter(|row| row.iter().any(|cell| !cell.trim().is_empty()))
+        .count();
+    if non_empty_rows < 2 {
+        return None;
+    }
+
+    let non_empty_cols = (0..filtered_cols.len())
+        .filter(|&col| {
+            cells
+                .iter()
+                .any(|row| row.get(col).is_some_and(|cell| !cell.trim().is_empty()))
+        })
+        .count();
+    if non_empty_cols < 2 {
+        return None;
+    }
+
+    let dense_rows = cells
+        .iter()
+        .filter(|row| row.iter().filter(|cell| !cell.trim().is_empty()).count() >= 2)
+        .count();
+    if dense_rows < 2 {
+        return None;
+    }
+
+    let alpha_rows = cells
+        .iter()
+        .filter(|row| {
+            row.first()
+                .is_some_and(|cell| cell.chars().any(|c| c.is_alphabetic()))
+                || row
+                    .iter()
+                    .any(|cell| cell.chars().filter(|c| c.is_alphabetic()).count() >= 6)
+        })
+        .count();
+    if alpha_rows < 2 {
+        return None;
+    }
+
+    Some(Table {
+        columns: filtered_cols,
+        rows: row_centers,
+        cells,
+        item_indices,
+    })
+}
+
+#[derive(Default)]
+struct PageContext {
+    has_tabular_regions: bool,
+    tables: Vec<(f32, String)>,
+}
+
+fn is_numeric_tick_token(token: &str) -> bool {
+    let trimmed = token.trim_matches(|c: char| matches!(c, ',' | ';' | ':' | '.'));
+    let trimmed = trimmed.strip_prefix('-').unwrap_or(trimmed);
+    !trimmed.is_empty() && trimmed.chars().all(|c| c.is_ascii_digit())
+}
+
+fn is_year_marker_token(token: &str) -> bool {
+    let trimmed = token.trim_matches(|c: char| matches!(c, ',' | ';' | ':' | '.'));
+    trimmed.eq_ignore_ascii_case("exercice") || matches!(trimmed, "N" | "N-1" | "N-2" | "N-3" | "E")
+}
+
+fn is_probably_chart_noise_line(line: &TextLine) -> bool {
+    let text = line.text();
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    if tokens.len() < 8 {
+        return false;
+    }
+
+    let numeric_tokens = tokens.iter().filter(|t| is_numeric_tick_token(t)).count();
+    let year_marker_tokens = tokens.iter().filter(|t| is_year_marker_token(t)).count();
+    let alpha_tokens = tokens
+        .iter()
+        .filter(|token| token.chars().any(|c| c.is_alphabetic()))
+        .count();
+
+    (year_marker_tokens >= 2 && numeric_tokens >= 8) || (numeric_tokens >= 14 && alpha_tokens <= 6)
+}
+
+fn is_probably_chart_legend_line(line: &TextLine) -> bool {
+    let text = line.text();
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    if tokens.len() < 5 {
+        return false;
+    }
+
+    let numeric_tokens = tokens.iter().filter(|t| is_numeric_tick_token(t)).count();
+    if numeric_tokens > 0 {
+        return false;
+    }
+
+    let alpha_tokens = tokens
+        .iter()
+        .filter(|token| token.chars().any(|c| c.is_alphabetic()))
+        .count();
+    let short_or_abbrev_tokens = tokens
+        .iter()
+        .filter(|token| {
+            let cleaned: String = token.chars().filter(|c| c.is_alphabetic()).collect();
+            !cleaned.is_empty() && (cleaned.chars().count() <= 5 || token.contains('.'))
+        })
+        .count();
+
+    alpha_tokens >= 5 && short_or_abbrev_tokens >= alpha_tokens.saturating_sub(1)
+}
 
 /// Options for markdown conversion
 #[derive(Debug, Clone)]
@@ -178,7 +538,7 @@ pub fn to_markdown_from_items_with_rects(
 
     // Detect tables on each page
     let mut table_items: HashSet<usize> = HashSet::new();
-    let mut page_tables: HashMap<u32, Vec<(f32, String)>> = HashMap::new();
+    let mut page_contexts: HashMap<u32, PageContext> = HashMap::new();
 
     // Store images by page and Y position for insertion
     let mut page_images: HashMap<u32, Vec<(f32, String)>> = HashMap::new();
@@ -211,13 +571,18 @@ pub fn to_markdown_from_items_with_rects(
 
     for page in pages {
         let group = page_groups.get(&page).unwrap();
+        let page_ctx = page_contexts.entry(page).or_default();
         let page_items: Vec<TextItem> = group.iter().map(|(_, item)| (*item).clone()).collect();
+        let page_rect_count = rects.iter().filter(|rect| rect.page == page).count();
 
         // Track which local indices are claimed by rect-based tables
         let mut rect_claimed: HashSet<usize> = HashSet::new();
 
         // Try rectangle-based table detection first
         let (rect_tables, hint_regions) = detect_tables_from_rects(&page_items, rects, page);
+        if !rect_tables.is_empty() || !hint_regions.is_empty() || page_rect_count >= 4 {
+            page_ctx.has_tabular_regions = true;
+        }
         for table in &rect_tables {
             for &idx in &table.item_indices {
                 rect_claimed.insert(idx);
@@ -227,78 +592,116 @@ pub fn to_markdown_from_items_with_rects(
             }
             let table_y = table.rows.first().copied().unwrap_or(0.0);
             let table_md = table_to_markdown(table);
-            page_tables
-                .entry(page)
-                .or_default()
-                .push((table_y, table_md));
+            page_ctx.tables.push((table_y, table_md));
         }
 
-        // Helper: run heuristic on a subset of items, remapping indices back to page-space
+        // Helper: run heuristic on a subset of page-local indices, remapping indices back to page-space
         let mut run_heuristic =
-            |subset_items: &[TextItem], index_map: &[usize], min_items: usize| {
-                if subset_items.len() < min_items {
-                    return;
+            |subset_indices: &[usize], min_items: usize| -> Vec<(Table, Vec<usize>)> {
+                let (filtered_items, filtered_map): (Vec<TextItem>, Vec<usize>) = subset_indices
+                    .iter()
+                    .copied()
+                    .filter_map(|page_idx| {
+                        let item = page_items.get(page_idx)?;
+                        (!is_probably_rotated_or_decorative(item)).then(|| (item.clone(), page_idx))
+                    })
+                    .unzip();
+
+                if filtered_items.len() < min_items {
+                    return Vec::new();
                 }
-                let tables = detect_tables(subset_items, base_size, false);
-                for table in tables {
-                    for &idx in &table.item_indices {
-                        if let Some(&page_idx) = index_map.get(idx) {
-                            if let Some(&(global_idx, _)) = group.get(page_idx) {
-                                table_items.insert(global_idx);
-                            }
-                        }
-                    }
-                    let table_y = table.rows.first().copied().unwrap_or(0.0);
-                    let table_md = table_to_markdown(&table);
-                    page_tables
-                        .entry(page)
-                        .or_default()
-                        .push((table_y, table_md));
-                }
+
+                detect_tables(&filtered_items, base_size, false)
+                    .into_iter()
+                    .map(|table| {
+                        let mut claimed_page_indices: Vec<usize> = table
+                            .item_indices
+                            .iter()
+                            .filter_map(|&idx| filtered_map.get(idx).copied())
+                            .collect();
+                        claimed_page_indices.sort_unstable();
+                        claimed_page_indices.dedup();
+                        (table, claimed_page_indices)
+                    })
+                    .collect()
             };
 
-        // Run heuristic detection on unclaimed items
-        if rect_claimed.is_empty() && hint_regions.is_empty() {
-            // No rect tables or hints — run heuristic on all items
-            let identity_map: Vec<usize> = (0..page_items.len()).collect();
-            run_heuristic(&page_items, &identity_map, 6);
-        } else if rect_claimed.is_empty() && !hint_regions.is_empty() {
-            // No rect tables but hint regions exist — run heuristic separately
-            // on items inside each hint region and on items outside all hints.
-            // This prevents graph labels from being merged into nearby tables.
-            let padding = 15.0; // include header lines slightly above rects
-            for hint in &hint_regions {
-                let (inside_items, inside_map): (Vec<TextItem>, Vec<usize>) = page_items
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, item)| {
-                        item.y >= hint.y_bottom - padding && item.y <= hint.y_top + padding
-                    })
-                    .map(|(idx, item)| (item.clone(), idx))
-                    .unzip();
-                run_heuristic(&inside_items, &inside_map, 6);
-                // Mark hint-region items as claimed so they aren't re-processed
-                for &page_idx in &inside_map {
-                    rect_claimed.insert(page_idx);
+        // Run hint-scoped heuristics even when some rect tables were already
+        // found on the page. Pages like boxed financial dashboards often have
+        // one cluster that forms a valid rect-backed table and adjacent boxed
+        // sections that only survive as hint regions.
+        let hint_padding = 15.0;
+        for hint in merge_hint_regions_into_bands(&hint_regions) {
+            let inside_indices: Vec<usize> = page_items
+                .iter()
+                .enumerate()
+                .filter(|(idx, item)| {
+                    !rect_claimed.contains(idx) && item_in_hint_region(item, &hint, hint_padding)
+                })
+                .map(|(idx, _)| idx)
+                .collect();
+            let claimed_tables = run_heuristic(&inside_indices, 6);
+            if claimed_tables.is_empty() {
+                if let Some(table) = salvage_boxed_section_table(&page_items, &inside_indices) {
+                    for &page_idx in &table.item_indices {
+                        rect_claimed.insert(page_idx);
+                        if let Some(&(global_idx, _)) = group.get(page_idx) {
+                            table_items.insert(global_idx);
+                        }
+                    }
+                    let table_y = table.rows.first().copied().unwrap_or(hint.y_top);
+                    let table_md = table_to_markdown(&table);
+                    if !table_md.trim().is_empty() {
+                        page_ctx.tables.push((table_y, table_md));
+                    }
+                }
+            } else {
+                for (table, claimed) in claimed_tables {
+                    for page_idx in claimed {
+                        rect_claimed.insert(page_idx);
+                        if let Some(&(global_idx, _)) = group.get(page_idx) {
+                            table_items.insert(global_idx);
+                        }
+                    }
+                    let table_y = table.rows.first().copied().unwrap_or(hint.y_top);
+                    let table_md = table_to_markdown(&table);
+                    if !table_md.trim().is_empty() {
+                        page_ctx.tables.push((table_y, table_md));
+                    }
                 }
             }
-            // Run heuristic on remaining items outside all hint regions
-            let (outside_items, outside_map): (Vec<TextItem>, Vec<usize>) = page_items
+        }
+
+        if rect_tables.is_empty() {
+            // Only run the broad page-wide fallback when nothing rect-backed was
+            // recovered. Otherwise it tends to manufacture noisy tables from
+            // leftover chart labels and headings.
+            let unclaimed_indices: Vec<usize> = page_items
                 .iter()
                 .enumerate()
                 .filter(|(idx, _)| !rect_claimed.contains(idx))
-                .map(|(idx, item)| (item.clone(), idx))
-                .unzip();
-            run_heuristic(&outside_items, &outside_map, 6);
-        } else {
-            // Rect tables found — run heuristic on unclaimed items
-            let (unclaimed_items, unclaimed_map): (Vec<TextItem>, Vec<usize>) = page_items
-                .iter()
-                .enumerate()
-                .filter(|(idx, _)| !rect_claimed.contains(idx))
-                .map(|(idx, item)| (item.clone(), idx))
-                .unzip();
-            run_heuristic(&unclaimed_items, &unclaimed_map, 6);
+                .map(|(idx, _)| idx)
+                .collect();
+            for (table, claimed) in run_heuristic(&unclaimed_indices, 6) {
+                for page_idx in claimed {
+                    rect_claimed.insert(page_idx);
+                    if let Some(&(global_idx, _)) = group.get(page_idx) {
+                        table_items.insert(global_idx);
+                    }
+                }
+                let table_y = table.rows.first().copied().unwrap_or(0.0);
+                let table_md = table_to_markdown(&table);
+                if !table_md.trim().is_empty() {
+                    page_ctx.tables.push((table_y, table_md));
+                }
+            }
+        }
+    }
+
+    let mut page_tables: HashMap<u32, Vec<(f32, String)>> = HashMap::new();
+    for (&page, ctx) in &page_contexts {
+        if !ctx.tables.is_empty() {
+            page_tables.insert(page, ctx.tables.clone());
         }
     }
 
@@ -306,7 +709,18 @@ pub fn to_markdown_from_items_with_rects(
     let non_table_items: Vec<TextItem> = text_items
         .into_iter()
         .enumerate()
-        .filter(|(idx, _)| !table_items.contains(idx))
+        .filter(|(idx, item)| {
+            if table_items.contains(idx) {
+                return false;
+            }
+
+            let page_has_tabular_regions = page_contexts
+                .get(&item.page)
+                .is_some_and(|ctx| ctx.has_tabular_regions);
+            !(page_has_tabular_regions
+                && (is_probably_rotated_or_decorative(item)
+                    || is_probably_table_margin_noise(item)))
+        })
         .map(|(_, item)| item)
         .collect();
 
@@ -323,7 +737,10 @@ pub fn to_markdown_from_items_with_rects(
     // Merge continuation tables across page breaks, but only for table-only pages
     merge_continuation_tables(&mut page_tables, &table_only_pages);
 
-    let lines = group_into_lines(non_table_items);
+    let lines: Vec<TextLine> = group_into_lines(non_table_items)
+        .into_iter()
+        .filter(|line| !is_probably_chart_noise_line(line) && !is_probably_chart_legend_line(line))
+        .collect();
 
     // Convert to markdown, inserting tables and images at appropriate positions
     to_markdown_from_lines_with_tables_and_images(lines, options, page_tables, page_images)
@@ -396,5 +813,29 @@ mod tests {
         let md = to_markdown(text, MarkdownOptions::default());
         assert!(md.contains("- First item"));
         assert!(md.contains("- Second item"));
+    }
+
+    #[test]
+    fn test_chart_noise_line_is_detected() {
+        let line = TextLine {
+            items: vec![TextItem {
+                text: "Exercice N-2 34 000 N-1 32 000 Exercice N 30 000 28 000 26 000 24 000 22 000 20 000".into(),
+                x: 0.0,
+                y: 100.0,
+                width: 400.0,
+                height: 12.0,
+                font: "F1".into(),
+                font_size: 12.0,
+                page: 1,
+                is_rotated: false,
+                is_bold: false,
+                is_italic: false,
+                item_type: crate::pdf_inspector::types::ItemType::Text,
+            }],
+            y: 100.0,
+            page: 1,
+        };
+
+        assert!(is_probably_chart_noise_line(&line));
     }
 }

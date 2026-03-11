@@ -57,6 +57,12 @@ pub(crate) fn merge_adjacent_items(items: &[TextItem]) -> (Vec<TextItem>, Vec<Ve
         let mut i = 0;
         while i < group.len() {
             let (first_idx, first_item) = group[i];
+            if first_item.is_rotated {
+                merged_items.push(first_item.clone());
+                index_map.push(vec![first_idx]);
+                i += 1;
+                continue;
+            }
             let mut text = first_item.text.clone();
             let mut end_x = first_item.x + first_item.width;
             let mut indices = vec![first_idx];
@@ -69,6 +75,9 @@ pub(crate) fn merge_adjacent_items(items: &[TextItem]) -> (Vec<TextItem>, Vec<Ve
                 // Must be similar font size (within 20%)
                 if (next_item.font_size - first_item.font_size).abs() > first_item.font_size * 0.20
                 {
+                    break;
+                }
+                if next_item.is_rotated {
                     break;
                 }
 
@@ -102,6 +111,7 @@ pub(crate) fn merge_adjacent_items(items: &[TextItem]) -> (Vec<TextItem>, Vec<Ve
                 font: first_item.font.clone(),
                 font_size: first_item.font_size,
                 page: first_item.page,
+                is_rotated: false,
                 is_bold: first_item.is_bold,
                 is_italic: first_item.is_italic,
                 item_type: first_item.item_type.clone(),
