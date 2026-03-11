@@ -1,0 +1,19 @@
+[package]
+name = "officemd_snapshot_tests"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+serde_json = "1"
+
+[dev-dependencies]
+officemd_docx = { path = "../../officemd_docx" }
+officemd_xlsx = { path = "../../officemd_xlsx" }
+officemd_csv = { path = "../../officemd_csv" }
+officemd_pptx = { path = "../../officemd_pptx" }
+officemd_pdf = { path = "../../officemd_pdf" }
+officemd_markdown = { path = "../../officemd_markdown" }
+officemd_core = { path = "../../officemd_core" }
+insta.workspace = true
+serde_json = "1"

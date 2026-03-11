@@ -1,0 +1,13 @@
+---
+source: crates/tests/rust_snapshots/tests/pdf_inspect.rs
+expression: "inspect_json(fixtures::OCR_GRAPH_SCANNED_PDF)"
+---
+{
+  "classification": "Scanned",
+  "confidence": 0.949999988079071,
+  "has_encoding_issues": false,
+  "page_count": 1,
+  "pages_needing_ocr": [
+    1
+  ]
+}

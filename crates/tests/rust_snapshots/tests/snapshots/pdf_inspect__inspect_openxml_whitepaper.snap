@@ -1,0 +1,11 @@
+---
+source: crates/tests/rust_snapshots/tests/pdf_inspect.rs
+expression: "inspect_json(fixtures::OPENXML_WHITEPAPER_PDF)"
+---
+{
+  "classification": "TextBased",
+  "confidence": 1.0,
+  "has_encoding_issues": false,
+  "page_count": 14,
+  "pages_needing_ocr": []
+}

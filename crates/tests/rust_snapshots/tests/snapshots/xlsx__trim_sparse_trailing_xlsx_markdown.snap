@@ -1,0 +1,12 @@
+---
+source: crates/tests/rust_snapshots/tests/xlsx.rs
+expression: normalize_markdown(&md)
+---
+## Sheet: Sparse
+
+| H1 | H2 | H3 |
+| --- | --- | --- |
+| 10 | 20 | 30 |
+| 40 | 50 | 60 |
+|  |  |  |
+| Footer |  |  |

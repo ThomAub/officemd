@@ -1,0 +1,7 @@
+---
+source: crates/tests/rust_snapshots/tests/pdf.rs
+expression: normalize_markdown(&md)
+---
+## Page: 1
+
+Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word

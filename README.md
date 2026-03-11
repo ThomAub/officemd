@@ -109,17 +109,6 @@ console.log(extractIrJson(content, "docx"));
 console.log(doclingFromBytes(content, "docx"));
 ```
 
-### Rust
-
-OfficeMD is a workspace of focused crates. Use them directly:
-
-```toml
-[dependencies]
-officemd_docx = "0.1"
-officemd_markdown = "0.1"
-officemd_core = "0.1"
-```
-
 ## Supported Formats
 
 | Format | Extension | Markdown | JSON IR | Docling |
@@ -142,6 +131,7 @@ For JS and Python tests, see [examples/README.md](examples/README.md).
 ## Acknowledgements
 
 PDF extraction vendors [pdf-inspector](https://github.com/firecrawl/pdf-inspector) by Firecrawl (MIT).
+PDF primitives [lopdf](https://github.com/J-F-Liu/lopdf) by J-F-Liu (MIT).
 
 ## License
 

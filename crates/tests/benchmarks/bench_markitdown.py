@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["markitdown[all]>=0.1.0"]
+# dependencies = ["markitdown[all]==0.1.5"]
 # ///
 """Benchmark markitdown markdown extraction.
 

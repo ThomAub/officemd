@@ -1,0 +1,4 @@
+---
+source: crates/tests/rust_snapshots/tests/pdf.rs
+expression: normalize_markdown(&md)
+---

@@ -1,0 +1,8 @@
+---
+source: crates/tests/rust_snapshots/tests/xlsx.rs
+expression: normalize_markdown(&md)
+---
+## Sheet: Blank
+
+|  |
+| --- |

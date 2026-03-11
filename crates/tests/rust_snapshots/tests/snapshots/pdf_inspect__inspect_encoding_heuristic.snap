@@ -1,0 +1,11 @@
+---
+source: crates/tests/rust_snapshots/tests/pdf_inspect.rs
+expression: "inspect_json(fixtures::ENCODING_HEURISTIC_PDF)"
+---
+{
+  "classification": "TextBased",
+  "confidence": 0.5,
+  "has_encoding_issues": true,
+  "page_count": 1,
+  "pages_needing_ocr": []
+}

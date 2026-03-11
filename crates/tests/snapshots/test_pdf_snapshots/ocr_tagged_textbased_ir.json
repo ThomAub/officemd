@@ -1,0 +1,37 @@
+{
+  "kind": "Pdf",
+  "pdf": {
+    "diagnostics": {
+      "classification": "TextBased",
+      "confidence": 0.5,
+      "has_encoding_issues": false,
+      "page_count": 2,
+      "pages_needing_ocr": []
+    },
+    "pages": [
+      {
+        "markdown": "**Table of Contents**\n\nHeading ... 1\nPage 2 Heading ... 2\n\n# Heading\n\nDocument text.\n\n*Table 1: Table caption*\n\nColumn 1 Column 2 Cell 1 Cell 2 Cell 3 Cell 4",
+        "number": 1
+      },
+      {
+        "markdown": "# Page 2 Heading\n\nBody text.",
+        "number": 2
+      }
+    ]
+  },
+  "properties": {
+    "app": {},
+    "core": {
+      "classification": "TextBased",
+      "confidence": "0.5000",
+      "has_encoding_issues": "false",
+      "page_count": "2",
+      "pages_needing_ocr": "",
+      "title": "Tagged PDF Demo"
+    },
+    "custom": {}
+  },
+  "sections": [],
+  "sheets": [],
+  "slides": []
+}

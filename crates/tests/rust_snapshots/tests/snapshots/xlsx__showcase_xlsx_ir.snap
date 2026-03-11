@@ -1,0 +1,24 @@
+---
+source: crates/tests/rust_snapshots/tests/xlsx.rs
+expression: canonical_json(&json)
+---
+{
+  "kind": "Xlsx",
+  "properties": null,
+  "sections": [],
+  "sheets": [
+    {
+      "formulas": [],
+      "hyperlinks": [],
+      "name": "Sales",
+      "tables": []
+    },
+    {
+      "formulas": [],
+      "hyperlinks": [],
+      "name": "Summary",
+      "tables": []
+    }
+  ],
+  "slides": []
+}

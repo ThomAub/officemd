@@ -1,0 +1,72 @@
+{
+  "body": {
+    "children": [
+      {
+        "$ref": "#/texts/0"
+      },
+      {
+        "$ref": "#/texts/1"
+      }
+    ],
+    "content_layer": "body",
+    "label": "unspecified",
+    "name": "_root_",
+    "self_ref": "#/body"
+  },
+  "furniture": {
+    "children": [],
+    "content_layer": "furniture",
+    "label": "unspecified",
+    "name": "_root_",
+    "self_ref": "#/furniture"
+  },
+  "groups": [],
+  "key_value_items": [],
+  "name": "document",
+  "pages": {
+    "1": {
+      "page_no": 1,
+      "size": {
+        "height": 0.0,
+        "width": 0.0
+      }
+    },
+    "2": {
+      "page_no": 2,
+      "size": {
+        "height": 0.0,
+        "width": 0.0
+      }
+    }
+  },
+  "pictures": [],
+  "schema_name": "DoclingDocument",
+  "tables": [],
+  "texts": [
+    {
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "orig": "**Table of Contents**\n\nHeading ... 1\nPage 2 Heading ... 2\n\n# Heading\n\nDocument text.\n\n*Table 1: Table caption*\n\nColumn 1 Column 2 Cell 1 Cell 2 Cell 3 Cell 4",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "prov": [],
+      "self_ref": "#/texts/0",
+      "text": "**Table of Contents**\n\nHeading ... 1\nPage 2 Heading ... 2\n\n# Heading\n\nDocument text.\n\n*Table 1: Table caption*\n\nColumn 1 Column 2 Cell 1 Cell 2 Cell 3 Cell 4"
+    },
+    {
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "orig": "# Page 2 Heading\n\nBody text.",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "prov": [],
+      "self_ref": "#/texts/1",
+      "text": "# Page 2 Heading\n\nBody text."
+    }
+  ],
+  "version": "1.9.0"
+}

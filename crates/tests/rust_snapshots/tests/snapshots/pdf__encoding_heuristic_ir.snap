@@ -1,0 +1,36 @@
+---
+source: crates/tests/rust_snapshots/tests/pdf.rs
+expression: canonical_json(&json)
+---
+{
+  "kind": "Pdf",
+  "pdf": {
+    "diagnostics": {
+      "classification": "TextBased",
+      "confidence": 0.5,
+      "has_encoding_issues": true,
+      "page_count": 1,
+      "pages_needing_ocr": []
+    },
+    "pages": [
+      {
+        "markdown": "Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word$Word",
+        "number": 1
+      }
+    ]
+  },
+  "properties": {
+    "app": {},
+    "core": {
+      "classification": "TextBased",
+      "confidence": "0.5000",
+      "has_encoding_issues": "true",
+      "page_count": "1",
+      "pages_needing_ocr": ""
+    },
+    "custom": {}
+  },
+  "sections": [],
+  "sheets": [],
+  "slides": []
+}

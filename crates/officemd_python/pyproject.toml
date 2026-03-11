@@ -44,8 +44,8 @@ dev = [
     "ty>=0.0.1a1",
 ]
 bench = [
-    "markitdown[all]>=0.1.0",
-    "docling>=2.0.0",
+    "markitdown[all]==0.1.5",
+    "docling==2.78.0",
 ]
 
 [tool.ruff]

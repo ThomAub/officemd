@@ -1,0 +1,34 @@
+---
+source: crates/tests/rust_snapshots/tests/pdf.rs
+expression: canonical_json(&json)
+---
+{
+  "kind": "Pdf",
+  "pdf": {
+    "diagnostics": {
+      "classification": "Scanned",
+      "confidence": 0.95,
+      "has_encoding_issues": false,
+      "page_count": 1,
+      "pages_needing_ocr": [
+        1
+      ]
+    },
+    "pages": []
+  },
+  "properties": {
+    "app": {},
+    "core": {
+      "classification": "Scanned",
+      "confidence": "0.9500",
+      "has_encoding_issues": "false",
+      "page_count": "1",
+      "pages_needing_ocr": "1",
+      "title": "Example graph"
+    },
+    "custom": {}
+  },
+  "sections": [],
+  "sheets": [],
+  "slides": []
+}

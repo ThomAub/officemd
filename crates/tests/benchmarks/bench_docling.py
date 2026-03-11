@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["docling>=2.0.0"]
+# dependencies = ["docling==2.78.0"]
 # ///
 """Benchmark docling markdown extraction.
 

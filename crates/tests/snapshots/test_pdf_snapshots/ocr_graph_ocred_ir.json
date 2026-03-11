@@ -1,0 +1,28 @@
+{
+  "kind": "Pdf",
+  "pdf": {
+    "diagnostics": {
+      "classification": "TextBased",
+      "confidence": 1.0,
+      "has_encoding_issues": false,
+      "page_count": 1,
+      "pages_needing_ocr": []
+    },
+    "pages": []
+  },
+  "properties": {
+    "app": {},
+    "core": {
+      "classification": "TextBased",
+      "confidence": "1.0000",
+      "has_encoding_issues": "false",
+      "page_count": "1",
+      "pages_needing_ocr": "",
+      "title": "Example graph"
+    },
+    "custom": {}
+  },
+  "sections": [],
+  "sheets": [],
+  "slides": []
+}

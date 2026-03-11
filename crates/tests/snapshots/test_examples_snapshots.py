@@ -122,3 +122,114 @@ def test_showcase_pptx_markdown_with_properties_snapshot(file_regression) -> Non
         extension=".md",
         basename="showcase_pptx_markdown_with_properties",
     )
+
+
+# ---------------------------------------------------------------------------
+# showcase_02.docx
+# ---------------------------------------------------------------------------
+
+
+def test_showcase_02_docx_ir_snapshot(file_regression) -> None:
+    content = _read_fixture("showcase_02.docx")
+    payload = extract_ir_json(content, format="docx")
+    file_regression.check(
+        _canonical_json(payload), extension=".json", basename="showcase_02_docx_ir"
+    )
+
+
+def test_showcase_02_docx_markdown_snapshot(file_regression) -> None:
+    content = _read_fixture("showcase_02.docx")
+    payload = markdown_from_bytes(content, format="docx")
+    file_regression.check(
+        _canonical_markdown(payload),
+        extension=".md",
+        basename="showcase_02_docx_markdown",
+    )
+
+
+# ---------------------------------------------------------------------------
+# showcase.csv
+# ---------------------------------------------------------------------------
+
+
+def test_showcase_csv_ir_snapshot(file_regression) -> None:
+    content = _read_fixture("showcase.csv")
+    payload = extract_ir_json(content, format="csv")
+    file_regression.check(
+        _canonical_json(payload), extension=".json", basename="showcase_csv_ir"
+    )
+
+
+def test_showcase_csv_markdown_snapshot(file_regression) -> None:
+    content = _read_fixture("showcase.csv")
+    payload = markdown_from_bytes(content, format="csv")
+    file_regression.check(
+        _canonical_markdown(payload),
+        extension=".md",
+        basename="showcase_csv_markdown",
+    )
+
+
+# ---------------------------------------------------------------------------
+# edge-case XLSX fixtures
+# ---------------------------------------------------------------------------
+
+
+def test_trim_sparse_trailing_xlsx_ir_snapshot(file_regression) -> None:
+    content = _read_fixture("trim_sparse_trailing.xlsx")
+    payload = extract_ir_json(content, format="xlsx")
+    file_regression.check(
+        _canonical_json(payload),
+        extension=".json",
+        basename="trim_sparse_trailing_xlsx_ir",
+    )
+
+
+def test_trim_sparse_trailing_xlsx_markdown_snapshot(file_regression) -> None:
+    content = _read_fixture("trim_sparse_trailing.xlsx")
+    payload = markdown_from_bytes(content, format="xlsx")
+    file_regression.check(
+        _canonical_markdown(payload),
+        extension=".md",
+        basename="trim_sparse_trailing_xlsx_markdown",
+    )
+
+
+def test_trim_wide_sparse_xlsx_ir_snapshot(file_regression) -> None:
+    content = _read_fixture("trim_wide_sparse.xlsx")
+    payload = extract_ir_json(content, format="xlsx")
+    file_regression.check(
+        _canonical_json(payload),
+        extension=".json",
+        basename="trim_wide_sparse_xlsx_ir",
+    )
+
+
+def test_trim_wide_sparse_xlsx_markdown_snapshot(file_regression) -> None:
+    content = _read_fixture("trim_wide_sparse.xlsx")
+    payload = markdown_from_bytes(content, format="xlsx")
+    file_regression.check(
+        _canonical_markdown(payload),
+        extension=".md",
+        basename="trim_wide_sparse_xlsx_markdown",
+    )
+
+
+def test_trim_all_empty_xlsx_ir_snapshot(file_regression) -> None:
+    content = _read_fixture("trim_all_empty.xlsx")
+    payload = extract_ir_json(content, format="xlsx")
+    file_regression.check(
+        _canonical_json(payload),
+        extension=".json",
+        basename="trim_all_empty_xlsx_ir",
+    )
+
+
+def test_trim_all_empty_xlsx_markdown_snapshot(file_regression) -> None:
+    content = _read_fixture("trim_all_empty.xlsx")
+    payload = markdown_from_bytes(content, format="xlsx")
+    file_regression.check(
+        _canonical_markdown(payload),
+        extension=".md",
+        basename="trim_all_empty_xlsx_markdown",
+    )

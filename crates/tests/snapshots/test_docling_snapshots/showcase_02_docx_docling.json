@@ -1,0 +1,276 @@
+{
+  "body": {
+    "children": [
+      {
+        "$ref": "#/texts/0"
+      },
+      {
+        "$ref": "#/texts/1"
+      },
+      {
+        "$ref": "#/texts/2"
+      },
+      {
+        "$ref": "#/tables/0"
+      },
+      {
+        "$ref": "#/texts/3"
+      },
+      {
+        "$ref": "#/groups/0"
+      }
+    ],
+    "content_layer": "body",
+    "label": "unspecified",
+    "name": "_root_",
+    "self_ref": "#/body"
+  },
+  "furniture": {
+    "children": [
+      {
+        "$ref": "#/texts/5"
+      },
+      {
+        "$ref": "#/texts/6"
+      }
+    ],
+    "content_layer": "furniture",
+    "label": "unspecified",
+    "name": "_root_",
+    "self_ref": "#/furniture"
+  },
+  "groups": [
+    {
+      "children": [
+        {
+          "$ref": "#/texts/4"
+        }
+      ],
+      "content_layer": "body",
+      "label": "section",
+      "name": "comments",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "self_ref": "#/groups/0"
+    }
+  ],
+  "key_value_items": [],
+  "name": "document",
+  "pages": {},
+  "pictures": [],
+  "schema_name": "DoclingDocument",
+  "tables": [
+    {
+      "children": [],
+      "content_layer": "body",
+      "data": {
+        "num_cols": 3,
+        "num_rows": 3,
+        "table_cells": [
+          {
+            "col_span": 1,
+            "column_header": true,
+            "end_col_offset_idx": 1,
+            "end_row_offset_idx": 1,
+            "row_header": false,
+            "row_section": false,
+            "row_span": 1,
+            "start_col_offset_idx": 0,
+            "start_row_offset_idx": 0,
+            "text": "Region"
+          },
+          {
+            "col_span": 1,
+            "column_header": true,
+            "end_col_offset_idx": 2,
+            "end_row_offset_idx": 1,
+            "row_header": false,
+            "row_section": false,
+            "row_span": 1,
+            "start_col_offset_idx": 1,
+            "start_row_offset_idx": 0,
+            "text": "Revenue"
+          },
+          {
+            "col_span": 1,
+            "column_header": true,
+            "end_col_offset_idx": 3,
+            "end_row_offset_idx": 1,
+            "row_header": false,
+            "row_section": false,
+            "row_span": 1,
+            "start_col_offset_idx": 2,
+            "start_row_offset_idx": 0,
+            "text": "Growth"
+          },
+          {
+            "col_span": 1,
+            "column_header": false,
+            "end_col_offset_idx": 1,
+            "end_row_offset_idx": 2,
+            "row_header": false,
+            "row_section": false,
+            "row_span": 1,
+            "start_col_offset_idx": 0,
+            "start_row_offset_idx": 1,
+            "text": "EMEA"
+          },
+          {
+            "col_span": 1,
+            "column_header": false,
+            "end_col_offset_idx": 2,
+            "end_row_offset_idx": 2,
+            "row_header": false,
+            "row_section": false,
+            "row_span": 1,
+            "start_col_offset_idx": 1,
+            "start_row_offset_idx": 1,
+            "text": "$1300000"
+          },
+          {
+            "col_span": 1,
+            "column_header": false,
+            "end_col_offset_idx": 3,
+            "end_row_offset_idx": 2,
+            "row_header": false,
+            "row_section": false,
+            "row_span": 1,
+            "start_col_offset_idx": 2,
+            "start_row_offset_idx": 1,
+            "text": "12%"
+          },
+          {
+            "col_span": 1,
+            "column_header": false,
+            "end_col_offset_idx": 1,
+            "end_row_offset_idx": 3,
+            "row_header": false,
+            "row_section": false,
+            "row_span": 1,
+            "start_col_offset_idx": 0,
+            "start_row_offset_idx": 2,
+            "text": "NA"
+          },
+          {
+            "col_span": 1,
+            "column_header": false,
+            "end_col_offset_idx": 2,
+            "end_row_offset_idx": 3,
+            "row_header": false,
+            "row_section": false,
+            "row_span": 1,
+            "start_col_offset_idx": 1,
+            "start_row_offset_idx": 2,
+            "text": "$980000"
+          },
+          {
+            "col_span": 1,
+            "column_header": false,
+            "end_col_offset_idx": 3,
+            "end_row_offset_idx": 3,
+            "row_header": false,
+            "row_section": false,
+            "row_span": 1,
+            "start_col_offset_idx": 2,
+            "start_row_offset_idx": 2,
+            "text": "9%"
+          }
+        ]
+      },
+      "label": "table",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "prov": [],
+      "self_ref": "#/tables/0"
+    }
+  ],
+  "texts": [
+    {
+      "children": [],
+      "content_layer": "body",
+      "label": "paragraph",
+      "orig": "Quarterly Operations Summary",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "prov": [],
+      "self_ref": "#/texts/0",
+      "text": "Quarterly Operations Summary"
+    },
+    {
+      "children": [],
+      "content_layer": "body",
+      "label": "paragraph",
+      "orig": "This fixture is used to demo DOCX extraction to IR (Intermediate Representation) and markdown.",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "prov": [],
+      "self_ref": "#/texts/1",
+      "text": "This fixture is used to demo DOCX extraction to IR (Intermediate Representation) and markdown."
+    },
+    {
+      "children": [],
+      "content_layer": "body",
+      "label": "paragraph",
+      "orig": "Please validate this sentence before publishing the report.[^c0]",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "prov": [],
+      "self_ref": "#/texts/2",
+      "text": "Please validate this sentence before publishing the report.[^c0]"
+    },
+    {
+      "children": [],
+      "content_layer": "body",
+      "label": "paragraph",
+      "orig": "End of document. The parser should emit a body section and a header section.",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "prov": [],
+      "self_ref": "#/texts/3",
+      "text": "End of document. The parser should emit a body section and a header section."
+    },
+    {
+      "children": [],
+      "content_layer": "body",
+      "label": "footnote",
+      "orig": "Reviewer: Example DOCX comment captured as markdown footnote.",
+      "parent": {
+        "$ref": "#/groups/0"
+      },
+      "prov": [],
+      "self_ref": "#/texts/4",
+      "text": "Reviewer: Example DOCX comment captured as markdown footnote."
+    },
+    {
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "orig": "OOXML Showcase Header",
+      "parent": {
+        "$ref": "#/furniture"
+      },
+      "prov": [],
+      "self_ref": "#/texts/5",
+      "text": "OOXML Showcase Header"
+    },
+    {
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "orig": "OOXML Showcase Header",
+      "parent": {
+        "$ref": "#/furniture"
+      },
+      "prov": [],
+      "self_ref": "#/texts/6",
+      "text": "OOXML Showcase Header"
+    }
+  ],
+  "version": "1.9.0"
+}
