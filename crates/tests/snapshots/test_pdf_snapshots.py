@@ -28,7 +28,9 @@ def _canonical_json(payload: str) -> str:
     return json.dumps(json.loads(payload), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
-def _canonical_markdown(payload: str) -> str:
+def _canonical_markdown(payload: str | None) -> str:
+    if not payload:
+        return ""
     return payload.replace("\r\n", "\n").rstrip() + "\n"
 
 
