@@ -131,6 +131,7 @@ For JS and Python tests, see [examples/README.md](examples/README.md).
 ## Acknowledgements
 
 PDF extraction vendors [pdf-inspector](https://github.com/firecrawl/pdf-inspector) by Firecrawl (MIT).
+
 PDF primitives [lopdf](https://github.com/J-F-Liu/lopdf) by J-F-Liu (MIT).
 
 ## License
