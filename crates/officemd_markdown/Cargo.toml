@@ -1,6 +1,6 @@
 [package]
 name = "officemd_markdown"
-version = "0.1.1"
+version = "0.1.2"
 edition.workspace = true
 description = "Markdown renderer for OfficeMD document IR"
 license = "MIT"
@@ -13,4 +13,4 @@ keywords = ["officemd", "markdown", "renderer", "docx", "xlsx"]
 categories = ["text-processing"]
 
 [dependencies]
-officemd_core = { version = "0.1.1", path = "../officemd_core" }
+officemd_core = { version = "0.1.2", path = "../officemd_core" }
