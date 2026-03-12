@@ -158,4 +158,4 @@ jobs:
           done
       - name: Publish main package
         working-directory: crates/officemd_js
-        run: npm publish --access public --provenance
+        run: npm publish --access public --provenance --ignore-scripts
