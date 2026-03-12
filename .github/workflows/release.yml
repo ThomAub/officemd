@@ -132,8 +132,10 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          # Trusted publishing via OIDC requires npm >= 11.5.1.
+          node-version: 24
           registry-url: https://registry.npmjs.org
+      - run: node --version && npm --version
       - run: npm install
         working-directory: crates/officemd_js
       - uses: actions/download-artifact@v4
@@ -152,8 +154,8 @@ jobs:
         run: |
           for pkg in npm/*/; do
             echo "Publishing $pkg..."
-            npm publish "$pkg" --access public
+            npm publish "$pkg" --access public --provenance
           done
       - name: Publish main package
         working-directory: crates/officemd_js
-        run: npm publish --access public
+        run: npm publish --access public --provenance
