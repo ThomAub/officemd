@@ -153,9 +153,22 @@ jobs:
         working-directory: crates/officemd_js
         run: |
           for pkg in npm/*/; do
-            echo "Publishing $pkg..."
+            name=$(node -p "require('./${pkg}package.json').name")
+            version=$(node -p "require('./${pkg}package.json').version")
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "Skipping ${name}@${version}; already published"
+              continue
+            fi
+            echo "Publishing ${name}@${version} from $pkg..."
             npm publish "$pkg" --access public --provenance
           done
       - name: Publish main package
         working-directory: crates/officemd_js
-        run: npm publish --access public --provenance --ignore-scripts
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "Skipping ${name}@${version}; already published"
+            exit 0
+          fi
+          npm publish --access public --provenance --ignore-scripts
