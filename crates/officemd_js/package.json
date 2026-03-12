@@ -1,6 +1,6 @@
 {
   "name": "office-md",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Native Node/Bun bindings for OfficeMD document extraction",
   "keywords": [
     "csv",
@@ -56,14 +56,14 @@
     "oxlint": "^1.50.0"
   },
   "optionalDependencies": {
-    "office-md-darwin-arm64": "0.1.2",
-    "office-md-darwin-x64": "0.1.2",
-    "office-md-linux-arm64-gnu": "0.1.2",
-    "office-md-linux-arm64-musl": "0.1.2",
-    "office-md-linux-x64-gnu": "0.1.2",
-    "office-md-linux-x64-musl": "0.1.2",
-    "office-md-win32-arm64-msvc": "0.1.2",
-    "office-md-win32-x64-msvc": "0.1.2"
+    "office-md-win32-x64-msvc": "0.1.3",
+    "office-md-darwin-x64": "0.1.3",
+    "office-md-linux-x64-gnu": "0.1.3",
+    "office-md-darwin-arm64": "0.1.3",
+    "office-md-linux-arm64-gnu": "0.1.3",
+    "office-md-linux-arm64-musl": "0.1.3",
+    "office-md-win32-arm64-msvc": "0.1.3",
+    "office-md-linux-x64-musl": "0.1.3"
   },
   "napi": {
     "name": "office-md",

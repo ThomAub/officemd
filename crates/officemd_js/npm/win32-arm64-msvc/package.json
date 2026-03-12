@@ -1,6 +1,6 @@
 {
   "name": "office-md-win32-arm64-msvc",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Native Node/Bun bindings for OfficeMD document extraction",
   "keywords": [
     "csv",
