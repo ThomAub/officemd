@@ -33,7 +33,7 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --strip --out dist
           rust-toolchain: stable
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: python-wheel-${{ matrix.os }}-${{ matrix.target }}
           path: crates/officemd_python/dist
@@ -48,7 +48,7 @@ jobs:
           working-directory: crates/officemd_python
           command: sdist
           args: --out dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: python-sdist
           path: crates/officemd_python/dist
@@ -61,7 +61,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           pattern: python-*
           path: dist
@@ -114,7 +114,7 @@ jobs:
       - run: npm install
       - name: Build
         run: npx napi build --platform --release --target ${{ matrix.settings.target }} ${{ matrix.settings.use-zig && '--zig' || '' }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: npm-${{ matrix.settings.target }}
           path: crates/officemd_js/*.node
@@ -138,7 +138,7 @@ jobs:
       - run: node --version && npm --version
       - run: npm install
         working-directory: crates/officemd_js
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           pattern: npm-*
           path: crates/officemd_js/artifacts
