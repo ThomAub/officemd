@@ -2,6 +2,7 @@
 /dist
 dist/
 /artifacts
+/specs
 /node_modules
 **/node_modules
 **/.venv

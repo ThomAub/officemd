@@ -1,0 +1,64 @@
+name: Release-plz
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-plz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Create or update release PR
+        id: release_pr
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+
+      - name: Sync binding versions
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          # Find the release PR branch (created or updated by release-plz)
+          pr_branch=$(gh pr list --label release --json headRefName --jq '.[0].headRefName')
+          if [ -z "$pr_branch" ]; then
+            echo "No release PR found, skipping version sync"
+            exit 0
+          fi
+
+          echo "Syncing versions on branch: $pr_branch"
+          git fetch origin "$pr_branch"
+          git checkout "$pr_branch"
+
+          # Run the sync script
+          bash scripts/sync-versions.sh
+
+          # Commit if there are changes
+          if git diff --quiet; then
+            echo "No version changes to sync"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add crates/officemd_python/pyproject.toml crates/officemd_js/package.json
+            git commit -m "chore: sync binding versions"
+            git push origin "$pr_branch"
+          fi
+
+      - name: Publish crates and create tags
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
