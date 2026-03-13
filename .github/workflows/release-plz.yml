@@ -31,7 +31,7 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: |
           # Find the release PR branch (created or updated by release-plz)
-          pr_branch=$(gh pr list --label release --json headRefName --jq '.[0].headRefName')
+          pr_branch=$(gh pr list --label release --json headRefName --jq '.[0].headRefName // empty')
           if [ -z "$pr_branch" ]; then
             echo "No release PR found, skipping version sync"
             exit 0
@@ -54,6 +54,9 @@ jobs:
             git commit -m "chore: sync binding versions"
             git push origin "$pr_branch"
           fi
+
+          # Restore main so the release step runs from the pushed commit
+          git checkout main
 
       - name: Publish crates and create tags
         uses: release-plz/action@v0.5
