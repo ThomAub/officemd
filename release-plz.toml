@@ -1,0 +1,11 @@
+[workspace]
+changelog_config = "cliff.toml"
+changelog_update = true
+dependencies_update = true
+git_tag_enable = true
+# cargo-dist owns GitHub Releases, not release-plz
+git_release_enable = false
+pr_labels = ["release"]
+semver_check = false
+allow_dirty = false
+publish_allow_dirty = false

@@ -47,3 +47,8 @@ insta = { version = "1.42", features = ["json"] }
 lto = true
 codegen-units = 1
 opt-level = 3
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

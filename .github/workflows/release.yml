@@ -61,7 +61,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           pattern: python-*
           path: dist
@@ -138,7 +138,7 @@ jobs:
       - run: node --version && npm --version
       - run: npm install
         working-directory: crates/officemd_js
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           pattern: npm-*
           path: crates/officemd_js/artifacts
