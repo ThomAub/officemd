@@ -23,6 +23,8 @@ pub struct RenderOptions {
     pub use_first_row_as_header: bool,
     /// Include DOCX header/footer sections in the output.
     pub include_headers_footers: bool,
+    /// Include XLSX formula footnotes in the output.
+    pub include_formulas: bool,
     /// Markdown profile controlling compact vs human-oriented formatting.
     pub markdown_profile: MarkdownProfile,
 }
@@ -33,6 +35,7 @@ impl Default for RenderOptions {
             include_document_properties: false,
             use_first_row_as_header: true,
             include_headers_footers: true,
+            include_formulas: true,
             markdown_profile: MarkdownProfile::LlmCompact,
         }
     }
@@ -70,7 +73,7 @@ fn render_xlsx(doc: &OoxmlDocument, options: RenderOptions) -> String {
             out.push('\n');
         }
 
-        if !sheet.formulas.is_empty() {
+        if options.include_formulas && !sheet.formulas.is_empty() {
             if matches!(options.markdown_profile, MarkdownProfile::Human) {
                 out.push_str("### Formulas\n");
             }
