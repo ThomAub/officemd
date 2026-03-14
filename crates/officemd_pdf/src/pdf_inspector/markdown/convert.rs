@@ -11,7 +11,7 @@ use super::analysis::{
 };
 use super::classify::{format_list_item, is_caption_line, is_list_item, is_monospace_font};
 use super::postprocess::clean_markdown;
-use super::preprocess::{merge_drop_caps, merge_heading_lines};
+use super::preprocess::{merge_drop_caps, merge_heading_lines, strip_repeated_headers_footers};
 
 /// Merge continuation tables that span across page breaks.
 ///
@@ -197,6 +197,9 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
 
     // Discover heading tiers for this document
     let heading_tiers = compute_heading_tiers(&lines, base_size);
+
+    // Strip repeated headers/footers before further processing
+    let lines = strip_repeated_headers_footers(lines, base_size, &heading_tiers);
 
     // Merge consecutive heading lines at the same level (e.g., wrapped titles)
     let lines = merge_heading_lines(lines, base_size, &heading_tiers);
@@ -496,6 +499,9 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
 
     // Discover heading tiers for this document
     let heading_tiers = compute_heading_tiers(&lines, base_size);
+
+    // Strip repeated headers/footers before further processing
+    let lines = strip_repeated_headers_footers(lines, base_size, &heading_tiers);
 
     // Merge consecutive heading lines at the same level (e.g., wrapped titles)
     let lines = merge_heading_lines(lines, base_size, &heading_tiers);

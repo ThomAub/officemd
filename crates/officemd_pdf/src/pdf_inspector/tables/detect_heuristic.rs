@@ -66,7 +66,7 @@ pub(crate) fn merge_adjacent_items(items: &[TextItem]) -> (Vec<TextItem>, Vec<Ve
             let mut text = first_item.text.clone();
             let mut end_x = first_item.x + first_item.width;
             let mut indices = vec![first_idx];
-            let x_gap_max = first_item.font_size * 0.5;
+            let x_gap_max = first_item.font_size * 0.75;
 
             let mut j = i + 1;
             while j < group.len() {
@@ -92,8 +92,8 @@ pub(crate) fn merge_adjacent_items(items: &[TextItem]) -> (Vec<TextItem>, Vec<Ve
                 }
 
                 // Insert space at word boundaries: within a word characters
-                // touch (gap ≈ 0), between words there's a visible gap.
-                if gap > first_item.font_size * 0.08 {
+                // touch (gap ~ 0), between words there's a visible gap.
+                if gap > first_item.font_size * 0.13 {
                     text.push(' ');
                 }
                 text.push_str(&next_item.text);

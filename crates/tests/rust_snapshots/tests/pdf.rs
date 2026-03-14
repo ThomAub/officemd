@@ -1,6 +1,15 @@
 use officemd_markdown::RenderOptions;
 use officemd_snapshot_tests::{canonical_json, fixtures, normalize_markdown};
 
+/// Load the plaquette comptable fixture at runtime (not committed to repo).
+fn plaquette_fixture() -> Option<Vec<u8>> {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../examples/data/PLAQUETTE_COMPTABLE_2022.pdf"
+    );
+    std::fs::read(path).ok()
+}
+
 #[test]
 fn openxml_whitepaper_ir() {
     let json =
@@ -84,4 +93,25 @@ fn encoding_heuristic_markdown() {
     )
     .expect("render PDF markdown");
     insta::assert_snapshot!("encoding_heuristic_markdown", normalize_markdown(&md));
+}
+
+#[test]
+fn plaquette_comptable_ir() {
+    let Some(bytes) = plaquette_fixture() else {
+        eprintln!("skipping plaquette_comptable_ir: fixture not found");
+        return;
+    };
+    let json = officemd_pdf::extract_ir_json(&bytes).expect("extract PDF IR");
+    insta::assert_snapshot!("plaquette_comptable_ir", canonical_json(&json));
+}
+
+#[test]
+fn plaquette_comptable_markdown() {
+    let Some(bytes) = plaquette_fixture() else {
+        eprintln!("skipping plaquette_comptable_markdown: fixture not found");
+        return;
+    };
+    let md = officemd_pdf::markdown_from_bytes_with_options(&bytes, RenderOptions::default())
+        .expect("render PDF markdown");
+    insta::assert_snapshot!("plaquette_comptable_markdown", normalize_markdown(&md));
 }

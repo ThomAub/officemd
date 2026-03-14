@@ -1,4 +1,6 @@
-//! Line preprocessing: heading merging and drop cap handling.
+//! Line preprocessing: heading merging, drop cap handling, and header/footer stripping.
+
+use std::collections::{HashMap, HashSet};
 
 use crate::pdf_inspector::types::TextLine;
 
@@ -139,4 +141,146 @@ pub(crate) fn merge_drop_caps(lines: Vec<TextLine>, base_size: f32) -> Vec<TextL
     }
 
     result
+}
+
+/// Strip repeated headers and footers that appear across multiple pages.
+///
+/// Detects lines near the top/bottom of pages (within 8% of Y range) that
+/// repeat on >= 50% of pages (minimum 3 pages). Text is normalized by
+/// removing digit sequences (page numbers vary across pages) before comparison.
+/// Lines with heading-tier font sizes are preserved.
+pub(crate) fn strip_repeated_headers_footers(
+    lines: Vec<TextLine>,
+    base_size: f32,
+    heading_tiers: &[f32],
+) -> Vec<TextLine> {
+    let pages: HashSet<u32> = lines.iter().map(|l| l.page).collect();
+    let page_count = pages.len();
+    if page_count < 3 {
+        return lines;
+    }
+
+    // Compute Y bounds per page from text content
+    let mut page_y_min: HashMap<u32, f32> = HashMap::new();
+    let mut page_y_max: HashMap<u32, f32> = HashMap::new();
+    for line in &lines {
+        page_y_min
+            .entry(line.page)
+            .and_modify(|v| *v = v.min(line.y))
+            .or_insert(line.y);
+        page_y_max
+            .entry(line.page)
+            .and_modify(|v| *v = v.max(line.y))
+            .or_insert(line.y);
+    }
+
+    let margin_fraction = 0.08;
+
+    // Collect candidate header/footer texts with their page sets and Y positions
+    struct Candidate {
+        pages: HashSet<u32>,
+        y_positions: Vec<f32>,
+    }
+    let mut candidates: HashMap<String, Candidate> = HashMap::new();
+
+    for line in &lines {
+        let text = line.text();
+        let trimmed = text.trim();
+
+        // Skip empty or long lines (unlikely to be headers/footers)
+        if trimmed.is_empty() || trimmed.chars().count() > 120 {
+            continue;
+        }
+
+        // Skip lines with heading-tier font sizes
+        if let Some(first_item) = line.items.first() {
+            if first_item.font_size / base_size >= 1.2
+                && heading_tiers
+                    .iter()
+                    .any(|&t| (first_item.font_size - t).abs() < 0.5)
+            {
+                continue;
+            }
+        }
+
+        // Check if line is in header or footer margin region
+        let y_min = page_y_min.get(&line.page).copied().unwrap_or(0.0);
+        let y_max = page_y_max.get(&line.page).copied().unwrap_or(842.0);
+        let y_range = (y_max - y_min).max(1.0);
+
+        let in_header_region = line.y >= y_max - y_range * margin_fraction;
+        let in_footer_region = line.y <= y_min + y_range * margin_fraction;
+
+        if !in_header_region && !in_footer_region {
+            continue;
+        }
+
+        let normalized = normalize_header_footer_text(trimmed);
+        if normalized.is_empty() {
+            continue;
+        }
+
+        let entry = candidates.entry(normalized).or_insert_with(|| Candidate {
+            pages: HashSet::new(),
+            y_positions: Vec::new(),
+        });
+        entry.pages.insert(line.page);
+        entry.y_positions.push(line.y);
+    }
+
+    // Determine which texts to strip: appear on >= 50% of pages with stable Y
+    let min_pages = (page_count as f32 * 0.5).ceil() as usize;
+    let y_tolerance = 5.0;
+    let mut texts_to_strip: HashSet<String> = HashSet::new();
+
+    for (text, candidate) in &candidates {
+        if candidate.pages.len() < min_pages {
+            continue;
+        }
+        // Check Y-position stability across pages
+        if candidate.y_positions.len() >= 2 {
+            let mean_y: f32 =
+                candidate.y_positions.iter().sum::<f32>() / candidate.y_positions.len() as f32;
+            if candidate
+                .y_positions
+                .iter()
+                .all(|&y| (y - mean_y).abs() <= y_tolerance)
+            {
+                texts_to_strip.insert(text.clone());
+            }
+        }
+    }
+
+    if texts_to_strip.is_empty() {
+        return lines;
+    }
+
+    lines
+        .into_iter()
+        .filter(|line| {
+            let text = line.text();
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                return true;
+            }
+            let normalized = normalize_header_footer_text(trimmed);
+            !texts_to_strip.contains(&normalized)
+        })
+        .collect()
+}
+
+/// Normalize header/footer text for cross-page comparison.
+/// Strips all digit sequences (page numbers vary across pages) and lowercases.
+fn normalize_header_footer_text(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if !ch.is_ascii_digit() {
+            result.push(ch);
+        }
+    }
+    result
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }

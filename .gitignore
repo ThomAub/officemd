@@ -1,5 +1,6 @@
 /target
 /dist
+specs/
 dist/
 /artifacts
 /node_modules
@@ -23,3 +24,5 @@ dist/
 *.key
 .idea/
 .vscode/
+examples/data/PLAQUETTE_COMPTABLE_2022.pdf
+**/snapshots/*plaquette*
