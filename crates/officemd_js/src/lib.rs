@@ -316,6 +316,7 @@ pub fn markdown_from_bytes(
     include_document_properties: Option<bool>,
     use_first_row_as_header: Option<bool>,
     include_headers_footers: Option<bool>,
+    include_formulas: Option<bool>,
     markdown_style: Option<String>,
     force_extract: Option<bool>,
 ) -> Result<String> {
@@ -324,6 +325,7 @@ pub fn markdown_from_bytes(
         include_document_properties: include_document_properties.unwrap_or(false),
         use_first_row_as_header: use_first_row_as_header.unwrap_or(true),
         include_headers_footers: include_headers_footers.unwrap_or(true),
+        include_formulas: include_formulas.unwrap_or(true),
         markdown_profile,
     };
     markdown_from_bytes_impl(
@@ -347,6 +349,7 @@ pub fn markdown_from_bytes_batch(
     include_document_properties: Option<bool>,
     use_first_row_as_header: Option<bool>,
     include_headers_footers: Option<bool>,
+    include_formulas: Option<bool>,
     markdown_style: Option<String>,
 ) -> Result<Vec<String>> {
     let markdown_profile = parse_markdown_style(markdown_style.as_deref())?;
@@ -354,6 +357,7 @@ pub fn markdown_from_bytes_batch(
         include_document_properties: include_document_properties.unwrap_or(false),
         use_first_row_as_header: use_first_row_as_header.unwrap_or(true),
         include_headers_footers: include_headers_footers.unwrap_or(true),
+        include_formulas: include_formulas.unwrap_or(true),
         markdown_profile,
     };
     let payloads = contents.into_iter().map(|buf| buf.to_vec()).collect();

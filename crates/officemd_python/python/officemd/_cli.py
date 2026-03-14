@@ -90,6 +90,7 @@ def _build_render_options(args: argparse.Namespace) -> dict:
     opts["include_document_properties"] = args.include_document_properties
     opts["use_first_row_as_header"] = args.use_first_row_as_header
     opts["include_headers_footers"] = args.include_headers_footers
+    opts["include_formulas"] = args.include_formulas
     opts["markdown_style"] = args.markdown_style
     if getattr(args, "force", False):
         opts["force_extract"] = True
@@ -135,6 +136,12 @@ def _add_shared_flags(parser: argparse.ArgumentParser) -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Include headers and footers (default: true)",
+    )
+    parser.add_argument(
+        "--include-formulas",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include XLSX formula footnotes (default: true)",
     )
     parser.add_argument(
         "--markdown-style",

@@ -148,6 +148,7 @@ fn extract_ir_json(py: Python<'_>, content: &[u8], format: Option<String>) -> Py
     include_document_properties=false,
     use_first_row_as_header=true,
     include_headers_footers=true,
+    include_formulas=true,
     markdown_style=None,
     force_extract=false,
 ))]
@@ -158,6 +159,7 @@ fn markdown_from_bytes(
     include_document_properties: bool,
     use_first_row_as_header: bool,
     include_headers_footers: bool,
+    include_formulas: bool,
     markdown_style: Option<String>,
     force_extract: bool,
 ) -> PyResult<String> {
@@ -167,6 +169,7 @@ fn markdown_from_bytes(
         include_document_properties,
         use_first_row_as_header,
         include_headers_footers,
+        include_formulas,
         markdown_profile,
     };
     py.detach(move || {
@@ -182,6 +185,7 @@ fn markdown_from_bytes(
     include_document_properties=false,
     use_first_row_as_header=true,
     include_headers_footers=true,
+    include_formulas=true,
     markdown_style=None,
 ))]
 fn markdown_from_bytes_batch(
@@ -192,6 +196,7 @@ fn markdown_from_bytes_batch(
     include_document_properties: bool,
     use_first_row_as_header: bool,
     include_headers_footers: bool,
+    include_formulas: bool,
     markdown_style: Option<String>,
 ) -> PyResult<Vec<String>> {
     let markdown_profile = parse_markdown_style(markdown_style.as_deref()).map_err(to_py_err)?;
@@ -199,6 +204,7 @@ fn markdown_from_bytes_batch(
         include_document_properties,
         use_first_row_as_header,
         include_headers_footers,
+        include_formulas,
         markdown_profile,
     };
     let worker_count = resolve_worker_count(workers);

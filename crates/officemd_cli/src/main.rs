@@ -68,6 +68,10 @@ struct CommonOptions {
     #[arg(long, default_value_t = false)]
     no_headers_footers: bool,
 
+    /// Omit XLSX formula footnotes from markdown output.
+    #[arg(long, default_value_t = false)]
+    no_formulas: bool,
+
     /// Use synthetic Col1/Col2 headers instead of first data row.
     #[arg(long, default_value_t = false)]
     no_first_row_header: bool,
@@ -439,6 +443,7 @@ fn render_output(doc: &OoxmlDocument, common: &CommonOptions) -> Result<String, 
                 include_document_properties: common.include_document_properties,
                 use_first_row_as_header: !common.no_first_row_header,
                 include_headers_footers: !common.no_headers_footers,
+                include_formulas: !common.no_formulas,
                 markdown_profile,
             };
             Ok(officemd_markdown::render_document_with_options(
@@ -706,6 +711,7 @@ fn extract_markdown_from_file(path: &Path, common: &CommonOptions) -> Result<Str
         include_document_properties: common.include_document_properties,
         use_first_row_as_header: !common.no_first_row_header,
         include_headers_footers: !common.no_headers_footers,
+        include_formulas: !common.no_formulas,
         markdown_profile,
     };
     let md = officemd_markdown::render_document_with_options(&doc, options);
@@ -1010,6 +1016,7 @@ mod tests {
             style_aware: false,
             streaming: false,
             no_headers_footers: false,
+            no_formulas: false,
             no_first_row_header: false,
             markdown_style: MarkdownStyleArg::Compact,
         }
