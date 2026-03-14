@@ -269,7 +269,7 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
             }
             let mut text = first.text.clone();
             let mut end_x = first.x + first.width;
-            let x_gap_max = first.font_size * 0.5;
+            let x_gap_max = first.font_size * 0.75;
 
             let mut j = i + 1;
             while j < group.len() {
@@ -289,7 +289,7 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
                     break;
                 }
                 // Insert space at word boundaries
-                if gap > first.font_size * 0.08 {
+                if gap > first.font_size * 0.13 {
                     text.push(' ');
                 }
                 text.push_str(&next.text);
@@ -1006,6 +1006,122 @@ mod tests {
         assert!(is_cjk_char('\u{AC00}'));
         // Latin is not CJK
         assert!(!is_cjk_char('A'));
+    }
+
+    #[test]
+    fn test_merge_items_french_letter_spacing() {
+        // French financial PDFs use wider letter-spacing (1-1.5pt gaps at 12pt).
+        // These intra-word gaps should NOT produce spaces.
+        fn item(ch: &str, x: f32, width: f32) -> TextItem {
+            TextItem {
+                text: ch.into(),
+                x,
+                y: 500.0,
+                width,
+                height: 12.0,
+                font: "F1".into(),
+                font_size: 12.0,
+                page: 1,
+                is_rotated: false,
+                is_bold: false,
+                is_italic: false,
+                item_type: ItemType::Text,
+            }
+        }
+
+        // "BILAN" with ~1.0-1.5pt gaps between chars (ratio 0.083-0.125 at 12pt)
+        let items = vec![
+            item("B", 100.0, 7.0),
+            item("I", 108.0, 3.5), // gap = 108.0 - 107.0 = 1.0
+            item("L", 112.5, 6.0), // gap = 112.5 - 111.5 = 1.0
+            item("A", 119.5, 7.0), // gap = 119.5 - 118.5 = 1.0
+            item("N", 128.0, 7.0), // gap = 128.0 - 126.5 = 1.5
+        ];
+
+        let merged = merge_text_items(items);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(
+            merged[0].text, "BILAN",
+            "French letter-spaced chars should merge without spaces"
+        );
+    }
+
+    #[test]
+    fn test_merge_items_preserves_word_boundary() {
+        // Word boundaries (~2pt gap at 13.3pt, ratio 0.15) must still get spaces.
+        fn item(ch: &str, x: f32, width: f32) -> TextItem {
+            TextItem {
+                text: ch.into(),
+                x,
+                y: 500.0,
+                width,
+                height: 13.3,
+                font: "F1".into(),
+                font_size: 13.3,
+                page: 1,
+                is_rotated: false,
+                is_bold: false,
+                is_italic: false,
+                item_type: ItemType::Text,
+            }
+        }
+
+        // "AB CD" with 0pt intra-word gaps and 2pt inter-word gap
+        let items = vec![
+            item("A", 100.0, 7.0),
+            item("B", 107.0, 7.0), // gap = 0
+            item("C", 116.0, 7.0), // gap = 116.0 - 114.0 = 2.0 (ratio 0.15)
+            item("D", 123.0, 7.0), // gap = 0
+        ];
+
+        let merged = merge_text_items(items);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(
+            merged[0].text, "AB CD",
+            "Word boundary should produce a space"
+        );
+    }
+
+    #[test]
+    fn test_merge_items_touching_words() {
+        // Touching items (gap = 0) should merge without spaces.
+        let items = vec![
+            TextItem {
+                text: "Hello".into(),
+                x: 100.0,
+                y: 500.0,
+                width: 30.0,
+                height: 12.0,
+                font: "F1".into(),
+                font_size: 12.0,
+                page: 1,
+                is_rotated: false,
+                is_bold: false,
+                is_italic: false,
+                item_type: ItemType::Text,
+            },
+            TextItem {
+                text: "World".into(),
+                x: 130.0,
+                y: 500.0,
+                width: 30.0,
+                height: 12.0,
+                font: "F1".into(),
+                font_size: 12.0,
+                page: 1,
+                is_rotated: false,
+                is_bold: false,
+                is_italic: false,
+                item_type: ItemType::Text,
+            },
+        ];
+
+        let merged = merge_text_items(items);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(
+            merged[0].text, "HelloWorld",
+            "Touching items merge without space"
+        );
     }
 
     #[test]

@@ -94,6 +94,22 @@ fn merge_hint_regions_into_bands(
     merged
 }
 
+/// Detect single uppercase characters with impossibly narrow width - typically
+/// watermark or decorative fragments from PDF rendering artifacts.
+fn is_probably_watermark_fragment(item: &TextItem) -> bool {
+    let trimmed = item.text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let char_count = trimmed.chars().count();
+    if char_count != 1 {
+        return false;
+    }
+    let width = item.width.abs();
+    let font_size = item.font_size.max(1.0);
+    width <= font_size * 0.35 && trimmed.chars().all(|c| c.is_ascii_uppercase())
+}
+
 fn is_probably_rotated_or_decorative(item: &TextItem) -> bool {
     if item.is_rotated {
         return true;
@@ -114,7 +130,7 @@ fn is_probably_rotated_or_decorative(item: &TextItem) -> bool {
         return tiny_width && alpha_count > 0;
     }
 
-    char_count == 1 && tiny_width && trimmed.chars().all(|c| c.is_ascii_uppercase())
+    is_probably_watermark_fragment(item)
 }
 
 fn is_probably_table_margin_noise(item: &TextItem) -> bool {
@@ -711,6 +727,12 @@ pub fn to_markdown_from_items_with_rects(
         .enumerate()
         .filter(|(idx, item)| {
             if table_items.contains(idx) {
+                return false;
+            }
+
+            // Unconditionally filter watermark fragments (single uppercase chars
+            // with impossibly narrow width) on all pages
+            if is_probably_watermark_fragment(item) {
                 return false;
             }
 
