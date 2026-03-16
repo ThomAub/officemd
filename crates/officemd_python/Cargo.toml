@@ -19,7 +19,7 @@ dist = false
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = []
+default = ["extension-module"]
 extension-module = ["pyo3/extension-module"]
 
 [dependencies]
