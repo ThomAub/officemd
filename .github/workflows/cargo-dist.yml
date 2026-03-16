@@ -85,9 +85,6 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}-dist-manifest.json
-      PYO3_NO_PYTHON: "1"
-      PYO3_CROSS: "1"
-      PYO3_CROSS_PYTHON_VERSION: "3.12"
     steps:
       - name: enable windows longpaths
         run: |
@@ -106,17 +103,12 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
-      - name: Set up Python 3.12 and let PyO3 detect it
-        if: ${{ !matrix.container }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Clear PyO3 cross-compilation overrides for native builds
-        if: ${{ !matrix.container }}
+      - name: Exclude binding crates from workspace
         shell: bash
         run: |
-          echo "PYO3_NO_PYTHON=" >> $GITHUB_ENV
-          echo "PYO3_CROSS=" >> $GITHUB_ENV
+          sed -i.bak '/"crates\/officemd_python"/d; /"crates\/officemd_js"/d' Cargo.toml
+          rm -f Cargo.toml.bak
+          cargo generate-lockfile
       - name: Install dist
         run: ${{ matrix.install_dist.run }}
       # Get the dist-manifest
