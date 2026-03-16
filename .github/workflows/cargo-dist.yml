@@ -85,9 +85,6 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}-dist-manifest.json
-      PYO3_NO_PYTHON: "1"
-      PYO3_CROSS: "1"
-      PYO3_CROSS_PYTHON_VERSION: "3.12"
     steps:
       - name: enable windows longpaths
         run: |

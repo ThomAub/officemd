@@ -12,6 +12,9 @@ readme = "README.md"
 keywords = ["officemd", "javascript", "napi-rs", "xlsx", "csv"]
 categories = ["api-bindings", "text-processing"]
 
+[package.metadata.dist]
+dist = false
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
