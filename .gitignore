@@ -1,6 +1,6 @@
 /target
 /dist
-specs/
+/specs/
 dist/
 /artifacts
 /node_modules
