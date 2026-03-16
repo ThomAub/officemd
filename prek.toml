@@ -16,7 +16,7 @@ repo = "local"
 hooks = [
     # -- Rust --
     { id = "cargo-fmt", name = "cargo fmt", language = "system", entry = "cargo fmt --all -- --check", files = "\\.rs$", pass_filenames = false },
-    { id = "clippy", name = "cargo clippy", language = "system", entry = "cargo clippy --workspace --all-targets --exclude officemd_pdf --exclude officemd_js --exclude officemd_python -- -D warnings", files = "\\.rs$", pass_filenames = false },
+    { id = "clippy", name = "cargo clippy", language = "system", entry = "cargo clippy --workspace --all-targets --exclude officemd_pdf -- -D warnings", files = "\\.rs$", pass_filenames = false },
 
     # -- JS (oxlint + oxfmt) --
     { id = "oxlint", name = "oxlint", language = "system", entry = "sh -c 'cd crates/officemd_js && npx oxlint .'", files = "crates/officemd_js/.*\\.(js|ts)$", pass_filenames = false },

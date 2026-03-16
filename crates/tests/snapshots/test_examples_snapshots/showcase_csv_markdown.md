@@ -1,5 +1,8 @@
+<!-- officemd: kind=xlsx profile=compact first_row_as_header=true formulas=true headers_footers=true properties=false -->
+
 ## Sheet: Sheet1
 
+### Table 1 (rows 1–4, cols A–E)
 | Product | BaseAmount | Rate | Total | Notes |
 | --- | --- | --- | --- | --- |
 | Widget | 1200 | 0.15 | =B2*(1+C2) | Primary SKU |

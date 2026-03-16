@@ -138,7 +138,8 @@
                   ]
                 }
               ]
-            ]
+            ],
+            "synthetic_headers": true
           }
         }
       ],

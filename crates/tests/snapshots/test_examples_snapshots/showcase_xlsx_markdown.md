@@ -1,5 +1,8 @@
+<!-- officemd: kind=xlsx profile=compact first_row_as_header=true formulas=true headers_footers=true properties=false -->
+
 ## Sheet: Sales
 
+### Table 1 (rows 1–6, cols A–E)
 | Product | BaseAmount | Rate | Total | Notes |
 | --- | --- | --- | --- | --- |
 | Widget | 1200 | 0.15 |  | Primary SKU |
@@ -14,6 +17,7 @@ D4=`=B4*(1+C4)`
 
 ## Sheet: Summary
 
+### Table 2 (rows 1–4, cols A–B)
 | Metric | Value |
 | --- | --- |
 | ReportDate |  |

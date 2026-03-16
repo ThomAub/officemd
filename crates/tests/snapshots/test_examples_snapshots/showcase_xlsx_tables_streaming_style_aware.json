@@ -373,7 +373,8 @@
                 ]
               }
             ]
-          ]
+          ],
+          "synthetic_headers": true
         }
       ]
     },
@@ -490,7 +491,8 @@
                 ]
               }
             ]
-          ]
+          ],
+          "synthetic_headers": true
         }
       ]
     }

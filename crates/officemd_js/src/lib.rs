@@ -310,6 +310,7 @@ pub fn extract_ir_json(content: Buffer, format: Option<String>) -> Result<String
 ///
 /// Returns an error if format detection, extraction, or rendering fails.
 #[napi]
+#[allow(clippy::too_many_arguments)]
 pub fn markdown_from_bytes(
     content: Buffer,
     format: Option<String>,
@@ -342,6 +343,7 @@ pub fn markdown_from_bytes(
 ///
 /// Returns an error if any item fails format detection, extraction, or rendering.
 #[napi]
+#[allow(clippy::too_many_arguments)]
 pub fn markdown_from_bytes_batch(
     contents: Vec<Buffer>,
     format: Option<String>,

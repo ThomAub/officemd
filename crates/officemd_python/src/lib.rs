@@ -479,6 +479,7 @@ mod tests {
                 false,
                 true,
                 true,
+                true,
                 Some("compact".to_string()),
                 false,
             )
@@ -502,6 +503,7 @@ mod tests {
                 false,
                 true,
                 true,
+                true,
                 Some("compact".to_string()),
             )
         })
@@ -520,6 +522,7 @@ mod tests {
                 py,
                 &bytes,
                 Some(".xlsx".to_string()),
+                true,
                 true,
                 true,
                 true,

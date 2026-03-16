@@ -1,5 +1,8 @@
+<!-- officemd: kind=xlsx profile=compact first_row_as_header=true formulas=true headers_footers=true properties=false -->
+
 ## Sheet: Sparse
 
+### Table 1 (rows 1–5, cols A–C)
 | H1 | H2 | H3 |
 | --- | --- | --- |
 | 10 | 20 | 30 |

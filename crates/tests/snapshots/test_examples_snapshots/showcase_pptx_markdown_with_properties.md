@@ -1,3 +1,5 @@
+<!-- officemd: kind=pptx profile=compact first_row_as_header=true formulas=true headers_footers=true properties=true -->
+
 ## Slide 1 - Quarterly Review
 
 Revenue is up 12% quarter over quarter.
@@ -10,7 +12,7 @@ Revenue is up 12% quarter over quarter.
 Speaker note: Call out that EMEA outperformed expectations.
 
 ### Comments
-[^c1]: Presenter: Add one slide on operating margin.
+[^c1|Presenter]: Add one slide on operating margin.
 
 ## Slide 2 - Roadmap
 

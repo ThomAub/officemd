@@ -1,3 +1,5 @@
+<!-- officemd: kind=docx profile=compact first_row_as_header=true formulas=true headers_footers=true properties=false -->
+
 ## Section: body
 
 Quarterly Operations Summary
@@ -10,7 +12,7 @@ Please validate this sentence before publishing the report.[^c0]
 
 End of document. The parser should emit a body section and a header section.
 ### Comments
-[^c0]: Reviewer: Example DOCX comment captured as markdown footnote.
+[^c0|Reviewer]: Example DOCX comment captured as markdown footnote.
 
 
 ## Section: header1
