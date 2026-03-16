@@ -85,9 +85,6 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}-dist-manifest.json
-      PYO3_NO_PYTHON: "1"
-      PYO3_CROSS: "1"
-      PYO3_CROSS_PYTHON_VERSION: "3.12"
     steps:
       - name: enable windows longpaths
         run: |
@@ -106,6 +103,18 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
+      - name: Set up Python 3.12 for PyO3
+        if: ${{ !matrix.container }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Configure PyO3 for cross-compilation
+        if: ${{ matrix.container }}
+        shell: bash
+        run: |
+          echo "PYO3_NO_PYTHON=1" >> $GITHUB_ENV
+          echo "PYO3_CROSS=1" >> $GITHUB_ENV
+          echo "PYO3_CROSS_PYTHON_VERSION=3.12" >> $GITHUB_ENV
       - name: Install dist
         run: ${{ matrix.install_dist.run }}
       # Get the dist-manifest
