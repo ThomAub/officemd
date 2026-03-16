@@ -30,9 +30,7 @@ impl Default for CsvExtractOptions {
     }
 }
 
-fn synthetic_headers(cols: usize) -> Vec<String> {
-    (1..=cols).map(|i| format!("Col{i}")).collect()
-}
+use officemd_core::ir::synthetic_col_headers;
 
 /// Extract table-centric IR with default options.
 ///
@@ -93,7 +91,7 @@ pub fn extract_tables_ir_with_options(
     }
 
     let cols = max_cols.max(1);
-    let headers = synthetic_headers(cols);
+    let headers = synthetic_col_headers(cols);
     for row in &mut table_rows {
         while row.len() < cols {
             row.push(TableCell {
@@ -122,6 +120,7 @@ pub fn extract_tables_ir_with_options(
         caption,
         headers,
         rows: table_rows,
+        synthetic_headers: true,
     };
 
     let properties = options

@@ -142,7 +142,8 @@ expression: canonical_json(&json)
                   ]
                 }
               ]
-            ]
+            ],
+            "synthetic_headers": true
           }
         }
       ],

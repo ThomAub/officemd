@@ -1045,6 +1045,8 @@ name = "officemd_markdown"
 version = "0.1.3"
 dependencies = [
  "officemd_core",
+ "regex",
+ "thiserror",
 ]
 
 [[package]]

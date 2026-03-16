@@ -60,9 +60,7 @@ impl SheetFilter {
     }
 }
 
-fn synthetic_headers(cols: usize) -> Vec<String> {
-    (1..=cols).map(|i| format!("Col{i}")).collect()
-}
+use officemd_core::ir::synthetic_col_headers;
 
 /// Extract a simple IR with one table per sheet (no chunking yet).
 ///
@@ -115,7 +113,7 @@ pub fn extract_tables_ir_with_options(
         } = grid;
 
         let cols = grid_cols.max(1);
-        let headers = synthetic_headers(cols);
+        let headers = synthetic_col_headers(cols);
         let mut rows = build_ir_rows(grid_rows, cols);
 
         if rows.is_empty() {
@@ -138,6 +136,7 @@ pub fn extract_tables_ir_with_options(
             caption,
             headers,
             rows,
+            synthetic_headers: true,
         };
 
         sheets.push(Sheet {

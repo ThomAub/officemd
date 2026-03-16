@@ -26,3 +26,4 @@ dist/
 .vscode/
 examples/data/PLAQUETTE_COMPTABLE_2022.pdf
 **/snapshots/*plaquette*
+diff.md

@@ -400,11 +400,12 @@ impl<'a> PartState<'a> {
                     });
                 }
             }
-            let headers = (1..=max_cols).map(|i| format!("Col{i}")).collect();
+            let headers = officemd_core::ir::synthetic_col_headers(max_cols);
             self.blocks.push(Block::Table(Table {
                 caption: None,
                 headers,
                 rows,
+                synthetic_headers: true,
             }));
         }
     }

@@ -72,6 +72,7 @@ mod tests {
                         }],
                     },
                 ]],
+                synthetic_headers: true,
             }],
             formulas: vec![FormulaNote {
                 cell_ref: "A1".into(),

@@ -587,7 +587,7 @@ fn build_table(rows: Vec<Vec<TableCell>>) -> Table {
         max_cols = 1;
     }
 
-    let headers = (1..=max_cols).map(|i| format!("Col{i}")).collect();
+    let headers = officemd_core::ir::synthetic_col_headers(max_cols);
     let mut fixed_rows = Vec::with_capacity(rows.len().max(1));
 
     if rows.is_empty() {
@@ -609,6 +609,7 @@ fn build_table(rows: Vec<Vec<TableCell>>) -> Table {
         caption: None,
         headers,
         rows: fixed_rows,
+        synthetic_headers: true,
     }
 }
 

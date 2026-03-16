@@ -1,9 +1,15 @@
-//! Markdown renderer for OOXML IR.
+//! Markdown renderer and parser for OOXML IR.
+
+pub mod parse;
+
+pub use parse::{ParseError, ParseOptions, parse_document, parse_document_with_options};
 
 use std::borrow::Cow;
 use std::fmt::Write;
 
-use officemd_core::ir::{Block, DocumentKind, Inline, OoxmlDocument, Paragraph, Table, TableCell};
+use officemd_core::ir::{
+    Block, CommentNote, DocumentKind, Inline, OoxmlDocument, Paragraph, Table, TableCell,
+};
 
 /// Markdown output profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,12 +56,29 @@ pub fn render_document(doc: &OoxmlDocument) -> String {
 /// Render a full OOXML document to Markdown with explicit options.
 #[must_use]
 pub fn render_document_with_options(doc: &OoxmlDocument, options: RenderOptions) -> String {
+    let mut out = render_frontmatter(doc, options);
     match doc.kind {
-        DocumentKind::Xlsx => render_xlsx(doc, options),
-        DocumentKind::Docx => render_docx(doc, options),
-        DocumentKind::Pptx => render_pptx(doc, options),
-        DocumentKind::Pdf => render_pdf(doc, options),
+        DocumentKind::Xlsx => out.push_str(&render_xlsx(doc, options)),
+        DocumentKind::Docx => out.push_str(&render_docx(doc, options)),
+        DocumentKind::Pptx => out.push_str(&render_pptx(doc, options)),
+        DocumentKind::Pdf => out.push_str(&render_pdf(doc, options)),
     }
+    out
+}
+
+fn render_frontmatter(doc: &OoxmlDocument, options: RenderOptions) -> String {
+    let kind = doc.kind.as_str();
+    let profile = match options.markdown_profile {
+        MarkdownProfile::LlmCompact => "compact",
+        MarkdownProfile::Human => "human",
+    };
+    format!(
+        "<!-- officemd: kind={kind} profile={profile} first_row_as_header={} formulas={} headers_footers={} properties={} -->\n\n",
+        options.use_first_row_as_header,
+        options.include_formulas,
+        options.include_headers_footers,
+        options.include_document_properties,
+    )
 }
 
 fn render_xlsx(doc: &OoxmlDocument, options: RenderOptions) -> String {
@@ -65,7 +88,7 @@ fn render_xlsx(doc: &OoxmlDocument, options: RenderOptions) -> String {
         render_properties(doc, &mut out, options);
     }
 
-    for (idx, sheet) in doc.sheets.iter().enumerate() {
+    for sheet in &doc.sheets {
         let _ = write!(out, "## Sheet: {}\n\n", sheet.name);
 
         for table in &sheet.tables {
@@ -96,11 +119,6 @@ fn render_xlsx(doc: &OoxmlDocument, options: RenderOptions) -> String {
             }
             out.push('\n');
         }
-
-        if idx + 1 < doc.sheets.len() && matches!(options.markdown_profile, MarkdownProfile::Human)
-        {
-            out.push_str("---\n\n");
-        }
     }
     out
 }
@@ -122,11 +140,7 @@ fn render_docx(doc: &OoxmlDocument, options: RenderOptions) -> String {
         }
 
         if wrote_section {
-            if matches!(options.markdown_profile, MarkdownProfile::Human) {
-                out.push_str("---\n\n");
-            } else {
-                out.push('\n');
-            }
+            out.push('\n');
         }
         wrote_section = true;
 
@@ -149,11 +163,7 @@ fn render_docx(doc: &OoxmlDocument, options: RenderOptions) -> String {
         if !section.comments.is_empty() {
             out.push_str("### Comments\n");
             for note in &section.comments {
-                if note.author.is_empty() {
-                    let _ = writeln!(out, "[^{}]: {}", note.id, note.text);
-                } else {
-                    let _ = writeln!(out, "[^{}]: {}: {}", note.id, note.author, note.text);
-                }
+                render_comment(note, &mut out, false);
             }
             out.push('\n');
         }
@@ -168,7 +178,7 @@ fn render_pptx(doc: &OoxmlDocument, options: RenderOptions) -> String {
         render_properties(doc, &mut out, options);
     }
 
-    for (idx, slide) in doc.slides.iter().enumerate() {
+    for slide in &doc.slides {
         match &slide.title {
             Some(title) => {
                 let _ = write!(
@@ -221,24 +231,9 @@ fn render_pptx(doc: &OoxmlDocument, options: RenderOptions) -> String {
         if !slide.comments.is_empty() {
             out.push_str("### Comments\n");
             for note in &slide.comments {
-                if note.author.is_empty() {
-                    let _ = writeln!(out, "[^{}]: {}", note.id, escape_pipes(&note.text));
-                } else {
-                    let _ = writeln!(
-                        out,
-                        "[^{}]: {}: {}",
-                        note.id,
-                        escape_pipes(&note.author),
-                        escape_pipes(&note.text)
-                    );
-                }
+                render_comment(note, &mut out, true);
             }
             out.push('\n');
-        }
-
-        if idx + 1 < doc.slides.len() && matches!(options.markdown_profile, MarkdownProfile::Human)
-        {
-            out.push_str("---\n\n");
         }
     }
 
@@ -269,7 +264,7 @@ fn render_pdf(doc: &OoxmlDocument, options: RenderOptions) -> String {
         return out;
     };
 
-    for (idx, page) in pdf.pages.iter().enumerate() {
+    for page in &pdf.pages {
         let _ = write!(out, "## Page: {}\n\n", page.number);
         if !page.markdown.is_empty() {
             out.push_str(&page.markdown);
@@ -277,9 +272,6 @@ fn render_pdf(doc: &OoxmlDocument, options: RenderOptions) -> String {
                 out.push('\n');
             }
             out.push('\n');
-        }
-        if idx + 1 < pdf.pages.len() && matches!(options.markdown_profile, MarkdownProfile::Human) {
-            out.push_str("---\n\n");
         }
     }
 
@@ -320,9 +312,7 @@ fn render_properties(doc: &OoxmlDocument, out: &mut String, options: RenderOptio
 
 fn render_table(table: &Table, options: RenderOptions) -> String {
     let mut out = String::new();
-    if matches!(options.markdown_profile, MarkdownProfile::Human)
-        && let Some(caption) = &table.caption
-    {
+    if let Some(caption) = &table.caption {
         let _ = writeln!(out, "### {caption}");
     }
 
@@ -416,6 +406,25 @@ fn escape_pipes(s: &str) -> String {
     s.replace('|', "\\|")
 }
 
+fn render_comment(note: &CommentNote, out: &mut String, do_escape_pipes: bool) {
+    if note.author.is_empty() {
+        let _ = writeln!(
+            out,
+            "[^{}]: {}",
+            note.id,
+            escape_text(&note.text, do_escape_pipes)
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "[^{}|{}]: {}",
+            note.id,
+            escape_text(&note.author, do_escape_pipes),
+            escape_text(&note.text, do_escape_pipes),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,6 +444,7 @@ mod tests {
                     inlines: vec![Inline::Text("Hello".into())],
                 }],
             }]],
+            synthetic_headers: true,
         };
         let opts = RenderOptions {
             use_first_row_as_header: false,
@@ -476,6 +486,7 @@ mod tests {
                     },
                 ],
             ],
+            synthetic_headers: true,
         };
         let md = render_table(&table, RenderOptions::default());
         assert!(md.contains("| Region | Revenue |"));
@@ -500,6 +511,7 @@ mod tests {
                     }],
                 },
             ]],
+            synthetic_headers: true,
         };
         let opts = RenderOptions {
             use_first_row_as_header: false,
@@ -516,6 +528,7 @@ mod tests {
             caption: None,
             headers: vec!["Col1".into()],
             rows: vec![],
+            synthetic_headers: true,
         };
         let md = render_table(&table, RenderOptions::default());
         assert!(md.contains("| Col1 |"));
@@ -552,6 +565,7 @@ mod tests {
                     },
                 ],
             ],
+            synthetic_headers: false,
         };
         let md = render_table(
             &table,
@@ -591,7 +605,7 @@ mod tests {
         assert!(md.contains("Hello"));
         assert!(md.contains("### Notes"));
         assert!(md.contains("### Comments"));
-        assert!(md.contains("[^c1]: Alice: Review"));
+        assert!(md.contains("[^c1|Alice]: Review"));
     }
 
     #[test]
@@ -616,6 +630,7 @@ mod tests {
                                 }],
                             },
                         ]],
+                        synthetic_headers: true,
                     }],
                     formulas: vec![FormulaNote {
                         cell_ref: "C1".into(),
@@ -646,7 +661,6 @@ mod tests {
         assert!(md.contains("| 1 | 2 |"));
         assert!(md.contains("### Formulas"));
         assert!(md.contains("[^f1]: C1 = `=A1+B1`"));
-        assert!(md.contains("---")); // separator between sheets
     }
 
     #[test]
@@ -669,6 +683,7 @@ mod tests {
                                     inlines: vec![Inline::Text("Cell".into())],
                                 }],
                             }]],
+                            synthetic_headers: true,
                         }),
                     ],
                     comments: vec![CommentNote {
@@ -695,7 +710,7 @@ mod tests {
         // With default use_first_row_as_header, first row ("Cell") becomes header
         assert!(md.contains("| Cell |"));
         assert!(md.contains("### Comments"));
-        assert!(md.contains("[^c0]: Bob: Check this"));
+        assert!(md.contains("[^c0|Bob]: Check this"));
         assert!(md.contains("## Section: footnotes"));
         assert!(md.contains("Footnote text"));
     }
@@ -847,6 +862,7 @@ mod tests {
                     inlines: vec![Inline::Text("A|B".into())],
                 }],
             }]],
+            synthetic_headers: false,
         };
         let opts = RenderOptions {
             use_first_row_as_header: false,
@@ -857,7 +873,7 @@ mod tests {
     }
 
     #[test]
-    fn renders_multiple_slides_with_separators() {
+    fn renders_multiple_slides() {
         let doc = OoxmlDocument {
             kind: DocumentKind::Pptx,
             slides: vec![
@@ -887,7 +903,6 @@ mod tests {
             },
         );
         assert!(md.contains("## Slide 1 - First"));
-        assert!(md.contains("---"));
         assert!(md.contains("## Slide 2 - Second"));
     }
 
@@ -1061,12 +1076,11 @@ mod tests {
         );
         assert!(md.contains("## Page: 1"));
         assert!(md.contains("Page one body"));
-        assert!(md.contains("---"));
         assert!(md.contains("## Page: 2"));
     }
 
     #[test]
-    fn renders_pdf_empty_when_no_pages_and_no_props() {
+    fn renders_pdf_frontmatter_only_when_no_pages_and_no_props() {
         let doc = OoxmlDocument {
             kind: DocumentKind::Pdf,
             pdf: Some(officemd_core::ir::PdfDocument {
@@ -1077,6 +1091,7 @@ mod tests {
         };
 
         let md = render_document(&doc);
-        assert!(md.is_empty());
+        assert!(md.starts_with("<!-- officemd:"));
+        assert!(!md.contains("## Page:"));
     }
 }

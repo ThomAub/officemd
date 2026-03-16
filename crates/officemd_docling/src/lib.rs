@@ -164,6 +164,7 @@ mod tests {
                 blocks: vec![Block::Table(Table {
                     caption: Some("Sales Data".into()),
                     headers: vec!["Col1".into(), "Col2".into()],
+                    synthetic_headers: true,
                     rows: vec![
                         vec![
                             TableCell {
@@ -220,6 +221,7 @@ mod tests {
                 tables: vec![Table {
                     caption: None,
                     headers: vec!["A".into()],
+                    synthetic_headers: true,
                     rows: vec![vec![TableCell {
                         content: vec![Paragraph {
                             inlines: vec![Inline::Text("1".into())],

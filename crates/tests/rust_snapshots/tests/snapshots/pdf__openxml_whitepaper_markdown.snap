@@ -2,6 +2,8 @@
 source: crates/tests/rust_snapshots/tests/pdf.rs
 expression: normalize_markdown(&md)
 ---
+<!-- officemd: kind=pdf profile=compact first_row_as_header=true formulas=true headers_footers=true properties=false -->
+
 ## Page: 1
 
 # OFFICE OPEN XML OVERVIEW
