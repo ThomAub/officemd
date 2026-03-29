@@ -24,6 +24,7 @@ impl From<OpcError> for DocxError {
             OpcError::Io(e) => DocxError::Io(e),
             OpcError::Xml(e) => DocxError::Xml(e),
             OpcError::MissingPart(path) => DocxError::MissingPart(path),
+            OpcError::Write(msg) => DocxError::Xml(msg),
         }
     }
 }
