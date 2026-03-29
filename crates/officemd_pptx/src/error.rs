@@ -22,6 +22,7 @@ impl From<OpcError> for PptxError {
             OpcError::Io(e) => PptxError::Io(e),
             OpcError::Xml(e) => PptxError::Xml(e),
             OpcError::MissingPart(path) => PptxError::MissingPart(path),
+            OpcError::Write(msg) => PptxError::Xml(msg),
         }
     }
 }
