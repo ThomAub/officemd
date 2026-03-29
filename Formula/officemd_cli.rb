@@ -1,25 +1,25 @@
 class OfficemdCli < Formula
   desc "CLI for OfficeMD document extraction and markdown rendering"
   homepage "https://github.com/ThomAub/officemd"
-  version "0.1.4"
+  version "0.1.5"
   if OS.mac?
     if Hardware::CPU.arm?
-      url "https://github.com/ThomAub/officemd/releases/download/v0.1.4/officemd_cli-aarch64-apple-darwin.tar.xz"
-      sha256 "16d340bececc75fac321704a33615e39a68dc790117534f869c0552990a38d1f"
+      url "https://github.com/ThomAub/officemd/releases/download/v0.1.5/officemd_cli-aarch64-apple-darwin.tar.xz"
+      sha256 "e8e6d85a51d6fadda95a203ee02575a3616af931648f5599f33a47cf266379b2"
     end
     if Hardware::CPU.intel?
-      url "https://github.com/ThomAub/officemd/releases/download/v0.1.4/officemd_cli-x86_64-apple-darwin.tar.xz"
-      sha256 "f31e55e37e65af4d5f3cd671b4be5d664a5e89c51c09797fe3fdae31e22ae0db"
+      url "https://github.com/ThomAub/officemd/releases/download/v0.1.5/officemd_cli-x86_64-apple-darwin.tar.xz"
+      sha256 "9aa6cbc06f82cd5adaa1643a5b5583d86c5f6accf7ab630d680532b071b66063"
     end
   end
   if OS.linux?
     if Hardware::CPU.arm?
-      url "https://github.com/ThomAub/officemd/releases/download/v0.1.4/officemd_cli-aarch64-unknown-linux-gnu.tar.xz"
-      sha256 "46d991e657360471ac8071c8e6ec3e017655e24c670b416d2eabf5e554c3d907"
+      url "https://github.com/ThomAub/officemd/releases/download/v0.1.5/officemd_cli-aarch64-unknown-linux-gnu.tar.xz"
+      sha256 "d9fbbc4cca7fa3538d4964e14cd24462144e34c4213cf97254da753867b91713"
     end
     if Hardware::CPU.intel?
-      url "https://github.com/ThomAub/officemd/releases/download/v0.1.4/officemd_cli-x86_64-unknown-linux-gnu.tar.xz"
-      sha256 "5ee20b0f165215b0bae5c4363ea655ad7f78e4e4ffe35c5678c25cc392cf9f28"
+      url "https://github.com/ThomAub/officemd/releases/download/v0.1.5/officemd_cli-x86_64-unknown-linux-gnu.tar.xz"
+      sha256 "8591c7be45b3ac17de03cc658f2ae52e696f88c9a1d5317d2c05f5b7f63ee2ea"
     end
   end
   license "MIT"
