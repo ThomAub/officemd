@@ -1,6 +1,6 @@
 [package]
 name = "officemd_csv"
-version = "0.1.4"
+version = "0.1.5"
 edition.workspace = true
 description = "CSV extraction aligned with OfficeMD markdown output"
 license = "MIT"
@@ -13,8 +13,8 @@ keywords = ["csv", "markdown", "parser", "table", "extractor"]
 categories = ["parser-implementations", "text-processing"]
 
 [dependencies]
-officemd_core = { version = "0.1.4", path = "../officemd_core" }
-officemd_markdown = { version = "0.1.4", path = "../officemd_markdown" }
+officemd_core = { version = "0.1.5", path = "../officemd_core" }
+officemd_markdown = { version = "0.1.5", path = "../officemd_markdown" }
 csv = "1.3"
 serde_json = "1"
 thiserror = "2.0"

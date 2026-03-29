@@ -1,6 +1,6 @@
 {
   "name": "office-md-darwin-x64",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Native Node/Bun bindings for OfficeMD document extraction",
   "keywords": [
     "csv",

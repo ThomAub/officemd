@@ -1,6 +1,6 @@
 [package]
 name = "clap-ai"
-version = "0.1.4"
+version = "0.1.5"
 edition.workspace = true
 description = "AI mode detection and help tree rendering for clap CLIs"
 license = "MIT"
