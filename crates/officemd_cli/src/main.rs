@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use officemd_core::ir::OoxmlDocument;
 use officemd_core::opc::OpcPackage;
 use officemd_pptx::PptxExtractOptions;
@@ -17,7 +17,12 @@ use std::path::{Path, PathBuf};
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
+
+    /// Show commands and options in a tree format. Depth 1 shows commands only,
+    /// depth 2 includes arguments and options.
+    #[arg(long, global = true, value_name = "DEPTH", default_missing_value = "2", num_args = 0..=1)]
+    help_tree: Option<u8>,
 }
 
 /// Shared options used by convert, stream, and inspect.
@@ -33,8 +38,8 @@ struct CommonOptions {
     include_document_properties: bool,
 
     /// Output format: markdown (default) or json.
-    #[arg(long, value_enum, default_value_t = OutputFormatArg::Markdown)]
-    output_format: OutputFormatArg,
+    #[arg(long, value_enum)]
+    output_format: Option<OutputFormatArg>,
 
     /// Pretty-print JSON output.
     #[arg(long, default_value_t = false)]
@@ -239,6 +244,25 @@ struct PdfInfo {
     has_encoding_issues: bool,
 }
 
+impl CommonOptions {
+    /// Effective output format: explicit choice, or Markdown by default.
+    fn output_format(&self) -> OutputFormatArg {
+        self.output_format.unwrap_or(OutputFormatArg::Markdown)
+    }
+}
+
+impl clap_ai::AiDefaults for CommonOptions {
+    fn apply_ai_defaults(&mut self) {
+        // Only override when the user did not pass --output-format explicitly.
+        if self.output_format.is_none() {
+            self.output_format = Some(OutputFormatArg::Json);
+        }
+        if !self.pretty {
+            self.pretty = true;
+        }
+    }
+}
+
 // --- Format detection ---
 
 fn detect_format_from_path(path: &Path) -> Option<DocumentFormat> {
@@ -322,7 +346,7 @@ fn extract_ir_document(
                 streaming_rows: common.streaming,
                 sheet_filter: common.sheets.as_deref().map(parse_sheet_filter),
                 include_document_properties: common.include_document_properties
-                    || common.output_format == OutputFormatArg::Json,
+                    || common.output_format() == OutputFormatArg::Json,
                 trim_empty: matches!(common.markdown_style, MarkdownStyleArg::Compact),
             };
             officemd_xlsx::extract_tables_ir_with_options(content, &options)
@@ -331,7 +355,7 @@ fn extract_ir_document(
         DocumentFormat::Csv => {
             let options = officemd_csv::table_ir::CsvExtractOptions {
                 include_document_properties: common.include_document_properties
-                    || common.output_format == OutputFormatArg::Json,
+                    || common.output_format() == OutputFormatArg::Json,
                 ..Default::default()
             };
             officemd_csv::extract_tables_ir_with_options(content, options)
@@ -433,7 +457,7 @@ fn parse_number_ranges(spec: &str) -> Result<Vec<usize>, String> {
 // --- Output rendering ---
 
 fn render_output(doc: &OoxmlDocument, common: &CommonOptions) -> Result<String, String> {
-    match common.output_format {
+    match common.output_format() {
         OutputFormatArg::Markdown => {
             let markdown_profile = match common.markdown_style {
                 MarkdownStyleArg::Compact => officemd_markdown::MarkdownProfile::LlmCompact,
@@ -819,8 +843,38 @@ fn render_colored_diff(text_a: &str, text_b: &str, label_a: &str, label_b: &str)
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
 
-    match cli.command {
+    // Handle --help-tree before anything else
+    if let Some(depth) = cli.help_tree {
+        let cmd = Cli::command();
+        let opts = clap_ai::HelpTreeOptions {
+            depth,
+            root_suffix: if clap_ai::is_ai_mode() {
+                Some(" [AI mode]".into())
+            } else {
+                None
+            },
+            footer_lines: if clap_ai::is_ai_mode() {
+                vec![
+                    String::new(),
+                    "AI mode active (AI=True): defaults to --output-format json --pretty".into(),
+                ]
+            } else {
+                vec![]
+            },
+        };
+        clap_ai::print_help_tree(&cmd, &opts);
+        return Ok(());
+    }
+
+    let command = cli.command.ok_or_else(|| {
+        // No subcommand and no --help-tree: show usage hint
+        "no subcommand provided. Use --help for usage or --help-tree for a command overview."
+            .to_string()
+    })?;
+
+    match command {
         Command::Markdown { file, common } => {
+            // markdown/render/diff always produce markdown — AI defaults don't apply.
             let md = extract_markdown_from_file(&file, &common)?;
             let mut stdout = std::io::stdout().lock();
             stdout
@@ -852,18 +906,19 @@ fn run() -> Result<(), String> {
         Command::Convert {
             input,
             output,
-            common,
+            mut common,
         } => {
+            clap_ai::maybe_apply_ai_defaults(&mut common);
             let bytes = std::fs::read(&input)
                 .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?;
             let resolved = resolve_format(&bytes, Some(&input), common.format)?;
             let doc = extract_ir_document(&bytes, resolved, &common)?;
             let rendered = render_output(&doc, &common)?;
             let output_path =
-                output.unwrap_or_else(|| default_output_path(&input, common.output_format));
+                output.unwrap_or_else(|| default_output_path(&input, common.output_format()));
             std::fs::write(&output_path, &rendered)
                 .map_err(|e| format!("failed to write output '{}': {e}", output_path.display()))?;
-            let format_label = match common.output_format {
+            let format_label = match common.output_format() {
                 OutputFormatArg::Markdown => "markdown",
                 OutputFormatArg::Json => "JSON",
             };
@@ -874,7 +929,8 @@ fn run() -> Result<(), String> {
                 output_path.display()
             );
         }
-        Command::Stream { input, common } => {
+        Command::Stream { input, mut common } => {
+            clap_ai::maybe_apply_ai_defaults(&mut common);
             let use_stdin = input == Path::new("-");
             let bytes = if use_stdin {
                 read_all_from_stdin()?
@@ -897,7 +953,8 @@ fn run() -> Result<(), String> {
                 .write_all(rendered.as_bytes())
                 .map_err(|e| format!("failed to write stdout: {e}"))?;
         }
-        Command::Inspect { input, common } => {
+        Command::Inspect { input, mut common } => {
+            clap_ai::maybe_apply_ai_defaults(&mut common);
             let bytes = std::fs::read(&input)
                 .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?;
             let resolved = resolve_format(&bytes, Some(&input), common.format)?;
@@ -919,7 +976,7 @@ fn run() -> Result<(), String> {
                 build_inspect_info(&doc, resolved)
             };
 
-            let output = match common.output_format {
+            let output = match common.output_format() {
                 OutputFormatArg::Json => {
                     if common.pretty {
                         serde_json::to_string_pretty(&info).map_err(|e| e.to_string())?
@@ -1007,7 +1064,7 @@ mod tests {
         CommonOptions {
             format: None,
             include_document_properties: false,
-            output_format: OutputFormatArg::Markdown,
+            output_format: Some(OutputFormatArg::Markdown),
             pretty: false,
             sheets: None,
             pages: None,

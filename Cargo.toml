@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+  "crates/clap_ai",
   "crates/officemd_core",
   "crates/officemd_markdown",
   "crates/officemd_docx",
@@ -16,6 +17,7 @@ members = [
   "examples/rust",
 ]
 default-members = [
+  "crates/clap_ai",
   "crates/officemd_core",
   "crates/officemd_markdown",
   "crates/officemd_docx",
