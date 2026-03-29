@@ -27,3 +27,5 @@ dist/
 examples/data/PLAQUETTE_COMPTABLE_2022.pdf
 **/snapshots/*plaquette*
 diff.md
+benchmark/corpus/
+benchmark/results/
