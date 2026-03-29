@@ -228,6 +228,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap-ai"
+version = "0.1.4"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_builder"
 version = "4.5.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -950,6 +957,7 @@ name = "officemd_cli"
 version = "0.1.4"
 dependencies = [
  "clap",
+ "clap-ai",
  "officemd_core",
  "officemd_csv",
  "officemd_docx",

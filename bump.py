@@ -37,6 +37,7 @@ VERSION_FILES: list[tuple[str, str, str]] = [
     ("crates/officemd_pptx/Cargo.toml", 'version = "{old}"', 'version = "{new}"'),
     ("crates/officemd_pdf/Cargo.toml", 'version = "{old}"', 'version = "{new}"'),
     ("crates/officemd_docling/Cargo.toml", 'version = "{old}"', 'version = "{new}"'),
+    ("crates/clap_ai/Cargo.toml", 'version = "{old}"', 'version = "{new}"'),
     ("crates/officemd_cli/Cargo.toml", 'version = "{old}"', 'version = "{new}"'),
     ("crates/officemd_js/Cargo.toml", 'version = "{old}"', 'version = "{new}"'),
     ("crates/officemd_python/Cargo.toml", 'version = "{old}"', 'version = "{new}"'),

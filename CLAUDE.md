@@ -1,17 +1,18 @@
 # officemd
 
-Monorepo for extracting OOXML/PDF documents to Markdown with a shared IR.
+Monorepo for extracting and generating OOXML/PDF documents with Markdown and a shared IR.
 
 ## Crate layout
 
 | Crate | Purpose |
 |---|---|
-| `officemd_core` | Shared IR types, OPC package reader |
+| `clap_ai` | Reusable AI mode detection + help tree for clap CLIs |
+| `officemd_core` | Shared IR types, OPC package reader + writer |
 | `officemd_markdown` | Markdown renderer + bidirectional parser |
-| `officemd_docx` | DOCX extractor |
-| `officemd_xlsx` | XLSX extractor |
+| `officemd_docx` | DOCX extractor + generator |
+| `officemd_xlsx` | XLSX extractor + generator |
 | `officemd_csv` | CSV extractor |
-| `officemd_pptx` | PPTX extractor |
+| `officemd_pptx` | PPTX extractor + generator |
 | `officemd_pdf` | PDF extractor (pdf-inspector vendored) |
 | `officemd_docling` | Docling format converter |
 | `officemd_cli` | Rust CLI binary |
@@ -46,7 +47,7 @@ uv run bump.py major            # 0.1.4 -> 1.0.0
 uv run bump.py patch --dry-run  # preview without writing
 ```
 
-This updates versions in all 22 files (12 Cargo.toml, 9 package.json, 1 pyproject.toml),
+This updates versions in all 23 files (13 Cargo.toml, 9 package.json, 1 pyproject.toml),
 runs `cargo check` to update Cargo.lock, commits, and creates the git tag.
 
 After running, push with:
@@ -58,7 +59,7 @@ git push origin main && git push origin v<new-version>
 ### Version files managed by bump.py
 
 - `Cargo.toml` (workspace)
-- `crates/officemd_*/Cargo.toml` (12 crates, including inter-crate dep versions)
+- `crates/officemd_*/Cargo.toml` + `crates/clap_ai/Cargo.toml` (12 crates + clap_ai, including inter-crate dep versions)
 - `crates/officemd_js/package.json` + `crates/officemd_js/npm/*/package.json` (9 files)
 - `crates/officemd_python/pyproject.toml`
 

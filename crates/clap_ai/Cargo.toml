@@ -1,0 +1,20 @@
+[package]
+name = "clap-ai"
+version = "0.1.4"
+edition.workspace = true
+description = "AI mode detection and help tree rendering for clap CLIs"
+license = "MIT"
+authors = ["Thomas Aubry"]
+repository = "https://github.com/ThomAub/officemd"
+homepage = "https://github.com/ThomAub/officemd"
+keywords = ["clap", "cli", "ai", "help", "tree"]
+categories = ["command-line-interface"]
+
+[dependencies]
+clap = "4"
+
+[dev-dependencies]
+clap = { version = "4", features = ["derive"] }
+
+[lints]
+workspace = true
