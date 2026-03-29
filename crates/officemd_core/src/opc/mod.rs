@@ -4,6 +4,7 @@ pub mod content_types;
 pub mod package;
 pub mod part;
 pub mod relationships;
+pub mod writer;
 
 pub use content_types::ContentTypes;
 pub use package::{OpcError, OpcPackage};
@@ -12,3 +13,4 @@ pub use relationships::{
     load_relationships_for_part, part_base_dir, relationship_target_map, rels_path_for_part,
     resolve_relationship_target,
 };
+pub use writer::{OpcWriter, RelEntry, serialize_relationships, xml_escape_attr, xml_escape_text};

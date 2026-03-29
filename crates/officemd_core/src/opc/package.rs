@@ -24,6 +24,8 @@ pub enum OpcError {
     Xml(String),
     #[error("Missing required part: {0}")]
     MissingPart(String),
+    #[error("Write error: {0}")]
+    Write(String),
 }
 
 /// Read-only OOXML package accessor.

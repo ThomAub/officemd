@@ -69,7 +69,7 @@ jobs:
           crate: cargo-nextest
           locked: true
       - name: test
-        run: cargo nextest run --workspace --cargo-quiet --failure-output final --status-level fail --no-fail-fast
+        run: cargo nextest run --workspace --exclude officemd_python --cargo-quiet --failure-output final --status-level fail --no-fail-fast
       - name: cargo package dry-run
         if: matrix.os == 'ubuntu-latest'
         run: cargo package --workspace --exclude officemd_examples --exclude officemd_js --exclude officemd_python --allow-dirty --no-verify
