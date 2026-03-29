@@ -49,6 +49,33 @@ OUT_MARKIT="$RESULTS/markit"
 OUT_LITEPARSE="$RESULTS/liteparse"
 
 mkdir -p "$OUT_OFFICEMD" "$OUT_MARKITDOWN" "$OUT_MARKIT" "$OUT_LITEPARSE"
+rm -f "$OUT_OFFICEMD"/*.md "$OUT_MARKITDOWN"/*.md "$OUT_MARKIT"/*.md "$OUT_LITEPARSE"/*.md "$RESULTS/quality.md"
+
+file_id() {
+    local file="$1"
+    local rel="${file#$REPO_ROOT/}"
+    rel="${rel//\//__}"
+    rel="${rel// /_}"
+    printf "%s" "$rel"
+}
+
+display_name() {
+    local file="$1"
+    printf "%s" "${file#$REPO_ROOT/}"
+}
+
+run_converter() {
+    local output="$1"
+    shift
+
+    local tmp
+    tmp="$(mktemp "$RESULTS/.compare.XXXXXX")"
+    if "$@" > "$tmp" 2>/dev/null; then
+        mv "$tmp" "$output"
+    else
+        rm -f "$tmp" "$output"
+    fi
+}
 
 # Collect benchmark files from corpus + examples/data
 FILES=()
@@ -72,25 +99,25 @@ echo "=== Converting files (${#FILES[@]}) ==="
 for FILE in "${FILES[@]}"; do
     BASENAME="$(basename "$FILE")"
     EXT="${BASENAME##*.}"
-    STEM="${BASENAME%.*}"
+    FILE_ID="$(file_id "$FILE")"
 
     echo "  $BASENAME"
 
     # officemd
-    "$OFFICEMD" markdown "$FILE" > "$OUT_OFFICEMD/${STEM}.md" 2>/dev/null || true
+    run_converter "$OUT_OFFICEMD/${FILE_ID}.md" "$OFFICEMD" markdown "$FILE"
 
     # markitdown
-    uv run --with 'markitdown[all]==0.1.5' -- markitdown "$FILE" \
-        > "$OUT_MARKITDOWN/${STEM}.md" 2>/dev/null || true
+    run_converter "$OUT_MARKITDOWN/${FILE_ID}.md" \
+        uv run --with 'markitdown[all]==0.1.5' -- markitdown "$FILE"
 
     # markit (all formats)
     if [ "$HAS_MARKIT" = true ]; then
-        markit "$FILE" > "$OUT_MARKIT/${STEM}.md" 2>/dev/null || true
+        run_converter "$OUT_MARKIT/${FILE_ID}.md" markit "$FILE"
     fi
 
     # liteparse (PDF only)
     if [ "$EXT" = "pdf" ] && [ "$HAS_LITEPARSE" = true ]; then
-        lit parse "$FILE" > "$OUT_LITEPARSE/${STEM}.md" 2>/dev/null || true
+        run_converter "$OUT_LITEPARSE/${FILE_ID}.md" lit parse "$FILE"
     fi
 done
 
@@ -119,14 +146,15 @@ echo ""
 print_header
 
 for FILE in "${FILES[@]}"; do
+    FILE_LABEL="$(display_name "$FILE")"
+    FILE_ID="$(file_id "$FILE")"
     BASENAME="$(basename "$FILE")"
-    STEM="${BASENAME%.*}"
     EXT="${BASENAME##*.}"
 
-    o_file="$OUT_OFFICEMD/${STEM}.md"
-    m_file="$OUT_MARKITDOWN/${STEM}.md"
-    k_file="$OUT_MARKIT/${STEM}.md"
-    l_file="$OUT_LITEPARSE/${STEM}.md"
+    o_file="$OUT_OFFICEMD/${FILE_ID}.md"
+    m_file="$OUT_MARKITDOWN/${FILE_ID}.md"
+    k_file="$OUT_MARKIT/${FILE_ID}.md"
+    l_file="$OUT_LITEPARSE/${FILE_ID}.md"
 
     o_val="-"; m_val="-"; k_val="-"; l_val="-"
 
@@ -135,7 +163,7 @@ for FILE in "${FILES[@]}"; do
     [ -s "$k_file" ] && k_val="$(wc -c < "$k_file" | tr -d ' ')"
     [ "$EXT" = "pdf" ] && [ -s "$l_file" ] && l_val="$(wc -c < "$l_file" | tr -d ' ')"
 
-    ROW="$(printf "$FMT" "$BASENAME" "$o_val" "$m_val" "$k_val" "$l_val")"
+    ROW="$(printf "$FMT" "$FILE_LABEL" "$o_val" "$m_val" "$k_val" "$l_val")"
 
     echo -n "$ROW"
     echo "$ROW" >> "$REPORT"
