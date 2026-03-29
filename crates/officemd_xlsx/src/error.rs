@@ -22,6 +22,7 @@ impl From<OpcError> for XlsxError {
             OpcError::Io(e) => XlsxError::Io(e),
             OpcError::Xml(e) => XlsxError::Xml(e),
             OpcError::MissingPart(path) => XlsxError::MissingPart(path),
+            OpcError::Write(msg) => XlsxError::Xml(msg),
         }
     }
 }
