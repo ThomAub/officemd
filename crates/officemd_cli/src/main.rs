@@ -149,6 +149,24 @@ enum Command {
         #[command(flatten)]
         common: CommonOptions,
     },
+
+    /// Create an Office document from markdown input.
+    ///
+    /// Reads officemd-flavored markdown and generates a .docx, .xlsx, or .pptx
+    /// file. The output format is detected from the file extension.
+    ///
+    /// Examples:
+    ///   officemd create report.docx < input.md
+    ///   officemd create data.xlsx --input table.md
+    ///   officemd create slides.pptx --input deck.md
+    Create {
+        /// Output file path (.docx, .xlsx, .pptx).
+        output: PathBuf,
+
+        /// Input markdown file, or '-' for stdin (default).
+        #[arg(short, long, default_value = "-")]
+        input: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -991,6 +1009,43 @@ fn run() -> Result<(), String> {
             stdout
                 .write_all(output.as_bytes())
                 .map_err(|e| format!("failed to write stdout: {e}"))?;
+        }
+        Command::Create { output, input } => {
+            let use_stdin = input == Path::new("-");
+            let markdown = if use_stdin {
+                let bytes = read_all_from_stdin()?;
+                String::from_utf8(bytes).map_err(|e| format!("invalid UTF-8 in stdin: {e}"))?
+            } else {
+                std::fs::read_to_string(&input)
+                    .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?
+            };
+
+            let doc = officemd_markdown::parse_document(&markdown)
+                .map_err(|e| format!("failed to parse markdown: {e}"))?;
+
+            let ext = output
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(str::to_ascii_lowercase);
+
+            let bytes = match ext.as_deref() {
+                Some("docx") => officemd_docx::generate_docx(&doc)
+                    .map_err(|e| format!("DOCX generation failed: {e}"))?,
+                Some("xlsx") => officemd_xlsx::generate_xlsx(&doc)
+                    .map_err(|e| format!("XLSX generation failed: {e}"))?,
+                Some("pptx") => officemd_pptx::generate_pptx(&doc)
+                    .map_err(|e| format!("PPTX generation failed: {e}"))?,
+                _ => {
+                    return Err(format!(
+                        "unsupported output format '{}'. Use .docx, .xlsx, or .pptx",
+                        output.display()
+                    ));
+                }
+            };
+
+            std::fs::write(&output, &bytes)
+                .map_err(|e| format!("failed to write '{}': {e}", output.display()))?;
+            eprintln!("Created {} ({} bytes)", output.display(), bytes.len());
         }
     }
 
