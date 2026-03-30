@@ -12,6 +12,7 @@ from officemd._officemd import (  # type: ignore[unresolved-import]
     markdown_from_bytes_batch,
 )
 from officemd.patching import (
+    BatchPatchContentResult,
     BatchPatchJob,
     BatchPatchResult,
     DocxPatch,
@@ -23,11 +24,14 @@ from officemd.patching import (
     ScopedDocxReplace,
     ScopedPptxReplace,
     TextReplace,
+    PatchReport,
     patch_docx,
     patch_docx_batch,
+    patch_docx_batch_with_report,
     patch_files,
     patch_pptx,
     patch_pptx_batch,
+    patch_pptx_batch_with_report,
 )
 
 
@@ -47,6 +51,7 @@ except ModuleNotFoundError:
 
 __all__ = [
     "apply_ooxml_patch_json",
+    "BatchPatchContentResult",
     "BatchPatchJob",
     "BatchPatchResult",
     "detect_format",
@@ -62,11 +67,14 @@ __all__ = [
     "MatchPolicy",
     "inspect_pdf_json",
     "markdown_from_bytes",
+    "PatchReport",
     "patch_docx",
     "patch_docx_batch",
+    "patch_docx_batch_with_report",
     "patch_files",
     "patch_pptx",
     "patch_pptx_batch",
+    "patch_pptx_batch_with_report",
     "PptxPatch",
     "PptxTextScope",
     "markdown_from_bytes_batch",

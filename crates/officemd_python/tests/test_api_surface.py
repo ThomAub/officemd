@@ -18,8 +18,10 @@ EXPECTED_EXPORTS = [
     "markdown_from_bytes_batch",
     "patch_docx",
     "patch_docx_batch",
+    "patch_docx_batch_with_report",
     "patch_pptx",
     "patch_pptx_batch",
+    "patch_pptx_batch_with_report",
 ]
 
 
@@ -96,6 +98,23 @@ def test_patch_docx_batch_applies_same_patch_with_rayon_workers() -> None:
     assert "term" in officemd.markdown_from_bytes(patched[1], format="docx")
 
 
+def test_patch_docx_batch_with_report_returns_counts() -> None:
+    content = officemd.create_document_from_markdown("## Section: body\n\nword word\n", "docx")
+    patch = officemd.DocxPatch(
+        scoped_replacements=[
+            officemd.ScopedDocxReplace(
+                officemd.DocxTextScope.ALL_TEXT,
+                officemd.TextReplace("word", "term"),
+            )
+        ]
+    )
+    patched = officemd.patch_docx_batch_with_report([content], patch, workers=2)
+    assert len(patched) == 1
+    assert patched[0].report.replacements_applied >= 2
+    assert patched[0].report.parts_modified >= 1
+    assert "term term" in officemd.markdown_from_bytes(patched[0].content, format="docx")
+
+
 def test_patch_files_uses_rust_batch_patching(tmp_path: Path) -> None:
     content = officemd.create_document_from_markdown("## Section: body\n\nword\n", "docx")
     src1 = tmp_path / "a.docx"
@@ -118,5 +137,7 @@ def test_patch_files_uses_rust_batch_patching(tmp_path: Path) -> None:
         workers=2,
     )
     assert all(result.ok for result in results)
+    assert all(result.report is not None for result in results)
+    assert all(result.report.replacements_applied >= 1 for result in results if result.report is not None)
     assert "term" in officemd.markdown_from_bytes((tmp_path / "out1.docx").read_bytes(), format="docx")
     assert "term" in officemd.markdown_from_bytes((tmp_path / "out2.docx").read_bytes(), format="docx")

@@ -148,16 +148,51 @@ pub struct OoxmlPatchRequest {
     pub core_title: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PatchReport {
+    pub parts_scanned: usize,
+    pub parts_modified: usize,
+    pub replacements_applied: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PatchedDocument {
+    pub content: Vec<u8>,
+    pub report: PatchReport,
+}
+
 pub fn patch_docx(content: &[u8], patch: &DocxPatch) -> Result<Vec<u8>, PatchError> {
-    let mut parts = read_parts(content)?;
-    apply_docx_patch_to_parts(&mut parts, patch)?;
-    write_parts(&parts)
+    Ok(patch_docx_with_report(content, patch)?.content)
 }
 
 pub fn patch_pptx(content: &[u8], patch: &PptxPatch) -> Result<Vec<u8>, PatchError> {
+    Ok(patch_pptx_with_report(content, patch)?.content)
+}
+
+pub fn patch_docx_with_report(
+    content: &[u8],
+    patch: &DocxPatch,
+) -> Result<PatchedDocument, PatchError> {
     let mut parts = read_parts(content)?;
-    apply_pptx_patch_to_parts(&mut parts, patch)?;
-    write_parts(&parts)
+    let mut report = PatchReport::default();
+    apply_docx_patch_to_parts(&mut parts, patch, &mut report)?;
+    Ok(PatchedDocument {
+        content: write_parts(&parts)?,
+        report,
+    })
+}
+
+pub fn patch_pptx_with_report(
+    content: &[u8],
+    patch: &PptxPatch,
+) -> Result<PatchedDocument, PatchError> {
+    let mut parts = read_parts(content)?;
+    let mut report = PatchReport::default();
+    apply_pptx_patch_to_parts(&mut parts, patch, &mut report)?;
+    Ok(PatchedDocument {
+        content: write_parts(&parts)?,
+        report,
+    })
 }
 
 pub fn patch_docx_batch(
@@ -165,7 +200,10 @@ pub fn patch_docx_batch(
     patch: &DocxPatch,
     workers: Option<usize>,
 ) -> Result<Vec<Vec<u8>>, PatchError> {
-    run_batch(contents, workers, |content| patch_docx(&content, patch))
+    Ok(patch_docx_batch_with_report(contents, patch, workers)?
+        .into_iter()
+        .map(|item| item.content)
+        .collect())
 }
 
 pub fn patch_pptx_batch(
@@ -173,7 +211,30 @@ pub fn patch_pptx_batch(
     patch: &PptxPatch,
     workers: Option<usize>,
 ) -> Result<Vec<Vec<u8>>, PatchError> {
-    run_batch(contents, workers, |content| patch_pptx(&content, patch))
+    Ok(patch_pptx_batch_with_report(contents, patch, workers)?
+        .into_iter()
+        .map(|item| item.content)
+        .collect())
+}
+
+pub fn patch_docx_batch_with_report(
+    contents: Vec<Vec<u8>>,
+    patch: &DocxPatch,
+    workers: Option<usize>,
+) -> Result<Vec<PatchedDocument>, PatchError> {
+    run_batch(contents, workers, |content| {
+        patch_docx_with_report(&content, patch)
+    })
+}
+
+pub fn patch_pptx_batch_with_report(
+    contents: Vec<Vec<u8>>,
+    patch: &PptxPatch,
+    workers: Option<usize>,
+) -> Result<Vec<PatchedDocument>, PatchError> {
+    run_batch(contents, workers, |content| {
+        patch_pptx_with_report(&content, patch)
+    })
 }
 
 pub fn apply_ooxml_patch(
@@ -181,7 +242,8 @@ pub fn apply_ooxml_patch(
     request: &OoxmlPatchRequest,
 ) -> Result<Vec<u8>, PatchError> {
     let mut parts = read_parts(content)?;
-    apply_low_level_patch_to_parts(&mut parts, request)?;
+    let mut report = PatchReport::default();
+    apply_low_level_patch_to_parts(&mut parts, request, &mut report)?;
     write_parts(&parts)
 }
 
@@ -218,13 +280,32 @@ pub fn patch_pptx_batch_json(
     patch_pptx_batch(contents, &patch, workers)
 }
 
-fn run_batch<F>(
+pub fn patch_docx_batch_json_with_report(
+    contents: Vec<Vec<u8>>,
+    patch_json: &str,
+    workers: Option<usize>,
+) -> Result<Vec<PatchedDocument>, PatchError> {
+    let patch: DocxPatch = serde_json::from_str(patch_json)?;
+    patch_docx_batch_with_report(contents, &patch, workers)
+}
+
+pub fn patch_pptx_batch_json_with_report(
+    contents: Vec<Vec<u8>>,
+    patch_json: &str,
+    workers: Option<usize>,
+) -> Result<Vec<PatchedDocument>, PatchError> {
+    let patch: PptxPatch = serde_json::from_str(patch_json)?;
+    patch_pptx_batch_with_report(contents, &patch, workers)
+}
+
+fn run_batch<T, F>(
     contents: Vec<Vec<u8>>,
     workers: Option<usize>,
     job: F,
-) -> Result<Vec<Vec<u8>>, PatchError>
+) -> Result<Vec<T>, PatchError>
 where
-    F: Fn(Vec<u8>) -> Result<Vec<u8>, PatchError> + Sync + Send,
+    F: Fn(Vec<u8>) -> Result<T, PatchError> + Sync + Send,
+    T: Send,
 {
     let worker_count =
         workers.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, usize::from));
@@ -239,27 +320,28 @@ where
 fn apply_docx_patch_to_parts(
     parts: &mut BTreeMap<String, Vec<u8>>,
     patch: &DocxPatch,
+    report: &mut PatchReport,
 ) -> Result<(), PatchError> {
     let part_names: Vec<String> = parts.keys().cloned().collect();
 
     if let Some(replace) = &patch.replace_body_title {
-        apply_replace_to_named_part(parts, "word/document.xml", replace)?;
+        apply_replace_to_named_part(parts, "word/document.xml", replace, report)?;
     }
 
     let mut metadata_requested = false;
     for scoped in &patch.scoped_replacements {
         if scoped.scope == DocxTextScope::MetadataCoreTitle {
             metadata_requested = true;
-            apply_core_title_replace(parts, &scoped.replace)?;
+            apply_core_title_replace(parts, &scoped.replace, report)?;
             continue;
         }
 
         let targets = docx_scope_targets(&part_names, scoped.scope);
-        apply_replace_to_parts(parts, &targets, &scoped.replace)?;
+        apply_replace_to_parts(parts, &targets, &scoped.replace, report)?;
     }
 
     if patch.set_core_title.is_some() || metadata_requested {
-        apply_core_title(parts, patch.set_core_title.as_deref())?;
+        apply_core_title(parts, patch.set_core_title.as_deref(), report)?;
     }
 
     Ok(())
@@ -268,6 +350,7 @@ fn apply_docx_patch_to_parts(
 fn apply_pptx_patch_to_parts(
     parts: &mut BTreeMap<String, Vec<u8>>,
     patch: &PptxPatch,
+    report: &mut PatchReport,
 ) -> Result<(), PatchError> {
     let part_names: Vec<String> = parts.keys().cloned().collect();
 
@@ -275,16 +358,16 @@ fn apply_pptx_patch_to_parts(
     for scoped in &patch.scoped_replacements {
         if scoped.scope == PptxTextScope::MetadataCoreTitle {
             metadata_requested = true;
-            apply_core_title_replace(parts, &scoped.replace)?;
+            apply_core_title_replace(parts, &scoped.replace, report)?;
             continue;
         }
 
         let targets = pptx_scope_targets(&part_names, scoped.scope);
-        apply_replace_to_parts(parts, &targets, &scoped.replace)?;
+        apply_replace_to_parts(parts, &targets, &scoped.replace, report)?;
     }
 
     if patch.set_core_title.is_some() || metadata_requested {
-        apply_core_title(parts, patch.set_core_title.as_deref())?;
+        apply_core_title(parts, patch.set_core_title.as_deref(), report)?;
     }
 
     Ok(())
@@ -293,12 +376,13 @@ fn apply_pptx_patch_to_parts(
 fn apply_low_level_patch_to_parts(
     parts: &mut BTreeMap<String, Vec<u8>>,
     request: &OoxmlPatchRequest,
+    report: &mut PatchReport,
 ) -> Result<(), PatchError> {
     for edit in &request.edits {
         let replace = TextReplace::first(&edit.from, &edit.to);
-        apply_replace_to_named_part(parts, &edit.part, &replace)?;
+        apply_replace_to_named_part(parts, &edit.part, &replace, report)?;
     }
-    apply_core_title(parts, request.core_title.as_deref())?;
+    apply_core_title(parts, request.core_title.as_deref(), report)?;
     Ok(())
 }
 
@@ -306,18 +390,23 @@ fn apply_replace_to_named_part(
     parts: &mut BTreeMap<String, Vec<u8>>,
     part: &str,
     replace: &TextReplace,
+    report: &mut PatchReport,
 ) -> Result<(), PatchError> {
+    report.parts_scanned += 1;
     let data = parts
         .get_mut(part)
         .ok_or_else(|| PatchError::MissingPart(part.to_string()))?;
-    let updated = apply_replace_to_text(&String::from_utf8_lossy(data), replace)?;
-    if updated == String::from_utf8_lossy(data) {
+    let original = String::from_utf8_lossy(data).into_owned();
+    let (updated, replacements_applied) = apply_replace_to_text(&original, replace)?;
+    if replacements_applied == 0 {
         return Err(PatchError::TextNotFound {
             part: part.to_string(),
             needle: replace.from.clone(),
         });
     }
     *data = updated.into_bytes();
+    report.parts_modified += 1;
+    report.replacements_applied += replacements_applied;
     Ok(())
 }
 
@@ -325,16 +414,20 @@ fn apply_replace_to_parts(
     parts: &mut BTreeMap<String, Vec<u8>>,
     target_parts: &[String],
     replace: &TextReplace,
+    report: &mut PatchReport,
 ) -> Result<(), PatchError> {
     let mut matched = false;
     for part in target_parts {
+        report.parts_scanned += 1;
         let Some(data) = parts.get_mut(part) else {
             continue;
         };
         let original = String::from_utf8_lossy(data).into_owned();
-        let updated = apply_replace_to_text(&original, replace)?;
-        if updated != original {
+        let (updated, replacements_applied) = apply_replace_to_text(&original, replace)?;
+        if replacements_applied > 0 {
             *data = updated.into_bytes();
+            report.parts_modified += 1;
+            report.replacements_applied += replacements_applied;
             matched = true;
         }
     }
@@ -349,24 +442,34 @@ fn apply_replace_to_parts(
     }
 }
 
-fn apply_replace_to_text(text: &str, replace: &TextReplace) -> Result<String, PatchError> {
+fn apply_replace_to_text(text: &str, replace: &TextReplace) -> Result<(String, usize), PatchError> {
     if replace.from.is_empty() {
-        return Ok(text.to_string());
+        return Ok((text.to_string(), 0));
     }
 
-    let updated = match (replace.match_policy, replace.mode) {
-        (MatchPolicy::Exact, ReplaceMode::All) => text.replace(&replace.from, &replace.to),
-        (MatchPolicy::Exact, ReplaceMode::First) => text.replacen(&replace.from, &replace.to, 1),
+    let (updated, replacements_applied) = match (replace.match_policy, replace.mode) {
+        (MatchPolicy::Exact, ReplaceMode::All) => {
+            let count = text.match_indices(&replace.from).count();
+            (text.replace(&replace.from, &replace.to), count)
+        }
+        (MatchPolicy::Exact, ReplaceMode::First) => {
+            let count = usize::from(text.contains(&replace.from));
+            (text.replacen(&replace.from, &replace.to, 1), count)
+        }
         _ => {
             let regex = build_replace_regex(replace)?;
+            let count = match replace.mode {
+                ReplaceMode::All => regex.find_iter(text).count(),
+                ReplaceMode::First => usize::from(regex.find(text).is_some()),
+            };
             let replaced = match replace.mode {
                 ReplaceMode::All => regex.replace_all(text, replace.to.as_str()),
                 ReplaceMode::First => regex.replace(text, replace.to.as_str()),
             };
-            replaced.into_owned()
+            (replaced.into_owned(), count)
         }
     };
-    Ok(updated)
+    Ok((updated, replacements_applied))
 }
 
 fn build_replace_regex(replace: &TextReplace) -> Result<Regex, PatchError> {
@@ -442,11 +545,13 @@ fn pptx_scope_targets(part_names: &[String], scope: PptxTextScope) -> Vec<String
 fn apply_core_title(
     parts: &mut BTreeMap<String, Vec<u8>>,
     title: Option<&str>,
+    report: &mut PatchReport,
 ) -> Result<(), PatchError> {
     let Some(title) = title else {
         return Ok(());
     };
 
+    report.parts_scanned += 1;
     let core_xml = parts
         .get_mut("docProps/core.xml")
         .ok_or_else(|| PatchError::MissingPart("docProps/core.xml".to_string()))?;
@@ -491,14 +596,17 @@ fn apply_core_title(
         });
     };
     *core_xml = updated.into_bytes();
+    report.parts_modified += 1;
+    report.replacements_applied += 1;
     Ok(())
 }
 
 fn apply_core_title_replace(
     parts: &mut BTreeMap<String, Vec<u8>>,
     replace: &TextReplace,
+    report: &mut PatchReport,
 ) -> Result<(), PatchError> {
-    apply_replace_to_named_part(parts, "docProps/core.xml", replace)
+    apply_replace_to_named_part(parts, "docProps/core.xml", replace, report)
 }
 
 fn read_parts(content: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, PatchError> {
@@ -646,7 +754,7 @@ mod tests {
 
     #[test]
     fn case_insensitive_first_replace_works() {
-        let updated = apply_replace_to_text(
+        let (updated, replacements_applied) = apply_replace_to_text(
             "Word word WORD",
             &TextReplace {
                 from: "word".to_string(),
@@ -657,12 +765,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(updated, "term word WORD");
+        assert_eq!(replacements_applied, 1);
     }
 
     #[test]
     fn patch_docx_batch_works() {
         let bytes = build_zip(vec![("word/document.xml", "<w:t>word</w:t>")]);
-        let patched = patch_docx_batch(
+        let patched = patch_docx_batch_with_report(
             vec![bytes.clone(), bytes],
             &DocxPatch {
                 set_core_title: None,
@@ -677,8 +786,11 @@ mod tests {
         .unwrap();
         assert_eq!(patched.len(), 2);
         for item in patched {
-            let parts = read_parts(&item).unwrap();
+            let parts = read_parts(&item.content).unwrap();
             assert!(String::from_utf8_lossy(&parts["word/document.xml"]).contains("term"));
+            assert_eq!(item.report.parts_scanned, 1);
+            assert_eq!(item.report.parts_modified, 1);
+            assert_eq!(item.report.replacements_applied, 1);
         }
     }
 
