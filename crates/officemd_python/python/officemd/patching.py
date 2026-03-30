@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field, is_dataclass
 from enum import Enum
 import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from officemd._officemd import _patch_docx_batch_json  # type: ignore[unresolved-import]
 from officemd._officemd import _patch_docx_json  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_pptx_batch_json  # type: ignore[unresolved-import]
 from officemd._officemd import _patch_pptx_json  # type: ignore[unresolved-import]
 
 
@@ -151,23 +152,48 @@ def patch_pptx(content: bytes, patch: PptxPatch | Mapping[str, Any]) -> bytes:
     return _patch_pptx_json(content, _to_patch_json(patch))
 
 
-def _run_batch_patch(job: BatchPatchJob) -> BatchPatchResult:
-    input_path = Path(job.input_path)
-    output_path = Path(job.output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    content = input_path.read_bytes()
-    if job.format == "docx":
-        patched = patch_docx(content, job.patch)
-    elif job.format == "pptx":
-        patched = patch_pptx(content, job.patch)
-    else:
-        return BatchPatchResult(str(input_path), str(output_path), job.format, False, "format must be 'docx' or 'pptx'")
-    output_path.write_bytes(patched)
-    return BatchPatchResult(str(input_path), str(output_path), job.format, True)
+def patch_docx_batch(
+    contents: list[bytes], patch: DocxPatch | Mapping[str, Any], workers: int | None = None
+) -> list[bytes]:
+    return _patch_docx_batch_json(contents, _to_patch_json(patch), workers)
+
+
+def patch_pptx_batch(
+    contents: list[bytes], patch: PptxPatch | Mapping[str, Any], workers: int | None = None
+) -> list[bytes]:
+    return _patch_pptx_batch_json(contents, _to_patch_json(patch), workers)
 
 
 def patch_files(jobs: list[BatchPatchJob], workers: int | None = None) -> list[BatchPatchResult]:
-    if workers is None or workers <= 1 or len(jobs) <= 1:
-        return [_run_batch_patch(job) for job in jobs]
-    with ProcessPoolExecutor(max_workers=workers) as executor:
-        return list(executor.map(_run_batch_patch, jobs))
+    results: list[BatchPatchResult] = []
+    grouped: dict[tuple[str, str], list[BatchPatchJob]] = {}
+
+    for job in jobs:
+        if job.format not in {"docx", "pptx"}:
+            results.append(
+                BatchPatchResult(
+                    str(job.input_path),
+                    str(job.output_path),
+                    job.format,
+                    False,
+                    "format must be 'docx' or 'pptx'",
+                )
+            )
+            continue
+        patch_json = _to_patch_json(job.patch)
+        grouped.setdefault((job.format, patch_json), []).append(job)
+
+    for (fmt, patch_json), grouped_jobs in grouped.items():
+        contents = [Path(job.input_path).read_bytes() for job in grouped_jobs]
+        if fmt == "docx":
+            patched_contents = _patch_docx_batch_json(contents, patch_json, workers)
+        else:
+            patched_contents = _patch_pptx_batch_json(contents, patch_json, workers)
+
+        for job, patched in zip(grouped_jobs, patched_contents, strict=True):
+            output_path = Path(job.output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(patched)
+            results.append(BatchPatchResult(str(job.input_path), str(job.output_path), job.format, True))
+
+    return results

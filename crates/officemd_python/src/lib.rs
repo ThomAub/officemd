@@ -267,6 +267,78 @@ fn _patch_pptx_json(py: Python<'_>, content: &[u8], patch_json: String) -> PyRes
         .map_err(to_py_err)
 }
 
+fn patch_docx_batch_json_impl(
+    contents: Vec<Vec<u8>>,
+    patch_json: &str,
+    workers: Option<usize>,
+) -> Result<Vec<Vec<u8>>, String> {
+    let worker_count = resolve_worker_count(workers);
+    if worker_count <= 1 || contents.len() <= 1 {
+        return contents
+            .into_iter()
+            .map(|content| patch_docx_json_impl(&content, patch_json))
+            .collect();
+    }
+
+    let pool = ThreadPoolBuilder::new()
+        .num_threads(worker_count)
+        .build()
+        .map_err(|e| e.to_string())?;
+    pool.install(|| {
+        contents
+            .into_par_iter()
+            .map(|content| patch_docx_json_impl(&content, patch_json))
+            .collect()
+    })
+}
+
+fn patch_pptx_batch_json_impl(
+    contents: Vec<Vec<u8>>,
+    patch_json: &str,
+    workers: Option<usize>,
+) -> Result<Vec<Vec<u8>>, String> {
+    let worker_count = resolve_worker_count(workers);
+    if worker_count <= 1 || contents.len() <= 1 {
+        return contents
+            .into_iter()
+            .map(|content| patch_pptx_json_impl(&content, patch_json))
+            .collect();
+    }
+
+    let pool = ThreadPoolBuilder::new()
+        .num_threads(worker_count)
+        .build()
+        .map_err(|e| e.to_string())?;
+    pool.install(|| {
+        contents
+            .into_par_iter()
+            .map(|content| patch_pptx_json_impl(&content, patch_json))
+            .collect()
+    })
+}
+
+#[pyfunction(signature = (contents, patch_json, workers=None))]
+fn _patch_docx_batch_json(
+    py: Python<'_>,
+    contents: Vec<Vec<u8>>,
+    patch_json: String,
+    workers: Option<usize>,
+) -> PyResult<Vec<Vec<u8>>> {
+    py.detach(move || patch_docx_batch_json_impl(contents, &patch_json, workers))
+        .map_err(to_py_err)
+}
+
+#[pyfunction(signature = (contents, patch_json, workers=None))]
+fn _patch_pptx_batch_json(
+    py: Python<'_>,
+    contents: Vec<Vec<u8>>,
+    patch_json: String,
+    workers: Option<usize>,
+) -> PyResult<Vec<Vec<u8>>> {
+    py.detach(move || patch_pptx_batch_json_impl(contents, &patch_json, workers))
+        .map_err(to_py_err)
+}
+
 #[pyfunction(signature = (
     content,
     style_aware_values=false,
@@ -336,6 +408,8 @@ fn _officemd(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(apply_ooxml_patch_json, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_docx_json, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_pptx_json, m)?)?;
+    m.add_function(wrap_pyfunction!(_patch_docx_batch_json, m)?)?;
+    m.add_function(wrap_pyfunction!(_patch_pptx_batch_json, m)?)?;
     m.add_function(wrap_pyfunction!(markdown_from_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(markdown_from_bytes_batch, m)?)?;
     m.add_function(wrap_pyfunction!(extract_sheet_names, m)?)?;

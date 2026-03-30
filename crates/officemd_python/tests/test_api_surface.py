@@ -17,7 +17,9 @@ EXPECTED_EXPORTS = [
     "markdown_from_bytes",
     "markdown_from_bytes_batch",
     "patch_docx",
+    "patch_docx_batch",
     "patch_pptx",
+    "patch_pptx_batch",
 ]
 
 
@@ -78,7 +80,23 @@ def test_patch_docx_typed_api_replaces_all_text() -> None:
     assert "term term" in markdown
 
 
-def test_patch_files_can_apply_same_docx_patch_to_multiple_files(tmp_path: Path) -> None:
+def test_patch_docx_batch_applies_same_patch_with_rayon_workers() -> None:
+    content = officemd.create_document_from_markdown("## Section: body\n\nword\n", "docx")
+    patch = officemd.DocxPatch(
+        scoped_replacements=[
+            officemd.ScopedDocxReplace(
+                officemd.DocxTextScope.ALL_TEXT,
+                officemd.TextReplace("word", "term"),
+            )
+        ]
+    )
+    patched = officemd.patch_docx_batch([content, content], patch, workers=2)
+    assert len(patched) == 2
+    assert "term" in officemd.markdown_from_bytes(patched[0], format="docx")
+    assert "term" in officemd.markdown_from_bytes(patched[1], format="docx")
+
+
+def test_patch_files_uses_rust_batch_patching(tmp_path: Path) -> None:
     content = officemd.create_document_from_markdown("## Section: body\n\nword\n", "docx")
     src1 = tmp_path / "a.docx"
     src2 = tmp_path / "b.docx"

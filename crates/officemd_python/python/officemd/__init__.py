@@ -24,8 +24,10 @@ from officemd.patching import (
     ScopedPptxReplace,
     TextReplace,
     patch_docx,
+    patch_docx_batch,
     patch_files,
     patch_pptx,
+    patch_pptx_batch,
 )
 
 
@@ -61,8 +63,10 @@ __all__ = [
     "inspect_pdf_json",
     "markdown_from_bytes",
     "patch_docx",
+    "patch_docx_batch",
     "patch_files",
     "patch_pptx",
+    "patch_pptx_batch",
     "PptxPatch",
     "PptxTextScope",
     "markdown_from_bytes_batch",
