@@ -1,3 +1,5 @@
+use rayon::ThreadPoolBuilder;
+use rayon::prelude::*;
 use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,6 +18,8 @@ pub enum PatchError {
     Json(#[from] serde_json::Error),
     #[error("regex error: {0}")]
     Regex(#[from] regex::Error),
+    #[error("thread pool error: {0}")]
+    ThreadPool(#[from] rayon::ThreadPoolBuildError),
     #[error("missing part: {0}")]
     MissingPart(String),
     #[error("text not found in {part}: {needle}")]
@@ -156,6 +160,22 @@ pub fn patch_pptx(content: &[u8], patch: &PptxPatch) -> Result<Vec<u8>, PatchErr
     write_parts(&parts)
 }
 
+pub fn patch_docx_batch(
+    contents: Vec<Vec<u8>>,
+    patch: &DocxPatch,
+    workers: Option<usize>,
+) -> Result<Vec<Vec<u8>>, PatchError> {
+    run_batch(contents, workers, |content| patch_docx(&content, patch))
+}
+
+pub fn patch_pptx_batch(
+    contents: Vec<Vec<u8>>,
+    patch: &PptxPatch,
+    workers: Option<usize>,
+) -> Result<Vec<Vec<u8>>, PatchError> {
+    run_batch(contents, workers, |content| patch_pptx(&content, patch))
+}
+
 pub fn apply_ooxml_patch(
     content: &[u8],
     request: &OoxmlPatchRequest,
@@ -178,6 +198,42 @@ pub fn patch_docx_json(content: &[u8], patch_json: &str) -> Result<Vec<u8>, Patc
 pub fn patch_pptx_json(content: &[u8], patch_json: &str) -> Result<Vec<u8>, PatchError> {
     let patch: PptxPatch = serde_json::from_str(patch_json)?;
     patch_pptx(content, &patch)
+}
+
+pub fn patch_docx_batch_json(
+    contents: Vec<Vec<u8>>,
+    patch_json: &str,
+    workers: Option<usize>,
+) -> Result<Vec<Vec<u8>>, PatchError> {
+    let patch: DocxPatch = serde_json::from_str(patch_json)?;
+    patch_docx_batch(contents, &patch, workers)
+}
+
+pub fn patch_pptx_batch_json(
+    contents: Vec<Vec<u8>>,
+    patch_json: &str,
+    workers: Option<usize>,
+) -> Result<Vec<Vec<u8>>, PatchError> {
+    let patch: PptxPatch = serde_json::from_str(patch_json)?;
+    patch_pptx_batch(contents, &patch, workers)
+}
+
+fn run_batch<F>(
+    contents: Vec<Vec<u8>>,
+    workers: Option<usize>,
+    job: F,
+) -> Result<Vec<Vec<u8>>, PatchError>
+where
+    F: Fn(Vec<u8>) -> Result<Vec<u8>, PatchError> + Sync + Send,
+{
+    let worker_count =
+        workers.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, usize::from));
+    if worker_count <= 1 || contents.len() <= 1 {
+        return contents.into_iter().map(job).collect();
+    }
+
+    let pool = ThreadPoolBuilder::new().num_threads(worker_count).build()?;
+    pool.install(|| contents.into_par_iter().map(job).collect())
 }
 
 fn apply_docx_patch_to_parts(
@@ -601,6 +657,29 @@ mod tests {
         )
         .unwrap();
         assert_eq!(updated, "term word WORD");
+    }
+
+    #[test]
+    fn patch_docx_batch_works() {
+        let bytes = build_zip(vec![("word/document.xml", "<w:t>word</w:t>")]);
+        let patched = patch_docx_batch(
+            vec![bytes.clone(), bytes],
+            &DocxPatch {
+                set_core_title: None,
+                replace_body_title: None,
+                scoped_replacements: vec![ScopedDocxReplace {
+                    scope: DocxTextScope::AllText,
+                    replace: TextReplace::all("word", "term"),
+                }],
+            },
+            Some(2),
+        )
+        .unwrap();
+        assert_eq!(patched.len(), 2);
+        for item in patched {
+            let parts = read_parts(&item).unwrap();
+            assert!(String::from_utf8_lossy(&parts["word/document.xml"]).contains("term"));
+        }
     }
 
     #[test]

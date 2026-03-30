@@ -7,8 +7,9 @@ use officemd_core::format::{
     DocumentFormat, detect_format_from_bytes, parse_format, resolve_format, resolve_worker_count,
 };
 use officemd_core::{
-    apply_ooxml_patch_json as apply_ooxml_patch_json_core, patch_docx_json as patch_docx_json_core,
-    patch_pptx_json as patch_pptx_json_core,
+    apply_ooxml_patch_json as apply_ooxml_patch_json_core,
+    patch_docx_batch_json as patch_docx_batch_json_core, patch_docx_json as patch_docx_json_core,
+    patch_pptx_batch_json as patch_pptx_batch_json_core, patch_pptx_json as patch_pptx_json_core,
 };
 use officemd_markdown::{MarkdownProfile, RenderOptions};
 use pyo3::prelude::*;
@@ -272,24 +273,7 @@ fn patch_docx_batch_json_impl(
     patch_json: &str,
     workers: Option<usize>,
 ) -> Result<Vec<Vec<u8>>, String> {
-    let worker_count = resolve_worker_count(workers);
-    if worker_count <= 1 || contents.len() <= 1 {
-        return contents
-            .into_iter()
-            .map(|content| patch_docx_json_impl(&content, patch_json))
-            .collect();
-    }
-
-    let pool = ThreadPoolBuilder::new()
-        .num_threads(worker_count)
-        .build()
-        .map_err(|e| e.to_string())?;
-    pool.install(|| {
-        contents
-            .into_par_iter()
-            .map(|content| patch_docx_json_impl(&content, patch_json))
-            .collect()
-    })
+    patch_docx_batch_json_core(contents, patch_json, workers).map_err(|e| e.to_string())
 }
 
 fn patch_pptx_batch_json_impl(
@@ -297,24 +281,7 @@ fn patch_pptx_batch_json_impl(
     patch_json: &str,
     workers: Option<usize>,
 ) -> Result<Vec<Vec<u8>>, String> {
-    let worker_count = resolve_worker_count(workers);
-    if worker_count <= 1 || contents.len() <= 1 {
-        return contents
-            .into_iter()
-            .map(|content| patch_pptx_json_impl(&content, patch_json))
-            .collect();
-    }
-
-    let pool = ThreadPoolBuilder::new()
-        .num_threads(worker_count)
-        .build()
-        .map_err(|e| e.to_string())?;
-    pool.install(|| {
-        contents
-            .into_par_iter()
-            .map(|content| patch_pptx_json_impl(&content, patch_json))
-            .collect()
-    })
+    patch_pptx_batch_json_core(contents, patch_json, workers).map_err(|e| e.to_string())
 }
 
 #[pyfunction(signature = (contents, patch_json, workers=None))]
