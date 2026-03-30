@@ -33,7 +33,7 @@ default-members = [
 
 [workspace.package]
 edition = "2024"
-version = "0.1.5"
+version = "0.1.6"
 license = "MIT"
 authors = ["Thomas Aubry"]
 repository = "https://github.com/ThomAub/officemd"

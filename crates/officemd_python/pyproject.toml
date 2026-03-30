@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "officemd"
-version = "0.1.5"
+version = "0.1.6"
 description = "Native Python bindings for OfficeMD document extraction"
 readme = "README.md"
 license = { text = "MIT" }

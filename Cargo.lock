@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "clap-ai"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "clap",
 ]
@@ -959,7 +959,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "clap",
  "clap-ai",
@@ -978,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "quick-xml",
  "rayon",
@@ -991,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_csv"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "csv",
  "officemd_core",
@@ -1002,7 +1002,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_docling"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "officemd_core",
  "serde",
@@ -1011,7 +1011,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_docx"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "officemd_core",
  "officemd_markdown",
@@ -1039,7 +1039,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_js"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "napi",
  "napi-build",
@@ -1059,7 +1059,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_markdown"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "officemd_core",
  "regex",
@@ -1068,7 +1068,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_pdf"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "log",
  "lopdf",
@@ -1084,7 +1084,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_pptx"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "officemd_core",
  "officemd_markdown",
@@ -1096,7 +1096,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_python"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "officemd_core",
  "officemd_csv",
@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "officemd_xlsx"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "officemd_core",
  "officemd_markdown",
@@ -1879,6 +1879,12 @@ checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
 ]
+
+[[package]]
+name = "winsafe"
+version = "0.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
 
 [[package]]
 name = "wit-bindgen"
