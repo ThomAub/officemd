@@ -301,6 +301,8 @@ const {
   inspectPdfJson,
   inspectPdfFontsJson,
   doclingFromBytes,
+  createDocumentFromMarkdown,
+  applyOoxmlPatchJson,
 } = nativeBinding;
 
 export {
@@ -314,5 +316,7 @@ export {
   inspectPdfJson,
   inspectPdfFontsJson,
   doclingFromBytes,
+  createDocumentFromMarkdown,
+  applyOoxmlPatchJson,
 };
 export default nativeBinding;
