@@ -24,7 +24,6 @@ from officemd import (
     markdown_from_bytes,
     patch_docx,
     patch_pptx,
-    patch_xlsx,
     patch_xlsx_with_report,
 )
 

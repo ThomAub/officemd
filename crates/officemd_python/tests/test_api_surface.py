@@ -1,9 +1,10 @@
 import inspect
+import zipfile
 from io import BytesIO
 from pathlib import Path
-import zipfile
 
 import officemd
+
 
 def _build_zip(parts: list[tuple[str, str]]) -> bytes:
     buffer = BytesIO()
@@ -73,7 +74,9 @@ def test_apply_ooxml_patch_json_returns_edited_ooxml_bytes() -> None:
         '{"edits":[{"part":"word/document.xml","from":"Hello","to":"Hello from Python"}]}',
     )
     assert isinstance(patched, bytes)
-    markdown = officemd.markdown_from_bytes(patched, format="docx", include_document_properties=True)
+    markdown = officemd.markdown_from_bytes(
+        patched, format="docx", include_document_properties=True
+    )
     assert "Hello from Python" in markdown
 
 
@@ -84,11 +87,17 @@ def test_patch_docx_typed_api_replaces_all_text() -> None:
             ("docProps/app.xml", "<Properties><Company>word company</Company></Properties>"),
             (
                 "docProps/custom.xml",
-                "<Properties><property name=\"FilePath\"><vt:lpwstr>word.docx</vt:lpwstr></property></Properties>",
+                (
+                    '<Properties><property name="FilePath">'
+                    "<vt:lpwstr>word.docx</vt:lpwstr></property></Properties>"
+                ),
             ),
             (
                 "docProps/core.xml",
-                '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc"><dc:title>word title</dc:title></cp:coreProperties>',
+                (
+                    '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc">'
+                    "<dc:title>word title</dc:title></cp:coreProperties>"
+                ),
             ),
         ]
     )
@@ -175,7 +184,7 @@ def test_patch_docx_preserve_formatting_across_runs() -> None:
         [
             (
                 "word/document.xml",
-                '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Hel</w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t>lo</w:t></w:r></w:p>',
+                "<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Hel</w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t>lo</w:t></w:r></w:p>",
             )
         ]
     )
@@ -192,8 +201,8 @@ def test_patch_docx_preserve_formatting_across_runs() -> None:
     )
     with zipfile.ZipFile(BytesIO(patched)) as zf:
         xml = zf.read("word/document.xml").decode()
-    assert '<w:rPr><w:b/></w:rPr><w:t>Hi</w:t>' in xml
-    assert '<w:rPr><w:i/></w:rPr><w:t></w:t>' in xml
+    assert "<w:rPr><w:b/></w:rPr><w:t>Hi</w:t>" in xml
+    assert "<w:rPr><w:i/></w:rPr><w:t></w:t>" in xml
 
 
 def test_patch_docx_can_replace_comment_author_and_metadata_fields() -> None:
@@ -201,19 +210,31 @@ def test_patch_docx_can_replace_comment_author_and_metadata_fields() -> None:
         [
             (
                 "word/comments.xml",
-                '<w:comments><w:comment w:id="0" w:author="Alice"><w:p><w:r><w:t>Needs review</w:t></w:r></w:p></w:comment></w:comments>',
+                (
+                    '<w:comments><w:comment w:id="0" w:author="Alice"><w:p><w:r>'
+                    "<w:t>Needs review</w:t></w:r></w:p></w:comment></w:comments>"
+                ),
             ),
             (
                 "docProps/app.xml",
-                "<Properties><Company>Old Company</Company><Template>Old Template</Template></Properties>",
+                (
+                    "<Properties><Company>Old Company</Company>"
+                    "<Template>Old Template</Template></Properties>"
+                ),
             ),
             (
                 "docProps/custom.xml",
-                "<Properties><property name=\"FilePath\"><vt:lpwstr>/tmp/old.docx</vt:lpwstr></property></Properties>",
+                (
+                    '<Properties><property name="FilePath">'
+                    "<vt:lpwstr>/tmp/old.docx</vt:lpwstr></property></Properties>"
+                ),
             ),
             (
                 "docProps/core.xml",
-                '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc"><dc:title>old</dc:title></cp:coreProperties>',
+                (
+                    '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc">'
+                    "<dc:title>old</dc:title></cp:coreProperties>"
+                ),
             ),
         ]
     )
@@ -248,7 +269,10 @@ def test_patch_pptx_all_text_includes_comment_authors_and_metadata() -> None:
             ("ppt/slides/slide1.xml", "<a:t>word slide</a:t>"),
             (
                 "ppt/commentAuthors.xml",
-                '<p:cmAuthorLst><p:cmAuthor id="0" name="word author" initials="WA"/></p:cmAuthorLst>',
+                (
+                    '<p:cmAuthorLst><p:cmAuthor id="0" name="word author"'
+                    ' initials="WA"/></p:cmAuthorLst>'
+                ),
             ),
             (
                 "docProps/app.xml",
@@ -256,11 +280,17 @@ def test_patch_pptx_all_text_includes_comment_authors_and_metadata() -> None:
             ),
             (
                 "docProps/custom.xml",
-                "<Properties><property name=\"FileName\"><vt:lpwstr>word.pptx</vt:lpwstr></property></Properties>",
+                (
+                    '<Properties><property name="FileName">'
+                    "<vt:lpwstr>word.pptx</vt:lpwstr></property></Properties>"
+                ),
             ),
             (
                 "docProps/core.xml",
-                '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc"><dc:title>word title</dc:title></cp:coreProperties>',
+                (
+                    '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc">'
+                    "<dc:title>word title</dc:title></cp:coreProperties>"
+                ),
             ),
         ]
     )
@@ -288,7 +318,10 @@ def test_patch_pptx_preserve_formatting_across_runs() -> None:
         [
             (
                 "ppt/slides/slide1.xml",
-                '<a:p><a:r><a:rPr b="1"/><a:t>Hel</a:t></a:r><a:r><a:rPr i="1"/><a:t>lo</a:t></a:r></a:p>',
+                (
+                    '<a:p><a:r><a:rPr b="1"/><a:t>Hel</a:t></a:r><a:r>'
+                    '<a:rPr i="1"/><a:t>lo</a:t></a:r></a:p>'
+                ),
             )
         ]
     )
@@ -314,19 +347,28 @@ def test_patch_pptx_can_replace_comment_author_and_metadata_fields() -> None:
         [
             (
                 "ppt/commentAuthors.xml",
-                '<p:cmAuthorLst><p:cmAuthor id="0" name="Alice" initials="AL"/></p:cmAuthorLst>',
+                ('<p:cmAuthorLst><p:cmAuthor id="0" name="Alice" initials="AL"/></p:cmAuthorLst>'),
             ),
             (
                 "docProps/app.xml",
-                "<Properties><Company>Old Company</Company><PresentationFormat>Old Deck</PresentationFormat></Properties>",
+                (
+                    "<Properties><Company>Old Company</Company>"
+                    "<PresentationFormat>Old Deck</PresentationFormat></Properties>"
+                ),
             ),
             (
                 "docProps/custom.xml",
-                "<Properties><property name=\"FileName\"><vt:lpwstr>old.pptx</vt:lpwstr></property></Properties>",
+                (
+                    '<Properties><property name="FileName">'
+                    "<vt:lpwstr>old.pptx</vt:lpwstr></property></Properties>"
+                ),
             ),
             (
                 "docProps/core.xml",
-                '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc"><dc:title>old</dc:title></cp:coreProperties>',
+                (
+                    '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc">'
+                    "<dc:title>old</dc:title></cp:coreProperties>"
+                ),
             ),
         ]
     )
@@ -401,11 +443,14 @@ def test_patch_xlsx_preserve_formatting_and_empty_string() -> None:
         [
             (
                 "xl/sharedStrings.xml",
-                '<sst><si><r><rPr><b/></rPr><t>Confi</t></r><r><rPr><i/></rPr><t>dential</t></r></si></sst>',
+                "<sst><si><r><rPr><b/></rPr><t>Confi</t></r><r><rPr><i/></rPr><t>dential</t></r></si></sst>",
             ),
             (
                 "xl/workbook.xml",
-                '<workbook><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>',
+                (
+                    '<workbook><sheets><sheet name="Sheet1" sheetId="1" '
+                    'r:id="rId1"/></sheets></workbook>'
+                ),
             ),
         ]
     )
@@ -422,8 +467,8 @@ def test_patch_xlsx_preserve_formatting_and_empty_string() -> None:
     )
     with zipfile.ZipFile(BytesIO(patched)) as zf:
         xml = zf.read("xl/sharedStrings.xml").decode()
-    assert '<rPr><b/></rPr><t></t>' in xml
-    assert '<rPr><i/></rPr><t></t>' in xml
+    assert "<rPr><b/></rPr><t></t>" in xml
+    assert "<rPr><i/></rPr><t></t>" in xml
 
 
 def test_patch_xlsx_all_text_includes_comments_and_metadata() -> None:
@@ -432,24 +477,40 @@ def test_patch_xlsx_all_text_includes_comments_and_metadata() -> None:
             ("xl/sharedStrings.xml", "<sst><si><t>word cell</t></si></sst>"),
             (
                 "xl/comments1.xml",
-                '<comments><authors><author>Alice</author></authors><commentList><comment ref="A1" authorId="0"><text><r><t>word comment</t></r></text></comment></commentList></comments>',
+                (
+                    "<comments><authors><author>Alice</author></authors><commentList>"
+                    '<comment ref="A1" authorId="0"><text><r><t>word comment</t></r>'
+                    "</text></comment></commentList></comments>"
+                ),
             ),
             (
                 "xl/persons/person.xml",
-                '<personList><person displayName="Alice" id="{1}" userId="word@example.com" providerId="word"/></personList>',
+                (
+                    '<personList><person displayName="Alice" id="{1}" '
+                    'userId="word@example.com" providerId="word"/></personList>'
+                ),
             ),
             ("docProps/app.xml", "<Properties><Company>word company</Company></Properties>"),
             (
                 "docProps/custom.xml",
-                "<Properties><property name=\"FilePath\"><vt:lpwstr>word.xlsx</vt:lpwstr></property></Properties>",
+                (
+                    '<Properties><property name="FilePath">'
+                    "<vt:lpwstr>word.xlsx</vt:lpwstr></property></Properties>"
+                ),
             ),
             (
                 "docProps/core.xml",
-                '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc"><dc:title>word title</dc:title></cp:coreProperties>',
+                (
+                    '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc">'
+                    "<dc:title>word title</dc:title></cp:coreProperties>"
+                ),
             ),
             (
                 "xl/workbook.xml",
-                '<workbook><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>',
+                (
+                    '<workbook><sheets><sheet name="Sheet1" sheetId="1" '
+                    'r:id="rId1"/></sheets></workbook>'
+                ),
             ),
         ]
     )
@@ -512,7 +573,15 @@ def test_patch_files_uses_rust_batch_patching(tmp_path: Path) -> None:
     )
     assert all(result.ok for result in results)
     assert all(result.report is not None for result in results)
-    assert all(result.report.replacements_applied >= 1 for result in results if result.report is not None)
-    assert "term" in officemd.markdown_from_bytes((tmp_path / "out1.docx").read_bytes(), format="docx")
-    assert "term" in officemd.markdown_from_bytes((tmp_path / "out2.docx").read_bytes(), format="docx")
-    assert "## Sheet: Revenue" in officemd.markdown_from_bytes((tmp_path / "out3.xlsx").read_bytes(), format="xlsx")
+    assert all(
+        result.report.replacements_applied >= 1 for result in results if result.report is not None
+    )
+    assert "term" in officemd.markdown_from_bytes(
+        (tmp_path / "out1.docx").read_bytes(), format="docx"
+    )
+    assert "term" in officemd.markdown_from_bytes(
+        (tmp_path / "out2.docx").read_bytes(), format="docx"
+    )
+    assert "## Sheet: Revenue" in officemd.markdown_from_bytes(
+        (tmp_path / "out3.xlsx").read_bytes(), format="xlsx"
+    )

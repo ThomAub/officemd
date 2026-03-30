@@ -1,38 +1,41 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, is_dataclass
-from enum import Enum
 import json
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field, is_dataclass
+from enum import Enum, StrEnum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
-from officemd._officemd import _patch_docx_batch_json  # type: ignore[unresolved-import]
-from officemd._officemd import _patch_docx_batch_json_with_report  # type: ignore[unresolved-import]
-from officemd._officemd import _patch_docx_json  # type: ignore[unresolved-import]
-from officemd._officemd import _patch_docx_json_with_report  # type: ignore[unresolved-import]
-from officemd._officemd import _patch_pptx_batch_json  # type: ignore[unresolved-import]
-from officemd._officemd import _patch_pptx_batch_json_with_report  # type: ignore[unresolved-import]
-from officemd._officemd import _patch_pptx_json  # type: ignore[unresolved-import]
-from officemd._officemd import _patch_pptx_json_with_report  # type: ignore[unresolved-import]
-from officemd._officemd import _patch_xlsx_batch_json  # type: ignore[unresolved-import]
-from officemd._officemd import _patch_xlsx_batch_json_with_report  # type: ignore[unresolved-import]
-from officemd._officemd import _patch_xlsx_json  # type: ignore[unresolved-import]
-from officemd._officemd import _patch_xlsx_json_with_report  # type: ignore[unresolved-import]
+from officemd._officemd import (
+    _patch_docx_batch_json,  # type: ignore[unresolved-import]
+    _patch_docx_batch_json_with_report,  # type: ignore[unresolved-import]
+    _patch_docx_json,  # type: ignore[unresolved-import]
+    _patch_docx_json_with_report,  # type: ignore[unresolved-import]
+    _patch_pptx_batch_json,  # type: ignore[unresolved-import]
+    _patch_pptx_batch_json_with_report,  # type: ignore[unresolved-import]
+    _patch_pptx_json,  # type: ignore[unresolved-import]
+    _patch_pptx_json_with_report,  # type: ignore[unresolved-import]
+    _patch_xlsx_batch_json,  # type: ignore[unresolved-import]
+    _patch_xlsx_batch_json_with_report,  # type: ignore[unresolved-import]
+    _patch_xlsx_json,  # type: ignore[unresolved-import]
+    _patch_xlsx_json_with_report,  # type: ignore[unresolved-import]
+)
 
 
-class ReplaceMode(str, Enum):
+class ReplaceMode(StrEnum):
     FIRST = "first"
     ALL = "all"
 
 
-class MatchPolicy(str, Enum):
+class MatchPolicy(StrEnum):
     EXACT = "exact"
     CASE_INSENSITIVE = "case_insensitive"
     WHOLE_WORD = "whole_word"
     WHOLE_WORD_CASE_INSENSITIVE = "whole_word_case_insensitive"
 
 
-class DocxTextScope(str, Enum):
+class DocxTextScope(StrEnum):
     BODY = "body"
     HEADERS = "headers"
     FOOTERS = "footers"
@@ -47,7 +50,7 @@ class DocxTextScope(str, Enum):
     ALL_TEXT = "all_text"
 
 
-class PptxTextScope(str, Enum):
+class PptxTextScope(StrEnum):
     SLIDE_TITLES = "slide_titles"
     SLIDE_BODY = "slide_body"
     NOTES = "notes"
@@ -61,7 +64,7 @@ class PptxTextScope(str, Enum):
     ALL_TEXT = "all_text"
 
 
-class XlsxTextScope(str, Enum):
+class XlsxTextScope(StrEnum):
     SHEET_NAMES = "sheet_names"
     HEADERS = "headers"
     CELL_TEXT = "cell_text"
