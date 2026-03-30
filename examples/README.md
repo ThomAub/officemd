@@ -23,6 +23,8 @@ cargo run -p officemd_examples --bin extract_ir_docx -- examples/data/showcase.d
 cargo run -p officemd_examples --bin extract_ir_xlsx -- examples/data/showcase.xlsx
 cargo run -p officemd_examples --bin extract_ir_csv -- examples/data/showcase.csv
 cargo run -p officemd_examples --bin extract_ir_pptx -- examples/data/showcase.pptx
+cargo run -p officemd_examples --bin edit_showcase_words
+cargo run -p officemd_examples --bin edit_showcase_words_batch
 ```
 
 ## JavaScript

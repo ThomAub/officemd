@@ -43,6 +43,30 @@ print(extract_ir_json(content, format="docx"))
 print(docling_from_bytes(content, format="docx"))
 ```
 
+## Typed OOXML patching with reports
+
+```python
+import officemd
+from pathlib import Path
+
+content = Path("report.docx").read_bytes()
+patch = officemd.DocxPatch(
+    scoped_replacements=[
+        officemd.ScopedDocxReplace(
+            officemd.DocxTextScope.ALL_TEXT,
+            officemd.TextReplace("word", "term"),
+        )
+    ]
+)
+
+single = officemd.patch_docx_with_report(content, patch)
+print(single.report.replacements_applied)
+
+batch = officemd.patch_docx_batch_with_report([content, content], patch, workers=4)
+for item in batch:
+    print(item.report.parts_scanned, item.report.parts_modified, item.report.replacements_applied)
+```
+
 ## Supported Formats
 
 | Format | Extension | Markdown | JSON IR | Docling |
