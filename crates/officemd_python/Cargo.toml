@@ -39,4 +39,5 @@ officemd_docling = { version = "0.1.5", path = "../officemd_docling" }
 pyo3-build-config = { version = "0.27.2", features = ["resolve-config"] }
 
 [dev-dependencies]
+officemd_core = { version = "0.1.5", path = "../officemd_core", features = ["test-helpers"] }
 zip = "2.2"

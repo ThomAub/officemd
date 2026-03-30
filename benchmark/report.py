@@ -208,7 +208,7 @@ def generate_report(data: dict[str, dict[str, float]]) -> str:
 
             if tool_count > 0 and tool_officemd > 0:
                 speedup = tool_total / tool_officemd
-                label = f"PDF files" if tool == "liteparse" else f"All files"
+                label = "PDF files" if tool == "liteparse" else "All files"
                 sections.append(f"{label}: officemd is {format_speedup(speedup)} faster "
                                 f"than {tool} across {tool_count} files.")
 

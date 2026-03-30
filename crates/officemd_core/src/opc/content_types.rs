@@ -83,7 +83,7 @@ fn attr_value(e: &BytesStart<'_>, key: &[u8]) -> Option<String> {
     None
 }
 
-fn local_name(name: &[u8]) -> &[u8] {
+pub(crate) fn local_name(name: &[u8]) -> &[u8] {
     if let Some(idx) = name.iter().rposition(|b| *b == b':') {
         &name[idx + 1..]
     } else if let Some(idx) = name.iter().rposition(|b| *b == b'}') {

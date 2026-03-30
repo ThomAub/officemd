@@ -2,12 +2,19 @@
 //!
 //! Provides shared IR and relationship parsing used by format-specific crates.
 
+pub mod format;
 pub mod ir;
 pub mod opc;
+pub mod patch;
 pub mod rels;
+
+#[cfg(any(test, feature = "test-helpers"))]
+#[doc(hidden)]
+pub mod test_helpers;
 
 pub use ir::*;
 pub use opc::*;
+pub use patch::*;
 pub use rels::*;
 
 #[cfg(test)]

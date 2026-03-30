@@ -133,7 +133,7 @@ def main() -> None:
         sys.exit(1)
 
     # Commit
-    print(f"\nCommitting...")
+    print("\nCommitting...")
     run(["git", "add", "-A"])
     run(["git", "commit", "-m", f"Bump all packages to {tag}"])
 

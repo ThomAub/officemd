@@ -3,8 +3,8 @@
 use std::collections::{HashMap, HashSet};
 
 use officemd_core::ir::{
-    Block, CommentNote, DocumentKind, Hyperlink, Inline, OoxmlDocument, Paragraph, Slide, Table,
-    TableCell,
+    Block, CommentNote, DocumentKind, DocumentProperties, Hyperlink, Inline, OoxmlDocument,
+    Paragraph, Slide, Table, TableCell,
 };
 use officemd_core::opc::{
     OpcPackage, load_relationships_for_part, relationship_target_map, resolve_relationship_target,
@@ -87,6 +87,7 @@ pub fn extract_ir_with_options(
         HashMap::new()
     };
 
+    let properties = extract_properties(&mut package)?;
     let mut slides = Vec::with_capacity(slide_rids.len());
 
     for (slide_number, rid) in slide_rids {
@@ -117,6 +118,7 @@ pub fn extract_ir_with_options(
 
     Ok(OoxmlDocument {
         kind: DocumentKind::Pptx,
+        properties,
         slides,
         ..Default::default()
     })
@@ -176,6 +178,12 @@ fn extract_comments(
 
 fn read_required_part(package: &mut OpcPackage<'_>, path: &str) -> Result<String, PptxError> {
     read_part(package, path)?.ok_or_else(|| PptxError::MissingPart(path.to_string()))
+}
+
+fn extract_properties(
+    package: &mut OpcPackage<'_>,
+) -> Result<Option<DocumentProperties>, PptxError> {
+    officemd_core::opc::extract_properties(package).map_err(PptxError::from)
 }
 
 fn read_part(package: &mut OpcPackage<'_>, path: &str) -> Result<Option<String>, PptxError> {

@@ -1,6 +1,33 @@
 {
   "kind": "Pptx",
-  "properties": null,
+  "properties": {
+    "app": {
+      "AppVersion": "14.0000",
+      "Application": "Microsoft Macintosh PowerPoint",
+      "HiddenSlides": "0",
+      "HyperlinksChanged": "false",
+      "LinksUpToDate": "false",
+      "MMClips": "0",
+      "Notes": "0",
+      "Paragraphs": "0",
+      "PresentationFormat": "On-screen Show (4:3)",
+      "ScaleCrop": "false",
+      "SharedDoc": "false",
+      "Slides": "0",
+      "TotalTime": "1",
+      "Words": "0",
+      "i4": "0",
+      "lpstr": "Office Theme"
+    },
+    "core": {
+      "created": "2013-01-27T09:14:16Z",
+      "description": "generated using python-pptx",
+      "lastModifiedBy": "Steve Canny",
+      "modified": "2013-01-27T09:15:58Z",
+      "revision": "1"
+    },
+    "custom": {}
+  },
   "sections": [],
   "sheets": [],
   "slides": [

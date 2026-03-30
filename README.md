@@ -115,6 +115,90 @@ print(extract_ir_json(content, format="docx"))
 print(docling_from_bytes(content, format="docx"))
 ```
 
+### Python patch reports and batch patching
+
+```python
+from pathlib import Path
+import officemd
+
+content = Path("report.docx").read_bytes()
+patch = officemd.DocxPatch(
+    scoped_replacements=[
+        officemd.ScopedDocxReplace(
+            officemd.DocxTextScope.ALL_TEXT,
+            officemd.TextReplace("word", "term"),
+        )
+    ]
+)
+# ALL_TEXT includes document content plus free-text metadata/app/custom fields.
+
+single = officemd.patch_docx_with_report(content, patch)
+print(single.report.replacements_applied)
+
+batch = officemd.patch_docx_batch_with_report([content, content], patch, workers=4)
+for item in batch:
+    print(item.report.parts_scanned, item.report.parts_modified, item.report.replacements_applied)
+```
+
+### Rust batch patching with reports
+
+```rust
+use officemd_core::{
+    patch_docx_batch_with_report, DocxPatch, DocxTextScope, ScopedDocxReplace, TextReplace,
+};
+
+let patch = DocxPatch {
+    set_core_title: None,
+    replace_body_title: None,
+    scoped_replacements: vec![ScopedDocxReplace {
+        scope: DocxTextScope::AllText,
+        replace: TextReplace::all("word", "term"),
+    }],
+};
+// AllText includes document content plus free-text metadata/app/custom fields.
+
+let results = patch_docx_batch_with_report(vec![doc1_bytes, doc2_bytes], &patch, Some(4))?;
+for item in results {
+    println!(
+        "parts_scanned={} parts_modified={} replacements_applied={}",
+        item.report.parts_scanned,
+        item.report.parts_modified,
+        item.report.replacements_applied
+    );
+}
+# Ok::<(), officemd_core::PatchError>(())
+```
+
+Patch scopes also support free-text metadata/comment fields:
+- DOCX: `MetadataCore`, `MetadataApp`, `MetadataCustom`, `MetadataAll`
+- PPTX: `CommentAuthors`, `MetadataCore`, `MetadataApp`, `MetadataCustom`, `MetadataAll`
+- XLSX: `Comments`, `CommentAuthors`, `MetadataCore`, `MetadataApp`, `MetadataCustom`, `MetadataAll`
+
+`AllText` now means all free-text fields: content + metadata/comment-author text.
+
+Formatting-preserving replacement is available for OOXML content text:
+
+```rust
+use officemd_core::{DocxPatch, DocxTextScope, ScopedDocxReplace, TextReplace};
+
+let patch = DocxPatch {
+    set_core_title: None,
+    replace_body_title: None,
+    scoped_replacements: vec![ScopedDocxReplace {
+        scope: DocxTextScope::Body,
+        replace: TextReplace::all("Confidential", "")
+            .with_preserve_formatting(true),
+    }],
+};
+```
+
+Semantics:
+- replacement can span multiple runs
+- the first matched run keeps the replacement text and therefore its formatting wins
+- later consumed runs are left empty in v1
+- metadata/comment-author fields still use simple text replacement
+
+
 ### JavaScript
 
 ```js
