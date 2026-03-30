@@ -1,6 +1,7 @@
 use officemd_core::{
     DocxPatch, DocxTextScope, PptxPatch, PptxTextScope, ScopedDocxReplace, ScopedPptxReplace,
-    TextReplace, patch_docx_batch_with_report, patch_pptx_batch_with_report,
+    ScopedXlsxReplace, TextReplace, XlsxPatch, XlsxSheetRename, XlsxTextScope,
+    patch_docx_batch_with_report, patch_pptx_batch_with_report, patch_xlsx_batch_with_report,
 };
 use serde_json::json;
 use std::fs;
@@ -20,9 +21,9 @@ fn main() {
     fs::create_dir_all(&out_dir).expect("create out dir");
 
     println!("Plan:");
-    println!("1. Load showcase DOCX/PPTX fixture bytes");
+    println!("1. Load showcase DOCX/PPTX/XLSX fixture bytes");
     println!(
-        "2. Patch batches with officemd_core::patch_docx_batch_with_report / patch_pptx_batch_with_report"
+        "2. Patch batches with officemd_core::patch_*_batch_with_report including metadata/comment-author scopes"
     );
     println!("3. Write outputs and print per-file replacement counters");
     println!();
@@ -53,6 +54,10 @@ fn main() {
                     "Edited DOCX comment from Rust batch patch API.",
                 ),
             },
+            ScopedDocxReplace {
+                scope: DocxTextScope::MetadataApp,
+                replace: TextReplace::all("OfficeMD", "OfficeMD Rust Batch Example"),
+            },
         ],
     };
     let docx_results =
@@ -77,11 +82,42 @@ fn main() {
                     "Edited PPTX comment from Rust batch patch API.",
                 ),
             },
+            ScopedPptxReplace {
+                scope: PptxTextScope::CommentAuthors,
+                replace: TextReplace::all("Alice", "Rust Batch Reviewer"),
+            },
         ],
     };
     let pptx_results =
         patch_pptx_batch_with_report(vec![pptx_bytes.clone(), pptx_bytes], &pptx_patch, Some(2))
             .expect("patch pptx batch");
+
+    let xlsx_bytes = fs::read(data_dir.join("showcase.xlsx")).expect("read xlsx");
+    let xlsx_patch = XlsxPatch {
+        set_core_title: Some("Edited XLSX Showcase Batch From Rust".to_string()),
+        rename_sheets: vec![XlsxSheetRename {
+            from: "Sales".to_string(),
+            to: "Sales Batch Rust".to_string(),
+            update_references: true,
+        }],
+        scoped_replacements: vec![
+            ScopedXlsxReplace {
+                scope: XlsxTextScope::AllText,
+                replace: TextReplace::all("North", "North Batch Rust"),
+            },
+            ScopedXlsxReplace {
+                scope: XlsxTextScope::Comments,
+                replace: TextReplace::all("Review", "Reviewed from Rust batch"),
+            },
+            ScopedXlsxReplace {
+                scope: XlsxTextScope::MetadataApp,
+                replace: TextReplace::all("OfficeMD", "OfficeMD Rust Batch Example"),
+            },
+        ],
+    };
+    let xlsx_results =
+        patch_xlsx_batch_with_report(vec![xlsx_bytes.clone(), xlsx_bytes], &xlsx_patch, Some(2))
+            .expect("patch xlsx batch");
 
     for (idx, item) in docx_results.iter().enumerate() {
         let path = out_dir.join(format!("showcase_batch_{idx}.docx"));
@@ -107,6 +143,22 @@ fn main() {
             serde_json::to_string_pretty(&json!({
                 "path": path.display().to_string(),
                 "format": "pptx",
+                "parts_scanned": item.report.parts_scanned,
+                "parts_modified": item.report.parts_modified,
+                "replacements_applied": item.report.replacements_applied,
+            }))
+            .unwrap()
+        );
+    }
+
+    for (idx, item) in xlsx_results.iter().enumerate() {
+        let path = out_dir.join(format!("showcase_batch_{idx}.xlsx"));
+        fs::write(&path, &item.content).expect("write xlsx batch result");
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "path": path.display().to_string(),
+                "format": "xlsx",
                 "parts_scanned": item.report.parts_scanned,
                 "parts_modified": item.report.parts_modified,
                 "replacements_applied": item.report.replacements_applied,

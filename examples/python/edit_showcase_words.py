@@ -14,11 +14,18 @@ from officemd import (
     PptxTextScope,
     ScopedDocxReplace,
     ScopedPptxReplace,
+    ScopedXlsxReplace,
     TextReplace,
+    XlsxPatch,
+    XlsxSheetRename,
+    XlsxTextScope,
     extract_ir_json,
+    extract_sheet_names,
     markdown_from_bytes,
     patch_docx,
     patch_pptx,
+    patch_xlsx,
+    patch_xlsx_with_report,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -69,6 +76,14 @@ def _docx_patch() -> DocxPatch:
                     "Edited DOCX comment from Python patch API.",
                 ),
             ),
+            ScopedDocxReplace(
+                DocxTextScope.METADATA_APP,
+                TextReplace("OfficeMD", "OfficeMD Python Example"),
+            ),
+            ScopedDocxReplace(
+                DocxTextScope.METADATA_CUSTOM,
+                TextReplace("showcase", "showcase-python"),
+            ),
         ],
     )
 
@@ -92,6 +107,39 @@ def _pptx_patch() -> PptxPatch:
                     "Edited PPTX comment from Python patch API.",
                 ),
             ),
+            ScopedPptxReplace(
+                PptxTextScope.COMMENT_AUTHORS,
+                TextReplace("Alice", "Python Reviewer"),
+            ),
+            ScopedPptxReplace(
+                PptxTextScope.METADATA_APP,
+                TextReplace("OfficeMD", "OfficeMD Python Example"),
+            ),
+        ],
+    )
+
+
+def _xlsx_patch() -> XlsxPatch:
+    return XlsxPatch(
+        set_core_title="Edited XLSX Showcase From Python",
+        rename_sheets=[XlsxSheetRename("Sales", "Sales Python")],
+        scoped_replacements=[
+            ScopedXlsxReplace(
+                XlsxTextScope.ALL_TEXT,
+                TextReplace("North", "North Python"),
+            ),
+            ScopedXlsxReplace(
+                XlsxTextScope.COMMENTS,
+                TextReplace("Review", "Reviewed from Python"),
+            ),
+            ScopedXlsxReplace(
+                XlsxTextScope.METADATA_APP,
+                TextReplace("OfficeMD", "OfficeMD Python Example"),
+            ),
+            ScopedXlsxReplace(
+                XlsxTextScope.METADATA_CUSTOM,
+                TextReplace("showcase", "showcase-python"),
+            ),
         ],
     )
 
@@ -112,10 +160,14 @@ def _summarize(path: Path, fmt: str) -> dict[str, object]:
         result["body_title"] = ir["sections"][0]["blocks"][0]["Paragraph"]["inlines"][0]["Text"]
         result["header_text"] = ir["sections"][1]["blocks"][0]["Paragraph"]["inlines"][0]["Text"]
         result["has_comment"] = "Edited DOCX comment from Python patch API." in markdown
-    else:
+    elif fmt == "pptx":
         result["core_title"] = (ir.get("properties") or {}).get("core", {}).get("title")
         result["slide_1_title"] = ir["slides"][0]["title"]
         result["has_comment"] = "Edited PPTX comment from Python patch API." in markdown
+    else:
+        result["core_title"] = (ir.get("properties") or {}).get("core", {}).get("title")
+        result["sheet_names"] = extract_sheet_names(content)
+        result["has_python_edit"] = "North Python" in markdown or "Reviewed from Python" in markdown
     return result
 
 
@@ -123,10 +175,11 @@ def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     print("Plan:")
-    print("1. Load examples/data/showcase.docx and showcase.pptx")
-    print("2. Patch OOXML parts directly via officemd.patch_docx / officemd.patch_pptx")
-    print("3. Verify edited files via officemd markdown/IR extraction")
-    print("4. Verify LibreOffice can still open them via headless PDF conversion")
+    print("1. Load examples/data/showcase.docx, showcase.pptx, and showcase.xlsx")
+    print("2. Patch OOXML parts directly via officemd.patch_docx / patch_pptx / patch_xlsx")
+    print("3. Showcase metadata/comment-author scopes plus ALL_TEXT semantics")
+    print("4. Verify edited files via officemd markdown/IR extraction")
+    print("5. Verify LibreOffice can still open them via headless PDF conversion")
     print()
 
     docx_out = OUT_DIR / "showcase_edited.docx"
@@ -135,11 +188,24 @@ def main() -> None:
     pptx_out = OUT_DIR / "showcase_edited.pptx"
     pptx_out.write_bytes(patch_pptx((DATA_DIR / "showcase.pptx").read_bytes(), _pptx_patch()))
 
+    xlsx_out = OUT_DIR / "showcase_edited.xlsx"
+    xlsx_result = patch_xlsx_with_report((DATA_DIR / "showcase.xlsx").read_bytes(), _xlsx_patch())
+    xlsx_out.write_bytes(xlsx_result.content)
+
     print("DOCX result:")
     print(json.dumps(_summarize(docx_out, "docx"), indent=2, ensure_ascii=False))
     print()
     print("PPTX result:")
     print(json.dumps(_summarize(pptx_out, "pptx"), indent=2, ensure_ascii=False))
+    print()
+    print("XLSX result:")
+    xlsx_summary = _summarize(xlsx_out, "xlsx")
+    xlsx_summary["report"] = {
+        "parts_scanned": xlsx_result.report.parts_scanned,
+        "parts_modified": xlsx_result.report.parts_modified,
+        "replacements_applied": xlsx_result.report.replacements_applied,
+    }
+    print(json.dumps(xlsx_summary, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

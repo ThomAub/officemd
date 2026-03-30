@@ -130,6 +130,7 @@ patch = officemd.DocxPatch(
         )
     ]
 )
+# ALL_TEXT includes document content plus free-text metadata/app/custom fields.
 
 single = officemd.patch_docx_with_report(content, patch)
 print(single.report.replacements_applied)
@@ -154,6 +155,7 @@ let patch = DocxPatch {
         replace: TextReplace::all("word", "term"),
     }],
 };
+// AllText includes document content plus free-text metadata/app/custom fields.
 
 let results = patch_docx_batch_with_report(vec![doc1_bytes, doc2_bytes], &patch, Some(4))?;
 for item in results {
@@ -166,6 +168,14 @@ for item in results {
 }
 # Ok::<(), officemd_core::PatchError>(())
 ```
+
+Patch scopes also support free-text metadata/comment fields:
+- DOCX: `MetadataCore`, `MetadataApp`, `MetadataCustom`, `MetadataAll`
+- PPTX: `CommentAuthors`, `MetadataCore`, `MetadataApp`, `MetadataCustom`, `MetadataAll`
+- XLSX: `Comments`, `CommentAuthors`, `MetadataCore`, `MetadataApp`, `MetadataCustom`, `MetadataAll`
+
+`AllText` now means all free-text fields: content + metadata/comment-author text.
+
 
 ### JavaScript
 

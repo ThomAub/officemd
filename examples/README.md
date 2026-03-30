@@ -23,8 +23,8 @@ cargo run -p officemd_examples --bin extract_ir_docx -- examples/data/showcase.d
 cargo run -p officemd_examples --bin extract_ir_xlsx -- examples/data/showcase.xlsx
 cargo run -p officemd_examples --bin extract_ir_csv -- examples/data/showcase.csv
 cargo run -p officemd_examples --bin extract_ir_pptx -- examples/data/showcase.pptx
-cargo run -p officemd_examples --bin edit_showcase_words
-cargo run -p officemd_examples --bin edit_showcase_words_batch
+cargo run -p officemd_examples --bin edit_showcase_words        # now covers DOCX + PPTX + XLSX patch scopes
+cargo run -p officemd_examples --bin edit_showcase_words_batch  # batch patching incl. metadata/comment-author scopes
 ```
 
 ## JavaScript
@@ -46,6 +46,7 @@ uv run maturin develop --release
 uv run python ../../examples/python/extract_ir.py ../../examples/data/showcase.docx
 uv run python ../../examples/python/xlsx_streaming_ir.py ../../examples/data/showcase.xlsx --style-aware-values
 uv run python ../../examples/python/pdf_inspect_fonts.py ../../examples/data/OpenXML_WhitePaper.pdf --limit 10
+uv run python ../../examples/python/edit_showcase_words.py      # now covers DOCX + PPTX + XLSX patch scopes
 ```
 
 ## Smoke Tests
