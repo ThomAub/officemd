@@ -5,6 +5,7 @@
 
 use napi::bindgen_prelude::{Buffer, Error, Result, Status};
 use napi_derive::napi;
+use officemd_core::apply_ooxml_patch_json as apply_ooxml_patch_json_core;
 use officemd_core::opc::OpcPackage;
 use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
@@ -22,6 +23,11 @@ const ERR_PDF_FONTS_INSPECT: &str = "ERR_PDF_FONTS_INSPECT";
 const ERR_JSON_SERIALIZE: &str = "ERR_JSON_SERIALIZE";
 const ERR_DOCLING_CONVERT: &str = "ERR_DOCLING_CONVERT";
 const ERR_PARALLELISM: &str = "ERR_PARALLELISM";
+const ERR_MARKDOWN_PARSE: &str = "ERR_MARKDOWN_PARSE";
+const ERR_DOCX_GENERATE: &str = "ERR_DOCX_GENERATE";
+const ERR_XLSX_GENERATE: &str = "ERR_XLSX_GENERATE";
+const ERR_PPTX_GENERATE: &str = "ERR_PPTX_GENERATE";
+const ERR_OOXML_PATCH: &str = "ERR_OOXML_PATCH";
 
 #[derive(Debug)]
 enum DocumentFormat {
@@ -284,6 +290,32 @@ fn docling_from_bytes_impl(content: &[u8], format: Option<&str>) -> Result<Strin
         .map_err(|err| internal_error(ERR_DOCLING_CONVERT, err))
 }
 
+fn create_document_from_markdown_impl(markdown: &str, format: &str) -> Result<Vec<u8>> {
+    let doc = officemd_markdown::parse_document(markdown)
+        .map_err(|err| internal_error(ERR_MARKDOWN_PARSE, err))?;
+
+    match parse_format(format) {
+        Some(DocumentFormat::Docx) => {
+            officemd_docx::generate_docx(&doc).map_err(|err| internal_error(ERR_DOCX_GENERATE, err))
+        }
+        Some(DocumentFormat::Xlsx) => {
+            officemd_xlsx::generate_xlsx(&doc).map_err(|err| internal_error(ERR_XLSX_GENERATE, err))
+        }
+        Some(DocumentFormat::Pptx) => {
+            officemd_pptx::generate_pptx(&doc).map_err(|err| internal_error(ERR_PPTX_GENERATE, err))
+        }
+        Some(DocumentFormat::Csv | DocumentFormat::Pdf) | None => Err(Error::new(
+            Status::InvalidArg,
+            format!("format must be one of: docx, xlsx, pptx (got {format})"),
+        )),
+    }
+}
+
+fn apply_ooxml_patch_json_impl(content: &[u8], patch_json: &str) -> Result<Vec<u8>> {
+    apply_ooxml_patch_json_core(content, patch_json)
+        .map_err(|err| internal_error(ERR_OOXML_PATCH, err))
+}
+
 /// Detect the document format from raw bytes.
 ///
 /// # Errors
@@ -438,6 +470,28 @@ pub fn inspect_pdf_fonts_json(content: Buffer) -> Result<String> {
 #[napi]
 pub fn docling_from_bytes(content: Buffer, format: Option<String>) -> Result<String> {
     docling_from_bytes_impl(content.as_ref(), format.as_deref())
+}
+
+/// Create an Office document from officemd-flavored markdown.
+///
+/// # Errors
+///
+/// Returns an error if markdown parsing fails or the target format is unsupported.
+#[napi]
+pub fn create_document_from_markdown(markdown: String, format: String) -> Result<Buffer> {
+    create_document_from_markdown_impl(&markdown, &format).map(Buffer::from)
+}
+
+/// Apply direct text replacements to named OOXML parts and optionally set the core title.
+///
+/// The `patch_json` payload must match `officemd_core::OoxmlPatchRequest`.
+///
+/// # Errors
+///
+/// Returns an error if the package is invalid, a part is missing, or a replacement target is not found.
+#[napi]
+pub fn apply_ooxml_patch_json(content: Buffer, patch_json: String) -> Result<Buffer> {
+    apply_ooxml_patch_json_impl(content.as_ref(), &patch_json).map(Buffer::from)
 }
 
 #[cfg(test)]

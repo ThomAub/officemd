@@ -32,7 +32,9 @@ export declare function markdownFromBytes(
   includeDocumentProperties?: boolean | undefined | null,
   useFirstRowAsHeader?: boolean | undefined | null,
   includeHeadersFooters?: boolean | undefined | null,
+  includeFormulas?: boolean | undefined | null,
   markdownStyle?: string | undefined | null,
+  forceExtract?: boolean | undefined | null,
 ): string;
 /**
  * Render multiple documents as Markdown with Rust-side parallel workers.
@@ -48,6 +50,7 @@ export declare function markdownFromBytesBatch(
   includeDocumentProperties?: boolean | undefined | null,
   useFirstRowAsHeader?: boolean | undefined | null,
   includeHeadersFooters?: boolean | undefined | null,
+  includeFormulas?: boolean | undefined | null,
   markdownStyle?: string | undefined | null,
 ): Array<string>;
 /**
@@ -110,3 +113,21 @@ export declare function doclingFromBytes(
   content: Buffer,
   format?: string | undefined | null,
 ): string;
+/**
+ * Create an Office document from officemd-flavored markdown.
+ *
+ * # Errors
+ *
+ * Returns an error if markdown parsing fails or the target format is unsupported.
+ */
+export declare function createDocumentFromMarkdown(markdown: string, format: string): Buffer;
+/**
+ * Apply direct text replacements to named OOXML parts and optionally set the core title.
+ *
+ * The `patchJson` payload must match `officemd_core::OoxmlPatchRequest`.
+ *
+ * # Errors
+ *
+ * Returns an error if the package is invalid, a part is missing, or a replacement target is not found.
+ */
+export declare function applyOoxmlPatchJson(content: Buffer, patchJson: string): Buffer;

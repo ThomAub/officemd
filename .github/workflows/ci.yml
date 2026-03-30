@@ -97,7 +97,7 @@ jobs:
           git checkout -- index.js index.d.ts
       - name: node tests
         working-directory: crates/officemd_js
-        run: node --test tests/cli-selection.test.mjs
+        run: node --test tests/cli-selection.test.mjs tests/api-surface.test.mjs
       - name: bun tests
         working-directory: crates/officemd_js
         run: bun test tests/cli-selection.test.mjs
@@ -121,18 +121,29 @@ jobs:
         with:
           cache-on-failure: true
       - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
       - name: sync
         working-directory: crates/officemd_python
         run: uv sync --dev
       - name: build extension
         working-directory: crates/officemd_python
         run: uv run maturin develop --release
+      - name: install js deps
+        working-directory: crates/officemd_js
+        run: npm install
+      - name: build js binding
+        working-directory: crates/officemd_js
+        run: npm run build
       - name: pytest smoke
         working-directory: crates/officemd_python
-        run: uv run pytest ../../examples/python/tests/test_showcase.py -q
+        run: uv run pytest ../../examples/python/tests/test_showcase.py tests/test_api_surface.py -q
       - name: snapshot tests
         working-directory: crates/officemd_python
         run: uv run pytest ../../crates/tests/snapshots/ -q
+      - name: binding surface parity
+        run: python3 scripts/binding_surface_compare.py --require-js-runtime
       - uses: PyO3/maturin-action@v1
         name: wheel and sdist
         with:
