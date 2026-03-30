@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from pathlib import Path
+import zipfile
 
 import pytest
 
@@ -14,7 +16,10 @@ from officemd import (
     PptxTextScope,
     ScopedDocxReplace,
     ScopedPptxReplace,
+    ScopedXlsxReplace,
     TextReplace,
+    XlsxPatch,
+    XlsxTextScope,
     apply_ooxml_patch_json,
     detect_format,
     extract_csv_tables_ir_json,
@@ -25,6 +30,7 @@ from officemd import (
     markdown_from_bytes,
     patch_docx,
     patch_pptx,
+    patch_xlsx,
 )
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[2]
@@ -112,6 +118,97 @@ def test_typed_pptx_patch_replaces_word_across_all_text() -> None:
     assert "Quarterly Recap" in markdown
     ir = json.loads(extract_ir_json(patched, format="pptx"))
     assert ir["properties"]["core"]["title"] == "Typed Showcase PPTX"
+
+
+def test_showcase_docx_preserve_formatting_fixture_smoke() -> None:
+    patched = patch_docx(
+        _read_bytes("showcase.docx"),
+        DocxPatch(
+            scoped_replacements=[
+                ScopedDocxReplace(
+                    DocxTextScope.BODY,
+                    TextReplace(
+                        "Quarterly Operations Summary",
+                        "Quarterly Operations Recap",
+                        preserve_formatting=True,
+                    ),
+                ),
+                ScopedDocxReplace(
+                    DocxTextScope.COMMENTS,
+                    TextReplace(
+                        "Example DOCX comment captured as markdown footnote.",
+                        "",
+                        preserve_formatting=True,
+                    ),
+                ),
+            ],
+        ),
+    )
+    markdown = markdown_from_bytes(patched, format="docx", include_document_properties=True)
+    assert "Quarterly Operations Recap" in markdown
+    assert "Example DOCX comment captured as markdown footnote." not in markdown
+    ir = json.loads(extract_ir_json(patched, format="docx"))
+    assert ir["kind"] == "Docx"
+    with zipfile.ZipFile(BytesIO(patched)) as zf:
+        assert "Quarterly Operations Recap" in zf.read("word/document.xml").decode()
+
+
+def test_showcase_pptx_preserve_formatting_fixture_smoke() -> None:
+    patched = patch_pptx(
+        _read_bytes("showcase.pptx"),
+        PptxPatch(
+            scoped_replacements=[
+                ScopedPptxReplace(
+                    PptxTextScope.SLIDE_BODY,
+                    TextReplace(
+                        "Revenue is up 12% quarter over quarter.",
+                        "Revenue rose 12% quarter over quarter.",
+                        preserve_formatting=True,
+                    ),
+                ),
+                ScopedPptxReplace(
+                    PptxTextScope.COMMENTS,
+                    TextReplace(
+                        "Add one slide on operating margin.",
+                        "",
+                        preserve_formatting=True,
+                    ),
+                ),
+            ],
+        ),
+    )
+    markdown = markdown_from_bytes(patched, format="pptx", include_document_properties=True)
+    assert "Revenue rose 12% quarter over quarter." in markdown
+    assert "Add one slide on operating margin." not in markdown
+    ir = json.loads(extract_ir_json(patched, format="pptx"))
+    assert ir["kind"] == "Pptx"
+    with zipfile.ZipFile(BytesIO(patched)) as zf:
+        assert "Revenue rose 12% quarter over quarter." in zf.read("ppt/slides/slide1.xml").decode()
+
+
+def test_showcase_xlsx_preserve_formatting_fixture_smoke() -> None:
+    patched = patch_xlsx(
+        _read_bytes("showcase.xlsx"),
+        XlsxPatch(
+            scoped_replacements=[
+                ScopedXlsxReplace(
+                    XlsxTextScope.ALL_TEXT,
+                    TextReplace("Widget", "Widget Pro", preserve_formatting=True),
+                ),
+                ScopedXlsxReplace(
+                    XlsxTextScope.COMMENTS,
+                    TextReplace("This row has a cell comment (Excel note).", "", preserve_formatting=True),
+                ),
+            ],
+        ),
+    )
+    markdown = markdown_from_bytes(patched, format="xlsx", include_document_properties=True)
+    assert "Widget Pro" in markdown
+    assert "This row has a cell comment (Excel note)." not in markdown
+    ir = json.loads(extract_ir_json(patched, format="xlsx"))
+    assert ir["kind"] == "Xlsx"
+    with zipfile.ZipFile(BytesIO(patched)) as zf:
+        assert "Widget Pro" in zf.read("xl/worksheets/sheet1.xml").decode()
 
 
 def test_showcase_csv_markdown_and_ir_smoke() -> None:

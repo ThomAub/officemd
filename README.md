@@ -198,7 +198,6 @@ Semantics:
 - later consumed runs are left empty in v1
 - metadata/comment-author fields still use simple text replacement
 
-PDF visual text removal/replacement is intentionally planned as a separate track; see `docs/pdf-visual-replacement-plan.md`.
 
 ### JavaScript
 
