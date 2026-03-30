@@ -7,12 +7,13 @@ use officemd_core::format::{
     DocumentFormat, detect_format_from_bytes, parse_format, resolve_format, resolve_worker_count,
 };
 use officemd_core::{
-    apply_ooxml_patch_json as apply_ooxml_patch_json_core,
+    DocxPatch, PptxPatch, apply_ooxml_patch_json as apply_ooxml_patch_json_core,
     patch_docx_batch_json as patch_docx_batch_json_core,
     patch_docx_batch_json_with_report as patch_docx_batch_json_with_report_core,
-    patch_docx_json as patch_docx_json_core, patch_pptx_batch_json as patch_pptx_batch_json_core,
+    patch_docx_json as patch_docx_json_core, patch_docx_with_report as patch_docx_with_report_core,
+    patch_pptx_batch_json as patch_pptx_batch_json_core,
     patch_pptx_batch_json_with_report as patch_pptx_batch_json_with_report_core,
-    patch_pptx_json as patch_pptx_json_core,
+    patch_pptx_json as patch_pptx_json_core, patch_pptx_with_report as patch_pptx_with_report_core,
 };
 use officemd_markdown::{MarkdownProfile, RenderOptions};
 use pyo3::prelude::*;
@@ -329,6 +330,40 @@ fn patch_pptx_batch_json_with_report_impl(
     serde_json::to_string(&results).map_err(|e| e.to_string())
 }
 
+fn patch_docx_json_with_report_impl(content: &[u8], patch_json: &str) -> Result<String, String> {
+    let patch: DocxPatch = serde_json::from_str(patch_json).map_err(|e| e.to_string())?;
+    let result = patch_docx_with_report_core(content, &patch).map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+fn patch_pptx_json_with_report_impl(content: &[u8], patch_json: &str) -> Result<String, String> {
+    let patch: PptxPatch = serde_json::from_str(patch_json).map_err(|e| e.to_string())?;
+    let result = patch_pptx_with_report_core(content, &patch).map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[pyfunction(signature = (content, patch_json))]
+fn _patch_docx_json_with_report(
+    py: Python<'_>,
+    content: &[u8],
+    patch_json: String,
+) -> PyResult<String> {
+    let owned_content = content.to_vec();
+    py.detach(move || patch_docx_json_with_report_impl(&owned_content, &patch_json))
+        .map_err(to_py_err)
+}
+
+#[pyfunction(signature = (content, patch_json))]
+fn _patch_pptx_json_with_report(
+    py: Python<'_>,
+    content: &[u8],
+    patch_json: String,
+) -> PyResult<String> {
+    let owned_content = content.to_vec();
+    py.detach(move || patch_pptx_json_with_report_impl(&owned_content, &patch_json))
+        .map_err(to_py_err)
+}
+
 #[pyfunction(signature = (contents, patch_json, workers=None))]
 fn _patch_docx_batch_json_with_report(
     py: Python<'_>,
@@ -420,6 +455,8 @@ fn _officemd(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(apply_ooxml_patch_json, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_docx_json, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_pptx_json, m)?)?;
+    m.add_function(wrap_pyfunction!(_patch_docx_json_with_report, m)?)?;
+    m.add_function(wrap_pyfunction!(_patch_pptx_json_with_report, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_docx_batch_json, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_pptx_batch_json, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_docx_batch_json_with_report, m)?)?;

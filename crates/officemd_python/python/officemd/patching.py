@@ -9,9 +9,11 @@ from typing import Any, Mapping
 from officemd._officemd import _patch_docx_batch_json  # type: ignore[unresolved-import]
 from officemd._officemd import _patch_docx_batch_json_with_report  # type: ignore[unresolved-import]
 from officemd._officemd import _patch_docx_json  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_docx_json_with_report  # type: ignore[unresolved-import]
 from officemd._officemd import _patch_pptx_batch_json  # type: ignore[unresolved-import]
 from officemd._officemd import _patch_pptx_batch_json_with_report  # type: ignore[unresolved-import]
 from officemd._officemd import _patch_pptx_json  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_pptx_json_with_report  # type: ignore[unresolved-import]
 
 
 class ReplaceMode(str, Enum):
@@ -127,6 +129,12 @@ class PatchReport:
 
 
 @dataclass(frozen=True)
+class PatchContentResult:
+    content: bytes
+    report: PatchReport
+
+
+@dataclass(frozen=True)
 class BatchPatchContentResult:
     content: bytes
     report: PatchReport
@@ -164,8 +172,22 @@ def patch_docx(content: bytes, patch: DocxPatch | Mapping[str, Any]) -> bytes:
     return _patch_docx_json(content, _to_patch_json(patch))
 
 
+def patch_docx_with_report(
+    content: bytes, patch: DocxPatch | Mapping[str, Any]
+) -> PatchContentResult:
+    item = json.loads(_patch_docx_json_with_report(content, _to_patch_json(patch)))
+    return PatchContentResult(content=bytes(item["content"]), report=PatchReport(**item["report"]))
+
+
 def patch_pptx(content: bytes, patch: PptxPatch | Mapping[str, Any]) -> bytes:
     return _patch_pptx_json(content, _to_patch_json(patch))
+
+
+def patch_pptx_with_report(
+    content: bytes, patch: PptxPatch | Mapping[str, Any]
+) -> PatchContentResult:
+    item = json.loads(_patch_pptx_json_with_report(content, _to_patch_json(patch)))
+    return PatchContentResult(content=bytes(item["content"]), report=PatchReport(**item["report"]))
 
 
 def patch_docx_batch(

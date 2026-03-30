@@ -19,9 +19,11 @@ EXPECTED_EXPORTS = [
     "patch_docx",
     "patch_docx_batch",
     "patch_docx_batch_with_report",
+    "patch_docx_with_report",
     "patch_pptx",
     "patch_pptx_batch",
     "patch_pptx_batch_with_report",
+    "patch_pptx_with_report",
 ]
 
 
@@ -80,6 +82,24 @@ def test_patch_docx_typed_api_replaces_all_text() -> None:
     )
     markdown = officemd.markdown_from_bytes(patched, format="docx", include_document_properties=True)
     assert "term term" in markdown
+
+
+def test_patch_docx_with_report_returns_counts() -> None:
+    content = officemd.create_document_from_markdown("## Section: body\n\nword word\n", "docx")
+    patched = officemd.patch_docx_with_report(
+        content,
+        officemd.DocxPatch(
+            scoped_replacements=[
+                officemd.ScopedDocxReplace(
+                    officemd.DocxTextScope.ALL_TEXT,
+                    officemd.TextReplace("word", "term"),
+                )
+            ],
+        ),
+    )
+    assert patched.report.replacements_applied >= 2
+    assert patched.report.parts_modified >= 1
+    assert "term term" in officemd.markdown_from_bytes(patched.content, format="docx")
 
 
 def test_patch_docx_batch_applies_same_patch_with_rayon_workers() -> None:
