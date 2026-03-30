@@ -40,6 +40,20 @@ fn to_py_err(err: impl std::fmt::Display) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(err.to_string())
 }
 
+fn create_document_from_markdown_impl(markdown: &str, format: &str) -> Result<Vec<u8>, String> {
+    let doc = officemd_markdown::parse_document(markdown)
+        .map_err(|e| format!("failed to parse markdown: {e}"))?;
+
+    match parse_format(format) {
+        Some(DocumentFormat::Docx) => officemd_docx::generate_docx(&doc).map_err(|e| e.to_string()),
+        Some(DocumentFormat::Xlsx) => officemd_xlsx::generate_xlsx(&doc).map_err(|e| e.to_string()),
+        Some(DocumentFormat::Pptx) => officemd_pptx::generate_pptx(&doc).map_err(|e| e.to_string()),
+        Some(DocumentFormat::Csv | DocumentFormat::Pdf) | None => Err(format!(
+            "format must be one of: docx, xlsx, pptx (got {format})"
+        )),
+    }
+}
+
 fn markdown_from_owned_bytes_impl(
     content: &[u8],
     format: Option<&str>,
@@ -240,6 +254,16 @@ fn docling_from_bytes(py: Python<'_>, content: &[u8], format: Option<String>) ->
         officemd_docling::convert_document_json(&doc).map_err(|e| e.to_string())
     })
     .map_err(to_py_err)
+}
+
+#[pyfunction(signature = (markdown, format))]
+fn create_document_from_markdown(
+    py: Python<'_>,
+    markdown: String,
+    format: String,
+) -> PyResult<Vec<u8>> {
+    py.detach(move || create_document_from_markdown_impl(&markdown, &format))
+        .map_err(to_py_err)
 }
 
 fn apply_ooxml_patch_json_impl(content: &[u8], patch_json: &str) -> Result<Vec<u8>, String> {
@@ -547,7 +571,7 @@ fn _officemd(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use officemd_core::test_helpers::{build_zip, minimal_xlsx_with_doc_props};
+    use officemd_core::test_helpers::minimal_xlsx_with_doc_props;
 
     #[test]
     fn markdown_from_csv_requires_explicit_format() {

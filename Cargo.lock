@@ -982,6 +982,7 @@ name = "officemd_core"
 version = "0.1.5"
 dependencies = [
  "quick-xml",
+ "rayon",
  "regex",
  "serde",
  "serde_json",
@@ -1054,6 +1055,7 @@ dependencies = [
  "officemd_xlsx",
  "rayon",
  "serde_json",
+ "zip",
 ]
 
 [[package]]
@@ -1109,6 +1111,7 @@ dependencies = [
  "pyo3-build-config",
  "rayon",
  "serde_json",
+ "zip",
 ]
 
 [[package]]

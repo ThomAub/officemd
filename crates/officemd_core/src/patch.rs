@@ -1269,13 +1269,48 @@ fn apply_xlsx_sheet_name_replace(
     Ok(())
 }
 
+fn rename_exact_sheet_name_attr(
+    xml: &str,
+    from: &str,
+    to: &str,
+) -> Result<(String, usize), PatchError> {
+    let mut replacements_applied = 0;
+    let updated = SHEET_NAME_ATTR_RE.replace_all(xml, |caps: &regex::Captures<'_>| {
+        let before = caps.get(1).expect("before").as_str();
+        let name = caps.get(2).expect("name").as_str();
+        let after = caps.get(3).expect("after").as_str();
+        let decoded = xml_unescape(name);
+        if decoded == from {
+            replacements_applied += 1;
+            format!("<sheet{before}name=\"{}\"{after}/>", xml_escape(to))
+        } else {
+            caps.get(0).expect("whole").as_str().to_string()
+        }
+    });
+    Ok((updated.into_owned(), replacements_applied))
+}
+
 fn apply_xlsx_sheet_rename(
     parts: &mut BTreeMap<String, Vec<u8>>,
     rename: &XlsxSheetRename,
     report: &mut PatchReport,
 ) -> Result<(), PatchError> {
-    let replace = TextReplace::first(&rename.from, &rename.to);
-    apply_xlsx_sheet_name_replace(parts, &replace, report)?;
+    report.parts_scanned += 1;
+    let workbook = parts
+        .get_mut("xl/workbook.xml")
+        .ok_or_else(|| PatchError::MissingPart("xl/workbook.xml".to_string()))?;
+    let original = String::from_utf8_lossy(workbook).into_owned();
+    let (updated, replacements_applied) =
+        rename_exact_sheet_name_attr(&original, &rename.from, &rename.to)?;
+    if replacements_applied == 0 {
+        return Err(PatchError::TextNotFound {
+            part: "xl/workbook.xml".to_string(),
+            needle: rename.from.clone(),
+        });
+    }
+    *workbook = updated.into_bytes();
+    report.parts_modified += 1;
+    report.replacements_applied += replacements_applied;
 
     if !rename.update_references {
         return Ok(());
@@ -1437,6 +1472,9 @@ fn rewrite_xml_text_containers_preserving_runs(
     let mut replacements_applied = 0;
     let updated = container_re.replace_all(xml, |caps: &regex::Captures<'_>| {
         let whole = caps.get(0).expect("whole match").as_str();
+        if matches!(replace.mode, ReplaceMode::First) && replacements_applied > 0 {
+            return whole.to_string();
+        }
         match rewrite_xml_text_nodes_preserving_runs(whole, node_re, replace) {
             Ok((rewritten, applied)) => {
                 replacements_applied += applied;
@@ -2067,6 +2105,35 @@ mod tests {
     }
 
     #[test]
+    fn typed_docx_patch_preserve_formatting_first_stops_after_first_paragraph() {
+        let bytes = build_zip(vec![(
+            "word/document.xml",
+            concat!(
+                "<w:p><w:r><w:t>Hello world</w:t></w:r></w:p>",
+                "<w:p><w:r><w:t>Hello again</w:t></w:r></w:p>"
+            ),
+        )]);
+
+        let patched = patch_docx(
+            &bytes,
+            &DocxPatch {
+                set_core_title: None,
+                replace_body_title: None,
+                scoped_replacements: vec![ScopedDocxReplace {
+                    scope: DocxTextScope::Body,
+                    replace: TextReplace::first("Hello", "Hi").with_preserve_formatting(true),
+                }],
+            },
+        )
+        .unwrap();
+
+        let parts = read_parts(&patched).unwrap();
+        let document_xml = String::from_utf8_lossy(&parts["word/document.xml"]);
+        assert!(document_xml.contains("<w:p><w:r><w:t>Hi world</w:t></w:r></w:p>"));
+        assert!(document_xml.contains("<w:p><w:r><w:t>Hello again</w:t></w:r></w:p>"));
+    }
+
+    #[test]
     fn typed_pptx_patch_preserve_formatting_does_not_cross_paragraphs() {
         let bytes = build_zip(vec![(
             "ppt/slides/slide1.xml",
@@ -2269,6 +2336,36 @@ mod tests {
                 || chart_xml.contains("&apos;Revenue Data&apos;!$B$2:$B$3")
         );
         assert!(patched.report.replacements_applied >= 4);
+    }
+
+    #[test]
+    fn xlsx_sheet_rename_requires_exact_sheet_name_match() {
+        let bytes = build_zip(vec![(
+            "xl/workbook.xml",
+            concat!(
+                "<workbook><definedNames>",
+                "<definedName name=\"_xlnm.Print_Area\">'Sales Data'!$A$1</definedName>",
+                "</definedNames><sheets>",
+                "<sheet name=\"Sales Data\" sheetId=\"1\" r:id=\"rId1\"/>",
+                "</sheets></workbook>"
+            ),
+        )]);
+
+        let err = patch_xlsx_with_report(
+            &bytes,
+            &XlsxPatch {
+                set_core_title: None,
+                rename_sheets: vec![XlsxSheetRename {
+                    from: "Sales".to_string(),
+                    to: "Revenue".to_string(),
+                    update_references: true,
+                }],
+                scoped_replacements: vec![],
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, PatchError::TextNotFound { .. }));
     }
 
     #[test]
