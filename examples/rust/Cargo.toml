@@ -5,9 +5,12 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+officemd_core = { path = "../../crates/officemd_core" }
 officemd_docx = { path = "../../crates/officemd_docx" }
 officemd_xlsx = { path = "../../crates/officemd_xlsx" }
 officemd_csv = { path = "../../crates/officemd_csv" }
 officemd_pptx = { path = "../../crates/officemd_pptx" }
 officemd_markdown = { path = "../../crates/officemd_markdown" }
 serde_json = "1"
+tempfile = "3"
+which = "7"
