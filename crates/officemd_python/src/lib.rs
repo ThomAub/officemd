@@ -7,13 +7,16 @@ use officemd_core::format::{
     DocumentFormat, detect_format_from_bytes, parse_format, resolve_format, resolve_worker_count,
 };
 use officemd_core::{
-    DocxPatch, PptxPatch, apply_ooxml_patch_json as apply_ooxml_patch_json_core,
+    DocxPatch, PptxPatch, XlsxPatch, apply_ooxml_patch_json as apply_ooxml_patch_json_core,
     patch_docx_batch_json as patch_docx_batch_json_core,
     patch_docx_batch_json_with_report as patch_docx_batch_json_with_report_core,
     patch_docx_json as patch_docx_json_core, patch_docx_with_report as patch_docx_with_report_core,
     patch_pptx_batch_json as patch_pptx_batch_json_core,
     patch_pptx_batch_json_with_report as patch_pptx_batch_json_with_report_core,
     patch_pptx_json as patch_pptx_json_core, patch_pptx_with_report as patch_pptx_with_report_core,
+    patch_xlsx_batch_json as patch_xlsx_batch_json_core,
+    patch_xlsx_batch_json_with_report as patch_xlsx_batch_json_with_report_core,
+    patch_xlsx_json as patch_xlsx_json_core, patch_xlsx_with_report as patch_xlsx_with_report_core,
 };
 use officemd_markdown::{MarkdownProfile, RenderOptions};
 use pyo3::prelude::*;
@@ -386,6 +389,74 @@ fn _patch_pptx_batch_json_with_report(
         .map_err(to_py_err)
 }
 
+fn patch_xlsx_json_impl(content: &[u8], patch_json: &str) -> Result<Vec<u8>, String> {
+    patch_xlsx_json_core(content, patch_json).map_err(|e| e.to_string())
+}
+
+fn patch_xlsx_json_with_report_impl(content: &[u8], patch_json: &str) -> Result<String, String> {
+    let patch: XlsxPatch = serde_json::from_str(patch_json).map_err(|e| e.to_string())?;
+    let result = patch_xlsx_with_report_core(content, &patch).map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+fn patch_xlsx_batch_json_impl(
+    contents: Vec<Vec<u8>>,
+    patch_json: &str,
+    workers: Option<usize>,
+) -> Result<Vec<Vec<u8>>, String> {
+    patch_xlsx_batch_json_core(contents, patch_json, workers).map_err(|e| e.to_string())
+}
+
+fn patch_xlsx_batch_json_with_report_impl(
+    contents: Vec<Vec<u8>>,
+    patch_json: &str,
+    workers: Option<usize>,
+) -> Result<String, String> {
+    let results = patch_xlsx_batch_json_with_report_core(contents, patch_json, workers)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&results).map_err(|e| e.to_string())
+}
+
+#[pyfunction(signature = (content, patch_json))]
+fn _patch_xlsx_json(py: Python<'_>, content: &[u8], patch_json: String) -> PyResult<Vec<u8>> {
+    let owned_content = content.to_vec();
+    py.detach(move || patch_xlsx_json_impl(&owned_content, &patch_json))
+        .map_err(to_py_err)
+}
+
+#[pyfunction(signature = (content, patch_json))]
+fn _patch_xlsx_json_with_report(
+    py: Python<'_>,
+    content: &[u8],
+    patch_json: String,
+) -> PyResult<String> {
+    let owned_content = content.to_vec();
+    py.detach(move || patch_xlsx_json_with_report_impl(&owned_content, &patch_json))
+        .map_err(to_py_err)
+}
+
+#[pyfunction(signature = (contents, patch_json, workers=None))]
+fn _patch_xlsx_batch_json(
+    py: Python<'_>,
+    contents: Vec<Vec<u8>>,
+    patch_json: String,
+    workers: Option<usize>,
+) -> PyResult<Vec<Vec<u8>>> {
+    py.detach(move || patch_xlsx_batch_json_impl(contents, &patch_json, workers))
+        .map_err(to_py_err)
+}
+
+#[pyfunction(signature = (contents, patch_json, workers=None))]
+fn _patch_xlsx_batch_json_with_report(
+    py: Python<'_>,
+    contents: Vec<Vec<u8>>,
+    patch_json: String,
+    workers: Option<usize>,
+) -> PyResult<String> {
+    py.detach(move || patch_xlsx_batch_json_with_report_impl(contents, &patch_json, workers))
+        .map_err(to_py_err)
+}
+
 #[pyfunction(signature = (
     content,
     style_aware_values=false,
@@ -455,12 +526,16 @@ fn _officemd(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(apply_ooxml_patch_json, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_docx_json, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_pptx_json, m)?)?;
+    m.add_function(wrap_pyfunction!(_patch_xlsx_json, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_docx_json_with_report, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_pptx_json_with_report, m)?)?;
+    m.add_function(wrap_pyfunction!(_patch_xlsx_json_with_report, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_docx_batch_json, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_pptx_batch_json, m)?)?;
+    m.add_function(wrap_pyfunction!(_patch_xlsx_batch_json, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_docx_batch_json_with_report, m)?)?;
     m.add_function(wrap_pyfunction!(_patch_pptx_batch_json_with_report, m)?)?;
+    m.add_function(wrap_pyfunction!(_patch_xlsx_batch_json_with_report, m)?)?;
     m.add_function(wrap_pyfunction!(markdown_from_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(markdown_from_bytes_batch, m)?)?;
     m.add_function(wrap_pyfunction!(extract_sheet_names, m)?)?;

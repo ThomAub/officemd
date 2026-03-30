@@ -1,7 +1,17 @@
 import inspect
+from io import BytesIO
 from pathlib import Path
+import zipfile
 
 import officemd
+
+def _build_zip(parts: list[tuple[str, str]]) -> bytes:
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, content in parts:
+            zf.writestr(name, content)
+    return buffer.getvalue()
+
 
 EXPECTED_EXPORTS = [
     "apply_ooxml_patch_json",
@@ -24,6 +34,10 @@ EXPECTED_EXPORTS = [
     "patch_pptx_batch",
     "patch_pptx_batch_with_report",
     "patch_pptx_with_report",
+    "patch_xlsx",
+    "patch_xlsx_batch",
+    "patch_xlsx_batch_with_report",
+    "patch_xlsx_with_report",
 ]
 
 
@@ -135,12 +149,151 @@ def test_patch_docx_batch_with_report_returns_counts() -> None:
     assert "term term" in officemd.markdown_from_bytes(patched[0].content, format="docx")
 
 
+def test_patch_docx_can_replace_comment_author_and_metadata_fields() -> None:
+    content = _build_zip(
+        [
+            (
+                "word/comments.xml",
+                '<w:comments><w:comment w:id="0" w:author="Alice"><w:p><w:r><w:t>Needs review</w:t></w:r></w:p></w:comment></w:comments>',
+            ),
+            (
+                "docProps/app.xml",
+                "<Properties><Company>Old Company</Company><Template>Old Template</Template></Properties>",
+            ),
+            (
+                "docProps/custom.xml",
+                "<Properties><property name=\"FilePath\"><vt:lpwstr>/tmp/old.docx</vt:lpwstr></property></Properties>",
+            ),
+            (
+                "docProps/core.xml",
+                '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc"><dc:title>old</dc:title></cp:coreProperties>',
+            ),
+        ]
+    )
+    patched = officemd.patch_docx(
+        content,
+        officemd.DocxPatch(
+            scoped_replacements=[
+                officemd.ScopedDocxReplace(
+                    officemd.DocxTextScope.COMMENTS,
+                    officemd.TextReplace("Alice", "Bob"),
+                ),
+                officemd.ScopedDocxReplace(
+                    officemd.DocxTextScope.METADATA_APP,
+                    officemd.TextReplace("Old", "New"),
+                ),
+                officemd.ScopedDocxReplace(
+                    officemd.DocxTextScope.METADATA_CUSTOM,
+                    officemd.TextReplace("/tmp/old.docx", "/tmp/new.docx"),
+                ),
+            ]
+        ),
+    )
+    with zipfile.ZipFile(BytesIO(patched)) as zf:
+        assert 'w:author="Bob"' in zf.read("word/comments.xml").decode()
+        assert "New Company" in zf.read("docProps/app.xml").decode()
+        assert "/tmp/new.docx" in zf.read("docProps/custom.xml").decode()
+
+
+def test_patch_pptx_can_replace_comment_author_and_metadata_fields() -> None:
+    content = _build_zip(
+        [
+            (
+                "ppt/commentAuthors.xml",
+                '<p:cmAuthorLst><p:cmAuthor id="0" name="Alice" initials="AL"/></p:cmAuthorLst>',
+            ),
+            (
+                "docProps/app.xml",
+                "<Properties><Company>Old Company</Company><PresentationFormat>Old Deck</PresentationFormat></Properties>",
+            ),
+            (
+                "docProps/custom.xml",
+                "<Properties><property name=\"FileName\"><vt:lpwstr>old.pptx</vt:lpwstr></property></Properties>",
+            ),
+            (
+                "docProps/core.xml",
+                '<cp:coreProperties xmlns:cp="cp" xmlns:dc="dc"><dc:title>old</dc:title></cp:coreProperties>',
+            ),
+        ]
+    )
+    patched = officemd.patch_pptx(
+        content,
+        officemd.PptxPatch(
+            scoped_replacements=[
+                officemd.ScopedPptxReplace(
+                    officemd.PptxTextScope.COMMENT_AUTHORS,
+                    officemd.TextReplace("Alice", "Bob"),
+                ),
+                officemd.ScopedPptxReplace(
+                    officemd.PptxTextScope.METADATA_APP,
+                    officemd.TextReplace("Old", "New"),
+                ),
+                officemd.ScopedPptxReplace(
+                    officemd.PptxTextScope.METADATA_CUSTOM,
+                    officemd.TextReplace("old.pptx", "new.pptx"),
+                ),
+            ]
+        ),
+    )
+    with zipfile.ZipFile(BytesIO(patched)) as zf:
+        assert 'name="Bob"' in zf.read("ppt/commentAuthors.xml").decode()
+        assert "New Company" in zf.read("docProps/app.xml").decode()
+        assert "new.pptx" in zf.read("docProps/custom.xml").decode()
+
+
+def test_patch_xlsx_with_reference_aware_sheet_rename() -> None:
+    content = officemd.create_document_from_markdown(
+        "## Sheet: Sales\n\n| Item | Value |\n| --- | --- |\n| Revenue | 10 |\n\n"
+        "## Sheet: Summary\n\n| Metric | Value |\n| --- | --- |\n| Revenue | 10 |\n\n"
+        "B2=`='Sales'!B2`\n",
+        "xlsx",
+    )
+    patched = officemd.patch_xlsx_with_report(
+        content,
+        officemd.XlsxPatch(
+            rename_sheets=[officemd.XlsxSheetRename("Sales", "Revenue")],
+        ),
+    )
+    assert officemd.extract_sheet_names(patched.content) == ["Revenue", "Summary"]
+    assert patched.report.replacements_applied >= 2
+    with zipfile.ZipFile(BytesIO(patched.content)) as zf:
+        workbook_xml = zf.read("xl/workbook.xml").decode()
+        sheet_xml = zf.read("xl/worksheets/sheet2.xml").decode()
+    assert 'name="Revenue"' in workbook_xml
+    assert "Revenue!B2" in sheet_xml or "'Revenue'!B2" in sheet_xml
+
+
+def test_patch_xlsx_replaces_workbook_text() -> None:
+    content = officemd.create_document_from_markdown(
+        "## Sheet: Sales\n\n| Term | Value |\n| --- | --- |\n| word | word |\n",
+        "xlsx",
+    )
+    patched = officemd.patch_xlsx(
+        content,
+        officemd.XlsxPatch(
+            scoped_replacements=[
+                officemd.ScopedXlsxReplace(
+                    officemd.XlsxTextScope.ALL_TEXT,
+                    officemd.TextReplace("word", "term"),
+                )
+            ]
+        ),
+    )
+    assert "term" in officemd.markdown_from_bytes(patched, format="xlsx")
+
+
 def test_patch_files_uses_rust_batch_patching(tmp_path: Path) -> None:
     content = officemd.create_document_from_markdown("## Section: body\n\nword\n", "docx")
+    xlsx = officemd.create_document_from_markdown(
+        "## Sheet: Sales\n\n| Term | Value |\n| --- | --- |\n| word | 1 |\n",
+        "xlsx",
+    )
     src1 = tmp_path / "a.docx"
     src2 = tmp_path / "b.docx"
+    src3 = tmp_path / "c.xlsx"
     src1.write_bytes(content)
     src2.write_bytes(content)
+    src3.write_bytes(xlsx)
     patch = officemd.DocxPatch(
         scoped_replacements=[
             officemd.ScopedDocxReplace(
@@ -149,10 +302,20 @@ def test_patch_files_uses_rust_batch_patching(tmp_path: Path) -> None:
             )
         ]
     )
+    xlsx_patch = officemd.XlsxPatch(
+        rename_sheets=[officemd.XlsxSheetRename("Sales", "Revenue")],
+        scoped_replacements=[
+            officemd.ScopedXlsxReplace(
+                officemd.XlsxTextScope.ALL_TEXT,
+                officemd.TextReplace("word", "term"),
+            )
+        ],
+    )
     results = officemd.patch_files(
         [
             officemd.BatchPatchJob(src1, tmp_path / "out1.docx", patch, "docx"),
             officemd.BatchPatchJob(src2, tmp_path / "out2.docx", patch, "docx"),
+            officemd.BatchPatchJob(src3, tmp_path / "out3.xlsx", xlsx_patch, "xlsx"),
         ],
         workers=2,
     )
@@ -161,3 +324,4 @@ def test_patch_files_uses_rust_batch_patching(tmp_path: Path) -> None:
     assert all(result.report.replacements_applied >= 1 for result in results if result.report is not None)
     assert "term" in officemd.markdown_from_bytes((tmp_path / "out1.docx").read_bytes(), format="docx")
     assert "term" in officemd.markdown_from_bytes((tmp_path / "out2.docx").read_bytes(), format="docx")
+    assert "## Sheet: Revenue" in officemd.markdown_from_bytes((tmp_path / "out3.xlsx").read_bytes(), format="xlsx")

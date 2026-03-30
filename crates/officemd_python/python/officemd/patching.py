@@ -14,6 +14,10 @@ from officemd._officemd import _patch_pptx_batch_json  # type: ignore[unresolved
 from officemd._officemd import _patch_pptx_batch_json_with_report  # type: ignore[unresolved-import]
 from officemd._officemd import _patch_pptx_json  # type: ignore[unresolved-import]
 from officemd._officemd import _patch_pptx_json_with_report  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_xlsx_batch_json  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_xlsx_batch_json_with_report  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_xlsx_json  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_xlsx_json_with_report  # type: ignore[unresolved-import]
 
 
 class ReplaceMode(str, Enum):
@@ -36,6 +40,10 @@ class DocxTextScope(str, Enum):
     FOOTNOTES = "footnotes"
     ENDNOTES = "endnotes"
     METADATA_CORE_TITLE = "metadata_core_title"
+    METADATA_CORE = "metadata_core"
+    METADATA_APP = "metadata_app"
+    METADATA_CUSTOM = "metadata_custom"
+    METADATA_ALL = "metadata_all"
     ALL_TEXT = "all_text"
 
 
@@ -44,6 +52,21 @@ class PptxTextScope(str, Enum):
     SLIDE_BODY = "slide_body"
     NOTES = "notes"
     COMMENTS = "comments"
+    COMMENT_AUTHORS = "comment_authors"
+    METADATA_CORE_TITLE = "metadata_core_title"
+    METADATA_CORE = "metadata_core"
+    METADATA_APP = "metadata_app"
+    METADATA_CUSTOM = "metadata_custom"
+    METADATA_ALL = "metadata_all"
+    ALL_TEXT = "all_text"
+
+
+class XlsxTextScope(str, Enum):
+    SHEET_NAMES = "sheet_names"
+    HEADERS = "headers"
+    CELL_TEXT = "cell_text"
+    SHARED_STRINGS = "shared_strings"
+    INLINE_STRINGS = "inline_strings"
     METADATA_CORE_TITLE = "metadata_core_title"
     ALL_TEXT = "all_text"
 
@@ -114,10 +137,50 @@ class PptxPatch:
 
 
 @dataclass(frozen=True)
+class XlsxSheetRename:
+    from_name: str
+    to_name: str
+    update_references: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "from": self.from_name,
+            "to": self.to_name,
+            "update_references": self.update_references,
+        }
+
+
+@dataclass(frozen=True)
+class ScopedXlsxReplace:
+    scope: XlsxTextScope
+    replace: TextReplace
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"scope": self.scope.value, "replace": self.replace.to_dict()}
+
+
+@dataclass(frozen=True)
+class XlsxPatch:
+    set_core_title: str | None = None
+    rename_sheets: list[XlsxSheetRename] = field(default_factory=list)
+    scoped_replacements: list[ScopedXlsxReplace] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if self.set_core_title is not None:
+            payload["set_core_title"] = self.set_core_title
+        if self.rename_sheets:
+            payload["rename_sheets"] = [item.to_dict() for item in self.rename_sheets]
+        if self.scoped_replacements:
+            payload["scoped_replacements"] = [item.to_dict() for item in self.scoped_replacements]
+        return payload
+
+
+@dataclass(frozen=True)
 class BatchPatchJob:
     input_path: str | Path
     output_path: str | Path
-    patch: DocxPatch | PptxPatch | Mapping[str, Any]
+    patch: DocxPatch | PptxPatch | XlsxPatch | Mapping[str, Any]
     format: str
 
 
@@ -164,7 +227,7 @@ def _normalize_payload(value: Any) -> Any:
     return value
 
 
-def _to_patch_json(patch: DocxPatch | PptxPatch | Mapping[str, Any]) -> str:
+def _to_patch_json(patch: DocxPatch | PptxPatch | XlsxPatch | Mapping[str, Any]) -> str:
     return json.dumps(_normalize_payload(patch), ensure_ascii=False)
 
 
@@ -190,6 +253,17 @@ def patch_pptx_with_report(
     return PatchContentResult(content=bytes(item["content"]), report=PatchReport(**item["report"]))
 
 
+def patch_xlsx(content: bytes, patch: XlsxPatch | Mapping[str, Any]) -> bytes:
+    return _patch_xlsx_json(content, _to_patch_json(patch))
+
+
+def patch_xlsx_with_report(
+    content: bytes, patch: XlsxPatch | Mapping[str, Any]
+) -> PatchContentResult:
+    item = json.loads(_patch_xlsx_json_with_report(content, _to_patch_json(patch)))
+    return PatchContentResult(content=bytes(item["content"]), report=PatchReport(**item["report"]))
+
+
 def patch_docx_batch(
     contents: list[bytes], patch: DocxPatch | Mapping[str, Any], workers: int | None = None
 ) -> list[bytes]:
@@ -200,6 +274,12 @@ def patch_pptx_batch(
     contents: list[bytes], patch: PptxPatch | Mapping[str, Any], workers: int | None = None
 ) -> list[bytes]:
     return _patch_pptx_batch_json(contents, _to_patch_json(patch), workers)
+
+
+def patch_xlsx_batch(
+    contents: list[bytes], patch: XlsxPatch | Mapping[str, Any], workers: int | None = None
+) -> list[bytes]:
+    return _patch_xlsx_batch_json(contents, _to_patch_json(patch), workers)
 
 
 def _batch_with_report_from_json(payload: str) -> list[BatchPatchContentResult]:
@@ -227,19 +307,26 @@ def patch_pptx_batch_with_report(
     return _batch_with_report_from_json(payload)
 
 
+def patch_xlsx_batch_with_report(
+    contents: list[bytes], patch: XlsxPatch | Mapping[str, Any], workers: int | None = None
+) -> list[BatchPatchContentResult]:
+    payload = _patch_xlsx_batch_json_with_report(contents, _to_patch_json(patch), workers)
+    return _batch_with_report_from_json(payload)
+
+
 def patch_files(jobs: list[BatchPatchJob], workers: int | None = None) -> list[BatchPatchResult]:
     results: list[BatchPatchResult] = []
     grouped: dict[tuple[str, str], list[BatchPatchJob]] = {}
 
     for job in jobs:
-        if job.format not in {"docx", "pptx"}:
+        if job.format not in {"docx", "pptx", "xlsx"}:
             results.append(
                 BatchPatchResult(
                     str(job.input_path),
                     str(job.output_path),
                     job.format,
                     False,
-                    "format must be 'docx' or 'pptx'",
+                    "format must be 'docx', 'pptx', or 'xlsx'",
                 )
             )
             continue
@@ -252,9 +339,13 @@ def patch_files(jobs: list[BatchPatchJob], workers: int | None = None) -> list[B
             patched_contents = _batch_with_report_from_json(
                 _patch_docx_batch_json_with_report(contents, patch_json, workers)
             )
-        else:
+        elif fmt == "pptx":
             patched_contents = _batch_with_report_from_json(
                 _patch_pptx_batch_json_with_report(contents, patch_json, workers)
+            )
+        else:
+            patched_contents = _batch_with_report_from_json(
+                _patch_xlsx_batch_json_with_report(contents, patch_json, workers)
             )
 
         for job, patched in zip(grouped_jobs, patched_contents, strict=True):

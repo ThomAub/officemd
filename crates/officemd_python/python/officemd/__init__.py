@@ -24,8 +24,12 @@ from officemd.patching import (
     ReplaceMode,
     ScopedDocxReplace,
     ScopedPptxReplace,
+    ScopedXlsxReplace,
     TextReplace,
     PatchReport,
+    XlsxPatch,
+    XlsxSheetRename,
+    XlsxTextScope,
     patch_docx,
     patch_docx_batch,
     patch_docx_batch_with_report,
@@ -35,6 +39,10 @@ from officemd.patching import (
     patch_pptx_batch,
     patch_pptx_batch_with_report,
     patch_pptx_with_report,
+    patch_xlsx,
+    patch_xlsx_batch,
+    patch_xlsx_batch_with_report,
+    patch_xlsx_with_report,
 )
 
 
@@ -89,7 +97,15 @@ __all__ = [
     "render_markdown",
     "ScopedDocxReplace",
     "ScopedPptxReplace",
+    "ScopedXlsxReplace",
     "TextReplace",
+    "XlsxPatch",
+    "XlsxSheetRename",
+    "XlsxTextScope",
+    "patch_xlsx",
+    "patch_xlsx_batch",
+    "patch_xlsx_batch_with_report",
+    "patch_xlsx_with_report",
 ]
 
 __version__ = "0.1.1"
