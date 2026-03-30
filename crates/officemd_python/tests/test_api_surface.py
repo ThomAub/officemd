@@ -1,10 +1,9 @@
 import inspect
-import zipfile
 from io import BytesIO
 from pathlib import Path
+import zipfile
 
 import officemd
-
 
 def _build_zip(parts: list[tuple[str, str]]) -> bytes:
     buffer = BytesIO()
@@ -74,9 +73,7 @@ def test_apply_ooxml_patch_json_returns_edited_ooxml_bytes() -> None:
         '{"edits":[{"part":"word/document.xml","from":"Hello","to":"Hello from Python"}]}',
     )
     assert isinstance(patched, bytes)
-    markdown = officemd.markdown_from_bytes(
-        patched, format="docx", include_document_properties=True
-    )
+    markdown = officemd.markdown_from_bytes(patched, format="docx", include_document_properties=True)
     assert "Hello from Python" in markdown
 
 
@@ -87,7 +84,7 @@ def test_patch_docx_typed_api_replaces_all_text() -> None:
             ("docProps/app.xml", "<Properties><Company>word company</Company></Properties>"),
             (
                 "docProps/custom.xml",
-                '<Properties><property name="FilePath"><vt:lpwstr>word.docx</vt:lpwstr></property></Properties>',
+                "<Properties><property name=\"FilePath\"><vt:lpwstr>word.docx</vt:lpwstr></property></Properties>",
             ),
             (
                 "docProps/core.xml",
@@ -115,6 +112,11 @@ def test_patch_docx_typed_api_replaces_all_text() -> None:
         assert "term company" in zf.read("docProps/app.xml").decode()
         assert "term.docx" in zf.read("docProps/custom.xml").decode()
         assert "term title" in zf.read("docProps/core.xml").decode()
+
+
+def test_text_replace_can_request_preserve_formatting() -> None:
+    payload = officemd.TextReplace("word", "", preserve_formatting=True).to_dict()
+    assert payload["preserve_formatting"] is True
 
 
 def test_patch_docx_with_report_returns_counts() -> None:
@@ -168,6 +170,32 @@ def test_patch_docx_batch_with_report_returns_counts() -> None:
     assert "term term" in officemd.markdown_from_bytes(patched[0].content, format="docx")
 
 
+def test_patch_docx_preserve_formatting_across_runs() -> None:
+    content = _build_zip(
+        [
+            (
+                "word/document.xml",
+                '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Hel</w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t>lo</w:t></w:r></w:p>',
+            )
+        ]
+    )
+    patched = officemd.patch_docx(
+        content,
+        officemd.DocxPatch(
+            scoped_replacements=[
+                officemd.ScopedDocxReplace(
+                    officemd.DocxTextScope.BODY,
+                    officemd.TextReplace("Hello", "Hi", preserve_formatting=True),
+                )
+            ]
+        ),
+    )
+    with zipfile.ZipFile(BytesIO(patched)) as zf:
+        xml = zf.read("word/document.xml").decode()
+    assert '<w:rPr><w:b/></w:rPr><w:t>Hi</w:t>' in xml
+    assert '<w:rPr><w:i/></w:rPr><w:t></w:t>' in xml
+
+
 def test_patch_docx_can_replace_comment_author_and_metadata_fields() -> None:
     content = _build_zip(
         [
@@ -181,7 +209,7 @@ def test_patch_docx_can_replace_comment_author_and_metadata_fields() -> None:
             ),
             (
                 "docProps/custom.xml",
-                '<Properties><property name="FilePath"><vt:lpwstr>/tmp/old.docx</vt:lpwstr></property></Properties>',
+                "<Properties><property name=\"FilePath\"><vt:lpwstr>/tmp/old.docx</vt:lpwstr></property></Properties>",
             ),
             (
                 "docProps/core.xml",
@@ -228,7 +256,7 @@ def test_patch_pptx_all_text_includes_comment_authors_and_metadata() -> None:
             ),
             (
                 "docProps/custom.xml",
-                '<Properties><property name="FileName"><vt:lpwstr>word.pptx</vt:lpwstr></property></Properties>',
+                "<Properties><property name=\"FileName\"><vt:lpwstr>word.pptx</vt:lpwstr></property></Properties>",
             ),
             (
                 "docProps/core.xml",
@@ -255,6 +283,32 @@ def test_patch_pptx_all_text_includes_comment_authors_and_metadata() -> None:
         assert "term title" in zf.read("docProps/core.xml").decode()
 
 
+def test_patch_pptx_preserve_formatting_across_runs() -> None:
+    content = _build_zip(
+        [
+            (
+                "ppt/slides/slide1.xml",
+                '<a:p><a:r><a:rPr b="1"/><a:t>Hel</a:t></a:r><a:r><a:rPr i="1"/><a:t>lo</a:t></a:r></a:p>',
+            )
+        ]
+    )
+    patched = officemd.patch_pptx(
+        content,
+        officemd.PptxPatch(
+            scoped_replacements=[
+                officemd.ScopedPptxReplace(
+                    officemd.PptxTextScope.SLIDE_BODY,
+                    officemd.TextReplace("Hello", "Hi", preserve_formatting=True),
+                )
+            ]
+        ),
+    )
+    with zipfile.ZipFile(BytesIO(patched)) as zf:
+        xml = zf.read("ppt/slides/slide1.xml").decode()
+    assert '<a:rPr b="1"/><a:t>Hi</a:t>' in xml
+    assert '<a:rPr i="1"/><a:t></a:t>' in xml
+
+
 def test_patch_pptx_can_replace_comment_author_and_metadata_fields() -> None:
     content = _build_zip(
         [
@@ -268,7 +322,7 @@ def test_patch_pptx_can_replace_comment_author_and_metadata_fields() -> None:
             ),
             (
                 "docProps/custom.xml",
-                '<Properties><property name="FileName"><vt:lpwstr>old.pptx</vt:lpwstr></property></Properties>',
+                "<Properties><property name=\"FileName\"><vt:lpwstr>old.pptx</vt:lpwstr></property></Properties>",
             ),
             (
                 "docProps/core.xml",
@@ -342,6 +396,36 @@ def test_patch_xlsx_replaces_workbook_text() -> None:
     assert "term" in officemd.markdown_from_bytes(patched, format="xlsx")
 
 
+def test_patch_xlsx_preserve_formatting_and_empty_string() -> None:
+    content = _build_zip(
+        [
+            (
+                "xl/sharedStrings.xml",
+                '<sst><si><r><rPr><b/></rPr><t>Confi</t></r><r><rPr><i/></rPr><t>dential</t></r></si></sst>',
+            ),
+            (
+                "xl/workbook.xml",
+                '<workbook><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>',
+            ),
+        ]
+    )
+    patched = officemd.patch_xlsx(
+        content,
+        officemd.XlsxPatch(
+            scoped_replacements=[
+                officemd.ScopedXlsxReplace(
+                    officemd.XlsxTextScope.SHARED_STRINGS,
+                    officemd.TextReplace("Confidential", "", preserve_formatting=True),
+                )
+            ]
+        ),
+    )
+    with zipfile.ZipFile(BytesIO(patched)) as zf:
+        xml = zf.read("xl/sharedStrings.xml").decode()
+    assert '<rPr><b/></rPr><t></t>' in xml
+    assert '<rPr><i/></rPr><t></t>' in xml
+
+
 def test_patch_xlsx_all_text_includes_comments_and_metadata() -> None:
     content = _build_zip(
         [
@@ -357,7 +441,7 @@ def test_patch_xlsx_all_text_includes_comments_and_metadata() -> None:
             ("docProps/app.xml", "<Properties><Company>word company</Company></Properties>"),
             (
                 "docProps/custom.xml",
-                '<Properties><property name="FilePath"><vt:lpwstr>word.xlsx</vt:lpwstr></property></Properties>',
+                "<Properties><property name=\"FilePath\"><vt:lpwstr>word.xlsx</vt:lpwstr></property></Properties>",
             ),
             (
                 "docProps/core.xml",
@@ -428,15 +512,7 @@ def test_patch_files_uses_rust_batch_patching(tmp_path: Path) -> None:
     )
     assert all(result.ok for result in results)
     assert all(result.report is not None for result in results)
-    assert all(
-        result.report.replacements_applied >= 1 for result in results if result.report is not None
-    )
-    assert "term" in officemd.markdown_from_bytes(
-        (tmp_path / "out1.docx").read_bytes(), format="docx"
-    )
-    assert "term" in officemd.markdown_from_bytes(
-        (tmp_path / "out2.docx").read_bytes(), format="docx"
-    )
-    assert "## Sheet: Revenue" in officemd.markdown_from_bytes(
-        (tmp_path / "out3.xlsx").read_bytes(), format="xlsx"
-    )
+    assert all(result.report.replacements_applied >= 1 for result in results if result.report is not None)
+    assert "term" in officemd.markdown_from_bytes((tmp_path / "out1.docx").read_bytes(), format="docx")
+    assert "term" in officemd.markdown_from_bytes((tmp_path / "out2.docx").read_bytes(), format="docx")
+    assert "## Sheet: Revenue" in officemd.markdown_from_bytes((tmp_path / "out3.xlsx").read_bytes(), format="xlsx")

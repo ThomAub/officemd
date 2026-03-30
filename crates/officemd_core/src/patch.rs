@@ -1,5 +1,5 @@
-use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
+use rayon::prelude::*;
 use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -104,6 +104,8 @@ pub struct TextReplace {
     pub mode: ReplaceMode,
     #[serde(default)]
     pub match_policy: MatchPolicy,
+    #[serde(default)]
+    pub preserve_formatting: bool,
 }
 
 impl TextReplace {
@@ -113,6 +115,7 @@ impl TextReplace {
             to: to.into(),
             mode: ReplaceMode::All,
             match_policy: MatchPolicy::Exact,
+            preserve_formatting: false,
         }
     }
 
@@ -122,11 +125,17 @@ impl TextReplace {
             to: to.into(),
             mode: ReplaceMode::First,
             match_policy: MatchPolicy::Exact,
+            preserve_formatting: false,
         }
     }
 
     pub fn with_match_policy(mut self, match_policy: MatchPolicy) -> Self {
         self.match_policy = match_policy;
+        self
+    }
+
+    pub fn with_preserve_formatting(mut self, preserve_formatting: bool) -> Self {
+        self.preserve_formatting = preserve_formatting;
         self
     }
 }
@@ -453,8 +462,12 @@ fn apply_docx_patch_to_parts(
             continue;
         }
 
-        let targets = docx_scope_targets(&part_names, scoped.scope);
-        apply_replace_to_parts(parts, &targets, &scoped.replace, report)?;
+        if scoped.replace.preserve_formatting {
+            apply_docx_scoped_replace_preserving_formatting(parts, &part_names, scoped, report)?;
+        } else {
+            let targets = docx_scope_targets(&part_names, scoped.scope);
+            apply_replace_to_parts(parts, &targets, &scoped.replace, report)?;
+        }
     }
 
     if patch.set_core_title.is_some() || metadata_requested {
@@ -479,8 +492,12 @@ fn apply_pptx_patch_to_parts(
             continue;
         }
 
-        let targets = pptx_scope_targets(&part_names, scoped.scope);
-        apply_replace_to_parts(parts, &targets, &scoped.replace, report)?;
+        if scoped.replace.preserve_formatting {
+            apply_pptx_scoped_replace_preserving_formatting(parts, &part_names, scoped, report)?;
+        } else {
+            let targets = pptx_scope_targets(&part_names, scoped.scope);
+            apply_replace_to_parts(parts, &targets, &scoped.replace, report)?;
+        }
     }
 
     if patch.set_core_title.is_some() || metadata_requested {
@@ -503,6 +520,11 @@ fn apply_xlsx_patch_to_parts(
 
     let mut metadata_requested = false;
     for scoped in &patch.scoped_replacements {
+        if scoped.replace.preserve_formatting {
+            apply_xlsx_scoped_replace_preserving_formatting(parts, &part_names, scoped, report)?;
+            continue;
+        }
+
         match scoped.scope {
             XlsxTextScope::MetadataCoreTitle => {
                 metadata_requested = true;
@@ -624,6 +646,70 @@ fn apply_replace_to_parts(
     }
 }
 
+fn apply_preserve_formatting_replace_to_parts(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    target_parts: &[String],
+    container_re: &Regex,
+    node_re: &Regex,
+    replace: &TextReplace,
+    report: &mut PatchReport,
+) -> Result<(), PatchError> {
+    let mut matched = false;
+    for part in target_parts {
+        report.parts_scanned += 1;
+        let Some(data) = parts.get_mut(part) else {
+            continue;
+        };
+        let original = String::from_utf8_lossy(data).into_owned();
+        let (updated, replacements_applied) =
+            rewrite_xml_text_containers_preserving_runs(&original, container_re, node_re, replace)?;
+        if replacements_applied > 0 {
+            *data = updated.into_bytes();
+            report.parts_modified += 1;
+            report.replacements_applied += replacements_applied;
+            matched = true;
+        }
+    }
+
+    if matched {
+        Ok(())
+    } else {
+        Err(PatchError::TextNotFound {
+            part: target_parts.join(","),
+            needle: replace.from.clone(),
+        })
+    }
+}
+
+fn try_apply_preserve_formatting_replace_to_parts(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    target_parts: &[String],
+    container_re: &Regex,
+    node_re: &Regex,
+    replace: &TextReplace,
+    report: &mut PatchReport,
+) -> bool {
+    !target_parts.is_empty()
+        && apply_preserve_formatting_replace_to_parts(
+            parts,
+            target_parts,
+            container_re,
+            node_re,
+            replace,
+            report,
+        )
+        .is_ok()
+}
+
+fn try_apply_simple_replace_to_parts(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    target_parts: &[String],
+    replace: &TextReplace,
+    report: &mut PatchReport,
+) -> bool {
+    !target_parts.is_empty() && apply_replace_to_parts(parts, target_parts, replace, report).is_ok()
+}
+
 fn apply_replace_to_text(text: &str, replace: &TextReplace) -> Result<(String, usize), PatchError> {
     if replace.from.is_empty() {
         return Ok((text.to_string(), 0));
@@ -670,8 +756,55 @@ fn build_replace_regex(replace: &TextReplace) -> Result<Regex, PatchError> {
     Ok(builder.build()?)
 }
 
+fn find_match_ranges(text: &str, replace: &TextReplace) -> Result<Vec<(usize, usize)>, PatchError> {
+    if replace.from.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    match (replace.match_policy, replace.mode) {
+        (MatchPolicy::Exact, ReplaceMode::All) => Ok(text
+            .match_indices(&replace.from)
+            .map(|(start, matched)| (start, start + matched.len()))
+            .collect()),
+        (MatchPolicy::Exact, ReplaceMode::First) => Ok(text
+            .find(&replace.from)
+            .map(|start| (start, start + replace.from.len()))
+            .into_iter()
+            .collect()),
+        _ => {
+            let regex = build_replace_regex(replace)?;
+            let iter = regex.find_iter(text).map(|m| (m.start(), m.end()));
+            Ok(match replace.mode {
+                ReplaceMode::All => iter.collect(),
+                ReplaceMode::First => iter.take(1).collect(),
+            })
+        }
+    }
+}
+
 static XML_TEXT_NODE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?s)<t(?:\s+xml:space="preserve")?>(.*?)</t>"#).unwrap());
+static WORD_TEXT_NODE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?s)<w:t(?:\s+[^>]*)?>(.*?)</w:t>"#).unwrap());
+static WORD_PARAGRAPH_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?s)<w:p(?:\s+[^>]*)?>.*?</w:p>"#).unwrap());
+static DRAWING_TEXT_NODE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?s)<a:t(?:\s+[^>]*)?>(.*?)</a:t>"#).unwrap());
+static DRAWING_PARAGRAPH_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?s)<a:p(?:\s+[^>]*)?>.*?</a:p>"#).unwrap());
+static PPT_COMMENT_TEXT_NODE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?s)<p:text(?:\s+[^>]*)?>(.*?)</p:text>"#).unwrap());
+static PPT_COMMENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?s)<p:cm(?:\s+[^>]*)?>.*?</p:cm>"#).unwrap());
+static XLSX_SHARED_STRING_ITEM_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?s)<si(?:\s+[^>]*)?>.*?</si>"#).unwrap());
+static XLSX_INLINE_STRING_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?s)<is(?:\s+[^>]*)?>.*?</is>"#).unwrap());
+static XLSX_COMMENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?s)<comment(?:\s+[^>]*)?>.*?</comment>"#).unwrap());
+static XLSX_THREADED_COMMENT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?s)<threadedComment(?:\s+[^>]*)?>.*?</threadedComment>"#).unwrap()
+});
 static FORMULA_NODE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)<f(?:\s[^>]*)?>(.*?)</f>").unwrap());
 static CHART_FORMULA_NODE_RE: LazyLock<Regex> =
@@ -820,6 +953,222 @@ fn xlsx_formula_targets(part_names: &[String]) -> Vec<String> {
         })
         .cloned()
         .collect()
+}
+
+fn apply_docx_scoped_replace_preserving_formatting(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    part_names: &[String],
+    scoped: &ScopedDocxReplace,
+    report: &mut PatchReport,
+) -> Result<(), PatchError> {
+    let mut matched = false;
+
+    let content_scope = match scoped.scope {
+        DocxTextScope::MetadataCoreTitle
+        | DocxTextScope::MetadataCore
+        | DocxTextScope::MetadataApp
+        | DocxTextScope::MetadataCustom
+        | DocxTextScope::MetadataAll => None,
+        other => Some(other),
+    };
+
+    if let Some(scope) = content_scope {
+        let targets = docx_scope_targets(part_names, scope);
+        matched |= try_apply_preserve_formatting_replace_to_parts(
+            parts,
+            &targets,
+            &WORD_PARAGRAPH_RE,
+            &WORD_TEXT_NODE_RE,
+            &scoped.replace,
+            report,
+        );
+    }
+
+    if matches!(scoped.scope, DocxTextScope::AllText) {
+        let metadata_targets = docx_scope_targets(part_names, DocxTextScope::MetadataAll);
+        matched |=
+            try_apply_simple_replace_to_parts(parts, &metadata_targets, &scoped.replace, report);
+    }
+
+    if matched {
+        Ok(())
+    } else {
+        let targets = docx_scope_targets(part_names, scoped.scope);
+        apply_replace_to_parts(parts, &targets, &scoped.replace, report)
+    }
+}
+
+fn apply_pptx_scoped_replace_preserving_formatting(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    part_names: &[String],
+    scoped: &ScopedPptxReplace,
+    report: &mut PatchReport,
+) -> Result<(), PatchError> {
+    let mut matched = false;
+
+    let slide_targets = match scoped.scope {
+        PptxTextScope::SlideTitles | PptxTextScope::SlideBody | PptxTextScope::AllText => {
+            pptx_scope_targets(part_names, PptxTextScope::SlideBody)
+        }
+        _ => Vec::new(),
+    };
+    matched |= try_apply_preserve_formatting_replace_to_parts(
+        parts,
+        &slide_targets,
+        &DRAWING_PARAGRAPH_RE,
+        &DRAWING_TEXT_NODE_RE,
+        &scoped.replace,
+        report,
+    );
+
+    let notes_targets = match scoped.scope {
+        PptxTextScope::Notes | PptxTextScope::AllText => {
+            pptx_scope_targets(part_names, PptxTextScope::Notes)
+        }
+        _ => Vec::new(),
+    };
+    matched |= try_apply_preserve_formatting_replace_to_parts(
+        parts,
+        &notes_targets,
+        &DRAWING_PARAGRAPH_RE,
+        &DRAWING_TEXT_NODE_RE,
+        &scoped.replace,
+        report,
+    );
+
+    let comment_targets = match scoped.scope {
+        PptxTextScope::Comments | PptxTextScope::AllText => {
+            pptx_scope_targets(part_names, PptxTextScope::Comments)
+        }
+        _ => Vec::new(),
+    };
+    matched |= try_apply_preserve_formatting_replace_to_parts(
+        parts,
+        &comment_targets,
+        &PPT_COMMENT_RE,
+        &PPT_COMMENT_TEXT_NODE_RE,
+        &scoped.replace,
+        report,
+    );
+
+    if matches!(scoped.scope, PptxTextScope::AllText) {
+        for scope in [PptxTextScope::CommentAuthors, PptxTextScope::MetadataAll] {
+            let targets = pptx_scope_targets(part_names, scope);
+            matched |= try_apply_simple_replace_to_parts(parts, &targets, &scoped.replace, report);
+        }
+    }
+
+    if matched {
+        Ok(())
+    } else {
+        let targets = pptx_scope_targets(part_names, scoped.scope);
+        apply_replace_to_parts(parts, &targets, &scoped.replace, report)
+    }
+}
+
+fn apply_xlsx_scoped_replace_preserving_formatting(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    part_names: &[String],
+    scoped: &ScopedXlsxReplace,
+    report: &mut PatchReport,
+) -> Result<(), PatchError> {
+    let mut matched = false;
+
+    match scoped.scope {
+        XlsxTextScope::SharedStrings
+        | XlsxTextScope::Headers
+        | XlsxTextScope::CellText
+        | XlsxTextScope::AllText => {
+            matched |= try_apply_preserve_formatting_replace_to_parts(
+                parts,
+                &["xl/sharedStrings.xml".to_string()],
+                &XLSX_SHARED_STRING_ITEM_RE,
+                &XML_TEXT_NODE_RE,
+                &scoped.replace,
+                report,
+            );
+        }
+        _ => {}
+    }
+
+    match scoped.scope {
+        XlsxTextScope::InlineStrings
+        | XlsxTextScope::Headers
+        | XlsxTextScope::CellText
+        | XlsxTextScope::AllText => {
+            let targets = xlsx_inline_string_targets(part_names);
+            matched |= try_apply_preserve_formatting_replace_to_parts(
+                parts,
+                &targets,
+                &XLSX_INLINE_STRING_RE,
+                &XML_TEXT_NODE_RE,
+                &scoped.replace,
+                report,
+            );
+        }
+        _ => {}
+    }
+
+    match scoped.scope {
+        XlsxTextScope::Comments | XlsxTextScope::AllText => {
+            let targets = xlsx_scope_targets(part_names, XlsxTextScope::Comments);
+            if !targets.is_empty() {
+                let normal_comment_targets: Vec<String> = targets
+                    .iter()
+                    .filter(|name| !name.starts_with("xl/threadedComments/"))
+                    .cloned()
+                    .collect();
+                let threaded_comment_targets: Vec<String> = targets
+                    .iter()
+                    .filter(|name| name.starts_with("xl/threadedComments/"))
+                    .cloned()
+                    .collect();
+
+                matched |= try_apply_preserve_formatting_replace_to_parts(
+                    parts,
+                    &normal_comment_targets,
+                    &XLSX_COMMENT_RE,
+                    &XML_TEXT_NODE_RE,
+                    &scoped.replace,
+                    report,
+                );
+
+                matched |= try_apply_preserve_formatting_replace_to_parts(
+                    parts,
+                    &threaded_comment_targets,
+                    &XLSX_THREADED_COMMENT_RE,
+                    &XML_TEXT_NODE_RE,
+                    &scoped.replace,
+                    report,
+                );
+            }
+        }
+        _ => {}
+    }
+
+    if matches!(scoped.scope, XlsxTextScope::AllText) {
+        for scope in [XlsxTextScope::CommentAuthors, XlsxTextScope::MetadataAll] {
+            let targets = xlsx_scope_targets(part_names, scope);
+            matched |= try_apply_simple_replace_to_parts(parts, &targets, &scoped.replace, report);
+        }
+    }
+
+    if matched {
+        Ok(())
+    } else {
+        match scoped.scope {
+            XlsxTextScope::SheetNames => {
+                apply_xlsx_sheet_name_replace(parts, &scoped.replace, report)
+            }
+            XlsxTextScope::MetadataCoreTitle => {
+                apply_core_title_replace(parts, &scoped.replace, report)
+            }
+            _ => {
+                let targets = xlsx_scope_targets(part_names, scoped.scope);
+                apply_replace_to_parts(parts, &targets, &scoped.replace, report)
+            }
+        }
+    }
 }
 
 fn apply_xlsx_workbook_text_replace(
@@ -1448,7 +1797,9 @@ mod tests {
         assert!(String::from_utf8_lossy(&parts["word/document.xml"]).contains("term body term"));
         assert!(String::from_utf8_lossy(&parts["word/header1.xml"]).contains("term header"));
         assert!(String::from_utf8_lossy(&parts["word/comments.xml"]).contains("term comment"));
-        assert!(String::from_utf8_lossy(&parts["word/comments.xml"]).contains("w:author=\"Alice\""));
+        assert!(
+            String::from_utf8_lossy(&parts["word/comments.xml"]).contains("w:author=\"Alice\"")
+        );
         assert!(String::from_utf8_lossy(&parts["docProps/core.xml"]).contains("new core"));
         assert!(String::from_utf8_lossy(&parts["docProps/app.xml"]).contains("term company"));
         assert!(String::from_utf8_lossy(&parts["docProps/custom.xml"]).contains("term.docx"));
@@ -1627,6 +1978,213 @@ mod tests {
     }
 
     #[test]
+    fn typed_docx_patch_preserve_formatting_cross_run_first_style_wins() {
+        let bytes = build_zip(vec![(
+            "word/document.xml",
+            concat!(
+                "<w:p>",
+                "<w:r><w:rPr><w:b/></w:rPr><w:t>Hel</w:t></w:r>",
+                "<w:r><w:rPr><w:i/></w:rPr><w:t>lo</w:t></w:r>",
+                "</w:p>"
+            ),
+        )]);
+
+        let patched = patch_docx(
+            &bytes,
+            &DocxPatch {
+                set_core_title: None,
+                replace_body_title: None,
+                scoped_replacements: vec![ScopedDocxReplace {
+                    scope: DocxTextScope::Body,
+                    replace: TextReplace::all("Hello", "Hi").with_preserve_formatting(true),
+                }],
+            },
+        )
+        .unwrap();
+
+        let parts = read_parts(&patched).unwrap();
+        assert!(String::from_utf8_lossy(&parts["word/document.xml"]).contains(
+            "<w:r><w:rPr><w:b/></w:rPr><w:t>Hi</w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t></w:t></w:r>"
+        ));
+    }
+
+    #[test]
+    fn typed_pptx_patch_preserve_formatting_cross_run_first_style_wins() {
+        let bytes = build_zip(vec![(
+            "ppt/slides/slide1.xml",
+            concat!(
+                "<a:p>",
+                "<a:r><a:rPr b=\"1\"/><a:t>Hel</a:t></a:r>",
+                "<a:r><a:rPr i=\"1\"/><a:t>lo</a:t></a:r>",
+                "</a:p>"
+            ),
+        )]);
+
+        let patched = patch_pptx(
+            &bytes,
+            &PptxPatch {
+                set_core_title: None,
+                scoped_replacements: vec![ScopedPptxReplace {
+                    scope: PptxTextScope::SlideBody,
+                    replace: TextReplace::all("Hello", "Hi").with_preserve_formatting(true),
+                }],
+            },
+        )
+        .unwrap();
+
+        let parts = read_parts(&patched).unwrap();
+        assert!(
+            String::from_utf8_lossy(&parts["ppt/slides/slide1.xml"]).contains(
+                "<a:r><a:rPr b=\"1\"/><a:t>Hi</a:t></a:r><a:r><a:rPr i=\"1\"/><a:t></a:t></a:r>"
+            )
+        );
+    }
+
+    #[test]
+    fn typed_docx_patch_preserve_formatting_does_not_cross_paragraphs() {
+        let bytes = build_zip(vec![(
+            "word/document.xml",
+            concat!(
+                "<w:p><w:r><w:t>Hel</w:t></w:r></w:p>",
+                "<w:p><w:r><w:t>lo</w:t></w:r></w:p>"
+            ),
+        )]);
+
+        let err = patch_docx(
+            &bytes,
+            &DocxPatch {
+                set_core_title: None,
+                replace_body_title: None,
+                scoped_replacements: vec![ScopedDocxReplace {
+                    scope: DocxTextScope::Body,
+                    replace: TextReplace::all("Hello", "Hi").with_preserve_formatting(true),
+                }],
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, PatchError::TextNotFound { .. }));
+    }
+
+    #[test]
+    fn typed_pptx_patch_preserve_formatting_does_not_cross_paragraphs() {
+        let bytes = build_zip(vec![(
+            "ppt/slides/slide1.xml",
+            concat!(
+                "<p:sld xmlns:p=\"p\" xmlns:a=\"a\"><p:cSld><p:spTree><p:sp><p:txBody>",
+                "<a:p><a:r><a:t>Hel</a:t></a:r></a:p>",
+                "<a:p><a:r><a:t>lo</a:t></a:r></a:p>",
+                "</p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+            ),
+        )]);
+
+        let err = patch_pptx(
+            &bytes,
+            &PptxPatch {
+                set_core_title: None,
+                scoped_replacements: vec![ScopedPptxReplace {
+                    scope: PptxTextScope::SlideBody,
+                    replace: TextReplace::all("Hello", "Hi").with_preserve_formatting(true),
+                }],
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, PatchError::TextNotFound { .. }));
+    }
+
+    #[test]
+    fn typed_xlsx_patch_preserve_formatting_rich_text_and_empty_string() {
+        let bytes = build_zip(vec![
+            (
+                "xl/sharedStrings.xml",
+                concat!(
+                    "<sst><si>",
+                    "<r><rPr><b/></rPr><t>Confi</t></r>",
+                    "<r><rPr><i/></rPr><t>dential</t></r>",
+                    "</si></sst>"
+                ),
+            ),
+            (
+                "xl/workbook.xml",
+                "<workbook><sheets><sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>",
+            ),
+        ]);
+
+        let patched = patch_xlsx(
+            &bytes,
+            &XlsxPatch {
+                set_core_title: None,
+                rename_sheets: vec![],
+                scoped_replacements: vec![ScopedXlsxReplace {
+                    scope: XlsxTextScope::SharedStrings,
+                    replace: TextReplace::all("Confidential", "").with_preserve_formatting(true),
+                }],
+            },
+        )
+        .unwrap();
+
+        let parts = read_parts(&patched).unwrap();
+        assert!(
+            String::from_utf8_lossy(&parts["xl/sharedStrings.xml"])
+                .contains("<r><rPr><b/></rPr><t></t></r><r><rPr><i/></rPr><t></t></r>")
+        );
+    }
+
+    #[test]
+    fn typed_xlsx_patch_preserve_formatting_does_not_cross_string_items() {
+        let bytes = build_zip(vec![
+            (
+                "xl/sharedStrings.xml",
+                "<sst><si><t>Hel</t></si><si><t>lo</t></si></sst>",
+            ),
+            (
+                "xl/workbook.xml",
+                "<workbook><sheets><sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>",
+            ),
+        ]);
+
+        let err = patch_xlsx(
+            &bytes,
+            &XlsxPatch {
+                set_core_title: None,
+                rename_sheets: vec![],
+                scoped_replacements: vec![ScopedXlsxReplace {
+                    scope: XlsxTextScope::SharedStrings,
+                    replace: TextReplace::all("Hello", "Hi").with_preserve_formatting(true),
+                }],
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, PatchError::TextNotFound { .. }));
+    }
+
+    #[test]
+    fn typed_metadata_replace_ignores_preserve_formatting_flag() {
+        let bytes = build_zip(vec![(
+            "docProps/app.xml",
+            "<Properties><Company>Old Company</Company></Properties>",
+        )]);
+
+        let patched = patch_docx(
+            &bytes,
+            &DocxPatch {
+                set_core_title: None,
+                replace_body_title: None,
+                scoped_replacements: vec![ScopedDocxReplace {
+                    scope: DocxTextScope::MetadataApp,
+                    replace: TextReplace::all("Old", "New").with_preserve_formatting(true),
+                }],
+            },
+        )
+        .unwrap();
+
+        let parts = read_parts(&patched).unwrap();
+        assert!(String::from_utf8_lossy(&parts["docProps/app.xml"]).contains("New Company"));
+    }
+
+    #[test]
     fn patch_docx_batch_works() {
         let bytes = build_zip(vec![("word/document.xml", "<w:t>word</w:t>")]);
         let patched = patch_docx_batch_with_report(
@@ -1794,8 +2352,10 @@ mod tests {
         let parts = read_parts(&patched.content).unwrap();
         assert!(String::from_utf8_lossy(&parts["xl/sharedStrings.xml"]).contains("term cell"));
         assert!(String::from_utf8_lossy(&parts["xl/comments1.xml"]).contains("term comment"));
-        assert!(String::from_utf8_lossy(&parts["xl/persons/person.xml"])
-            .contains("displayName=\"Alice\""));
+        assert!(
+            String::from_utf8_lossy(&parts["xl/persons/person.xml"])
+                .contains("displayName=\"Alice\"")
+        );
         assert!(String::from_utf8_lossy(&parts["docProps/app.xml"]).contains("term company"));
         assert!(String::from_utf8_lossy(&parts["docProps/custom.xml"]).contains("term.xlsx"));
         assert!(String::from_utf8_lossy(&parts["docProps/core.xml"]).contains("term workbook"));

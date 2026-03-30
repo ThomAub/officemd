@@ -176,6 +176,29 @@ Patch scopes also support free-text metadata/comment fields:
 
 `AllText` now means all free-text fields: content + metadata/comment-author text.
 
+Formatting-preserving replacement is available for OOXML content text:
+
+```rust
+use officemd_core::{DocxPatch, DocxTextScope, ScopedDocxReplace, TextReplace};
+
+let patch = DocxPatch {
+    set_core_title: None,
+    replace_body_title: None,
+    scoped_replacements: vec![ScopedDocxReplace {
+        scope: DocxTextScope::Body,
+        replace: TextReplace::all("Confidential", "")
+            .with_preserve_formatting(true),
+    }],
+};
+```
+
+Semantics:
+- replacement can span multiple runs
+- the first matched run keeps the replacement text and therefore its formatting wins
+- later consumed runs are left empty in v1
+- metadata/comment-author fields still use simple text replacement
+
+PDF visual text removal/replacement is intentionally planned as a separate track; see `docs/pdf-visual-replacement-plan.md`.
 
 ### JavaScript
 

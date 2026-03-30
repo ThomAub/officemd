@@ -1,26 +1,23 @@
 from __future__ import annotations
 
-import json
-from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, is_dataclass
 from enum import Enum
+import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
-from officemd._officemd import (
-    _patch_docx_batch_json,  # type: ignore[unresolved-import]
-    _patch_docx_batch_json_with_report,  # type: ignore[unresolved-import]
-    _patch_docx_json,  # type: ignore[unresolved-import]
-    _patch_docx_json_with_report,  # type: ignore[unresolved-import]
-    _patch_pptx_batch_json,  # type: ignore[unresolved-import]
-    _patch_pptx_batch_json_with_report,  # type: ignore[unresolved-import]
-    _patch_pptx_json,  # type: ignore[unresolved-import]
-    _patch_pptx_json_with_report,  # type: ignore[unresolved-import]
-    _patch_xlsx_batch_json,  # type: ignore[unresolved-import]
-    _patch_xlsx_batch_json_with_report,  # type: ignore[unresolved-import]
-    _patch_xlsx_json,  # type: ignore[unresolved-import]
-    _patch_xlsx_json_with_report,  # type: ignore[unresolved-import]
-)
+from officemd._officemd import _patch_docx_batch_json  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_docx_batch_json_with_report  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_docx_json  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_docx_json_with_report  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_pptx_batch_json  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_pptx_batch_json_with_report  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_pptx_json  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_pptx_json_with_report  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_xlsx_batch_json  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_xlsx_batch_json_with_report  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_xlsx_json  # type: ignore[unresolved-import]
+from officemd._officemd import _patch_xlsx_json_with_report  # type: ignore[unresolved-import]
 
 
 class ReplaceMode(str, Enum):
@@ -86,6 +83,7 @@ class TextReplace:
     to_text: str
     mode: ReplaceMode = ReplaceMode.ALL
     match_policy: MatchPolicy = MatchPolicy.EXACT
+    preserve_formatting: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -93,6 +91,7 @@ class TextReplace:
             "to": self.to_text,
             "mode": self.mode.value,
             "match_policy": self.match_policy.value,
+            "preserve_formatting": self.preserve_formatting,
         }
 
 
