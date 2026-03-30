@@ -3,74 +3,17 @@
 // PyO3 `#[pyfunction]` signatures must take owned values, not references.
 #![allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 
-use officemd_core::opc::OpcPackage;
+use officemd_core::format::{
+    DocumentFormat, detect_format_from_bytes, parse_format, resolve_format, resolve_worker_count,
+};
+use officemd_core::{
+    apply_ooxml_patch_json as apply_ooxml_patch_json_core, patch_docx_json as patch_docx_json_core,
+    patch_pptx_json as patch_pptx_json_core,
+};
 use officemd_markdown::{MarkdownProfile, RenderOptions};
 use pyo3::prelude::*;
 use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
-
-#[derive(Debug, Clone, Copy)]
-enum DocumentFormat {
-    Docx,
-    Xlsx,
-    Csv,
-    Pptx,
-    Pdf,
-}
-
-impl DocumentFormat {
-    fn extension(self) -> &'static str {
-        match self {
-            Self::Docx => ".docx",
-            Self::Xlsx => ".xlsx",
-            Self::Csv => ".csv",
-            Self::Pptx => ".pptx",
-            Self::Pdf => ".pdf",
-        }
-    }
-}
-
-fn parse_format(value: &str) -> Option<DocumentFormat> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        ".docx" | "docx" => Some(DocumentFormat::Docx),
-        ".xlsx" | "xlsx" => Some(DocumentFormat::Xlsx),
-        ".csv" | "csv" => Some(DocumentFormat::Csv),
-        ".pptx" | "pptx" => Some(DocumentFormat::Pptx),
-        ".pdf" | "pdf" => Some(DocumentFormat::Pdf),
-        _ => None,
-    }
-}
-
-fn detect_format_from_bytes(content: &[u8]) -> Result<DocumentFormat, String> {
-    if officemd_pdf::looks_like_pdf_header(content) {
-        return Ok(DocumentFormat::Pdf);
-    }
-
-    let mut package = OpcPackage::from_bytes(content).map_err(|e| e.to_string())?;
-
-    if package.has_part("word/document.xml") {
-        return Ok(DocumentFormat::Docx);
-    }
-    if package.has_part("xl/workbook.xml") {
-        return Ok(DocumentFormat::Xlsx);
-    }
-    if package.has_part("ppt/presentation.xml") {
-        return Ok(DocumentFormat::Pptx);
-    }
-
-    Err(
-        "Could not detect format from file content (supported: .docx, .xlsx, .csv, .pptx, .pdf; csv requires explicit format)"
-            .to_string(),
-    )
-}
-
-fn resolve_format(content: &[u8], format: Option<&str>) -> Result<DocumentFormat, String> {
-    match format {
-        Some(v) => parse_format(v)
-            .ok_or_else(|| "format must be one of: .docx, .xlsx, .csv, .pptx, .pdf".to_string()),
-        None => detect_format_from_bytes(content),
-    }
-}
 
 fn parse_markdown_style(style: Option<&str>) -> Result<MarkdownProfile, String> {
     match style
@@ -87,12 +30,6 @@ fn parse_markdown_style(style: Option<&str>) -> Result<MarkdownProfile, String> 
 
 fn to_py_err(err: impl std::fmt::Display) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(err.to_string())
-}
-
-fn resolve_worker_count(workers: Option<usize>) -> usize {
-    workers
-        .filter(|v| *v > 0)
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, usize::from))
 }
 
 fn markdown_from_owned_bytes_impl(
@@ -297,6 +234,39 @@ fn docling_from_bytes(py: Python<'_>, content: &[u8], format: Option<String>) ->
     .map_err(to_py_err)
 }
 
+fn apply_ooxml_patch_json_impl(content: &[u8], patch_json: &str) -> Result<Vec<u8>, String> {
+    apply_ooxml_patch_json_core(content, patch_json).map_err(|e| e.to_string())
+}
+
+fn patch_docx_json_impl(content: &[u8], patch_json: &str) -> Result<Vec<u8>, String> {
+    patch_docx_json_core(content, patch_json).map_err(|e| e.to_string())
+}
+
+fn patch_pptx_json_impl(content: &[u8], patch_json: &str) -> Result<Vec<u8>, String> {
+    patch_pptx_json_core(content, patch_json).map_err(|e| e.to_string())
+}
+
+#[pyfunction(signature = (content, patch_json))]
+fn apply_ooxml_patch_json(py: Python<'_>, content: &[u8], patch_json: String) -> PyResult<Vec<u8>> {
+    let owned_content = content.to_vec();
+    py.detach(move || apply_ooxml_patch_json_impl(&owned_content, &patch_json))
+        .map_err(to_py_err)
+}
+
+#[pyfunction(signature = (content, patch_json))]
+fn _patch_docx_json(py: Python<'_>, content: &[u8], patch_json: String) -> PyResult<Vec<u8>> {
+    let owned_content = content.to_vec();
+    py.detach(move || patch_docx_json_impl(&owned_content, &patch_json))
+        .map_err(to_py_err)
+}
+
+#[pyfunction(signature = (content, patch_json))]
+fn _patch_pptx_json(py: Python<'_>, content: &[u8], patch_json: String) -> PyResult<Vec<u8>> {
+    let owned_content = content.to_vec();
+    py.detach(move || patch_pptx_json_impl(&owned_content, &patch_json))
+        .map_err(to_py_err)
+}
+
 #[pyfunction(signature = (
     content,
     style_aware_values=false,
@@ -362,6 +332,10 @@ fn _officemd(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(inspect_pdf_fonts_json, m)?)?;
     m.add_function(wrap_pyfunction!(extract_ir_json, m)?)?;
     m.add_function(wrap_pyfunction!(docling_from_bytes, m)?)?;
+    m.add_function(wrap_pyfunction!(create_document_from_markdown, m)?)?;
+    m.add_function(wrap_pyfunction!(apply_ooxml_patch_json, m)?)?;
+    m.add_function(wrap_pyfunction!(_patch_docx_json, m)?)?;
+    m.add_function(wrap_pyfunction!(_patch_pptx_json, m)?)?;
     m.add_function(wrap_pyfunction!(markdown_from_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(markdown_from_bytes_batch, m)?)?;
     m.add_function(wrap_pyfunction!(extract_sheet_names, m)?)?;
@@ -373,99 +347,7 @@ fn _officemd(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use zip::ZipWriter;
-    use zip::write::FileOptions;
-
-    fn build_zip(parts: Vec<(&str, &str)>) -> Vec<u8> {
-        let mut buffer = Vec::new();
-        let mut writer = ZipWriter::new(std::io::Cursor::new(&mut buffer));
-        let options: FileOptions<'_, ()> = FileOptions::default();
-
-        for (path, contents) in parts {
-            writer.start_file(path, options).unwrap();
-            writer.write_all(contents.as_bytes()).unwrap();
-        }
-
-        writer.finish().unwrap();
-        buffer
-    }
-
-    fn minimal_xlsx_with_doc_props() -> Vec<u8> {
-        let workbook = r#"<?xml version="1.0" encoding="UTF-8"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets>
-    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
-  </sheets>
-</workbook>"#;
-        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-</Relationships>"#;
-        let sheet = r#"<?xml version="1.0" encoding="UTF-8"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <sheetData>
-    <row r="1"><c r="A1"><v>1</v></c></row>
-  </sheetData>
-</worksheet>"#;
-        let core = r#"<?xml version="1.0" encoding="UTF-8"?>
-<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">
-  <dc:title>Quarterly Results</dc:title>
-</cp:coreProperties>"#;
-
-        build_zip(vec![
-            ("xl/workbook.xml", workbook),
-            ("xl/_rels/workbook.xml.rels", workbook_rels),
-            ("xl/worksheets/sheet1.xml", sheet),
-            ("docProps/core.xml", core),
-        ])
-    }
-
-    #[test]
-    fn parse_format_accepts_expected_variants() {
-        assert!(matches!(parse_format("docx"), Some(DocumentFormat::Docx)));
-        assert!(matches!(parse_format(".XLSX"), Some(DocumentFormat::Xlsx)));
-        assert!(matches!(parse_format("csv"), Some(DocumentFormat::Csv)));
-        assert!(matches!(parse_format("PPTX"), Some(DocumentFormat::Pptx)));
-        assert!(matches!(parse_format("pdf"), Some(DocumentFormat::Pdf)));
-    }
-
-    #[test]
-    fn detects_formats_from_minimal_packages() {
-        let docx = build_zip(vec![("word/document.xml", "<w:document/>")]);
-        let xlsx = build_zip(vec![("xl/workbook.xml", "<workbook/>")]);
-        let pptx = build_zip(vec![("ppt/presentation.xml", "<p:presentation/>")]);
-
-        assert!(matches!(
-            detect_format_from_bytes(&docx),
-            Ok(DocumentFormat::Docx)
-        ));
-        assert!(matches!(
-            detect_format_from_bytes(&xlsx),
-            Ok(DocumentFormat::Xlsx)
-        ));
-        assert!(matches!(
-            detect_format_from_bytes(&pptx),
-            Ok(DocumentFormat::Pptx)
-        ));
-        assert!(matches!(
-            detect_format_from_bytes(b"%PDF-1.7\n"),
-            Ok(DocumentFormat::Pdf)
-        ));
-    }
-
-    #[test]
-    fn resolve_format_uses_explicit_value() {
-        let not_zip = b"not a zip archive";
-        let resolved = resolve_format(not_zip, Some(".docx")).unwrap();
-        assert!(matches!(resolved, DocumentFormat::Docx));
-    }
-
-    #[test]
-    fn resolve_format_rejects_invalid_explicit_value() {
-        let err = resolve_format(b"irrelevant", Some(".txt")).unwrap_err();
-        assert!(err.contains("format must be one of"));
-    }
+    use officemd_core::test_helpers::{build_zip, minimal_xlsx_with_doc_props};
 
     #[test]
     fn markdown_from_csv_requires_explicit_format() {

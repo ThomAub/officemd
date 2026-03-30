@@ -7,6 +7,15 @@ import pytest
 
 from officemd import _cli
 from officemd import (
+    DocxPatch,
+    DocxTextScope,
+    MatchPolicy,
+    PptxPatch,
+    PptxTextScope,
+    ScopedDocxReplace,
+    ScopedPptxReplace,
+    TextReplace,
+    apply_ooxml_patch_json,
     detect_format,
     extract_csv_tables_ir_json,
     extract_ir_json,
@@ -14,6 +23,8 @@ from officemd import (
     extract_tables_ir_json,
     inspect_pdf_json,
     markdown_from_bytes,
+    patch_docx,
+    patch_pptx,
 )
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[2]
@@ -53,6 +64,54 @@ def test_showcase_markdown_and_ir_smoke() -> None:
 
     markdown = markdown_from_bytes(pptx, format="pptx")
     assert "Quarterly Review" in markdown
+
+
+def test_showcase_pptx_core_title_patch_surfaces_in_ir() -> None:
+    patched = apply_ooxml_patch_json(
+        _read_bytes("showcase.pptx"),
+        json.dumps({"core_title": "Patched Showcase PPTX Title"}),
+    )
+    ir = json.loads(extract_ir_json(patched, format="pptx"))
+    assert ir["kind"] == "Pptx"
+    assert ir["properties"]["core"]["title"] == "Patched Showcase PPTX Title"
+
+
+def test_typed_docx_patch_replaces_word_across_all_text() -> None:
+    patched = patch_docx(
+        _read_bytes("showcase.docx"),
+        DocxPatch(
+            set_core_title="Typed Showcase DOCX",
+            scoped_replacements=[
+                ScopedDocxReplace(
+                    DocxTextScope.ALL_TEXT,
+                    TextReplace("showcase", "demo", match_policy=MatchPolicy.CASE_INSENSITIVE),
+                )
+            ],
+        ),
+    )
+    markdown = markdown_from_bytes(patched, format="docx", include_document_properties=True)
+    assert "demo" in markdown.lower()
+    ir = json.loads(extract_ir_json(patched, format="docx"))
+    assert ir["properties"]["core"]["title"] == "Typed Showcase DOCX"
+
+
+def test_typed_pptx_patch_replaces_word_across_all_text() -> None:
+    patched = patch_pptx(
+        _read_bytes("showcase.pptx"),
+        PptxPatch(
+            set_core_title="Typed Showcase PPTX",
+            scoped_replacements=[
+                ScopedPptxReplace(
+                    PptxTextScope.ALL_TEXT,
+                    TextReplace("Review", "Recap", match_policy=MatchPolicy.WHOLE_WORD),
+                )
+            ],
+        ),
+    )
+    markdown = markdown_from_bytes(patched, format="pptx", include_document_properties=True)
+    assert "Quarterly Recap" in markdown
+    ir = json.loads(extract_ir_json(patched, format="pptx"))
+    assert ir["properties"]["core"]["title"] == "Typed Showcase PPTX"
 
 
 def test_showcase_csv_markdown_and_ir_smoke() -> None:
