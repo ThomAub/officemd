@@ -4,6 +4,7 @@ use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read, Write};
+use std::sync::LazyLock;
 use thiserror::Error;
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
@@ -54,6 +55,10 @@ pub enum DocxTextScope {
     Footnotes,
     Endnotes,
     MetadataCoreTitle,
+    MetadataCore,
+    MetadataApp,
+    MetadataCustom,
+    MetadataAll,
     AllText,
 }
 
@@ -64,6 +69,23 @@ pub enum PptxTextScope {
     SlideBody,
     Notes,
     Comments,
+    CommentAuthors,
+    MetadataCoreTitle,
+    MetadataCore,
+    MetadataApp,
+    MetadataCustom,
+    MetadataAll,
+    AllText,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum XlsxTextScope {
+    SheetNames,
+    Headers,
+    CellText,
+    SharedStrings,
+    InlineStrings,
     MetadataCoreTitle,
     AllText,
 }
@@ -115,6 +137,20 @@ pub struct ScopedPptxReplace {
     pub replace: TextReplace,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScopedXlsxReplace {
+    pub scope: XlsxTextScope,
+    pub replace: TextReplace,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct XlsxSheetRename {
+    pub from: String,
+    pub to: String,
+    #[serde(default = "default_true")]
+    pub update_references: bool,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DocxPatch {
     #[serde(default)]
@@ -131,6 +167,16 @@ pub struct PptxPatch {
     pub set_core_title: Option<String>,
     #[serde(default)]
     pub scoped_replacements: Vec<ScopedPptxReplace>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct XlsxPatch {
+    #[serde(default)]
+    pub set_core_title: Option<String>,
+    #[serde(default)]
+    pub rename_sheets: Vec<XlsxSheetRename>,
+    #[serde(default)]
+    pub scoped_replacements: Vec<ScopedXlsxReplace>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -161,12 +207,20 @@ pub struct PatchedDocument {
     pub report: PatchReport,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 pub fn patch_docx(content: &[u8], patch: &DocxPatch) -> Result<Vec<u8>, PatchError> {
     Ok(patch_docx_with_report(content, patch)?.content)
 }
 
 pub fn patch_pptx(content: &[u8], patch: &PptxPatch) -> Result<Vec<u8>, PatchError> {
     Ok(patch_pptx_with_report(content, patch)?.content)
+}
+
+pub fn patch_xlsx(content: &[u8], patch: &XlsxPatch) -> Result<Vec<u8>, PatchError> {
+    Ok(patch_xlsx_with_report(content, patch)?.content)
 }
 
 pub fn patch_docx_with_report(
@@ -195,6 +249,19 @@ pub fn patch_pptx_with_report(
     })
 }
 
+pub fn patch_xlsx_with_report(
+    content: &[u8],
+    patch: &XlsxPatch,
+) -> Result<PatchedDocument, PatchError> {
+    let mut parts = read_parts(content)?;
+    let mut report = PatchReport::default();
+    apply_xlsx_patch_to_parts(&mut parts, patch, &mut report)?;
+    Ok(PatchedDocument {
+        content: write_parts(&parts)?,
+        report,
+    })
+}
+
 pub fn patch_docx_batch(
     contents: Vec<Vec<u8>>,
     patch: &DocxPatch,
@@ -217,6 +284,17 @@ pub fn patch_pptx_batch(
         .collect())
 }
 
+pub fn patch_xlsx_batch(
+    contents: Vec<Vec<u8>>,
+    patch: &XlsxPatch,
+    workers: Option<usize>,
+) -> Result<Vec<Vec<u8>>, PatchError> {
+    Ok(patch_xlsx_batch_with_report(contents, patch, workers)?
+        .into_iter()
+        .map(|item| item.content)
+        .collect())
+}
+
 pub fn patch_docx_batch_with_report(
     contents: Vec<Vec<u8>>,
     patch: &DocxPatch,
@@ -234,6 +312,16 @@ pub fn patch_pptx_batch_with_report(
 ) -> Result<Vec<PatchedDocument>, PatchError> {
     run_batch(contents, workers, |content| {
         patch_pptx_with_report(&content, patch)
+    })
+}
+
+pub fn patch_xlsx_batch_with_report(
+    contents: Vec<Vec<u8>>,
+    patch: &XlsxPatch,
+    workers: Option<usize>,
+) -> Result<Vec<PatchedDocument>, PatchError> {
+    run_batch(contents, workers, |content| {
+        patch_xlsx_with_report(&content, patch)
     })
 }
 
@@ -262,6 +350,11 @@ pub fn patch_pptx_json(content: &[u8], patch_json: &str) -> Result<Vec<u8>, Patc
     patch_pptx(content, &patch)
 }
 
+pub fn patch_xlsx_json(content: &[u8], patch_json: &str) -> Result<Vec<u8>, PatchError> {
+    let patch: XlsxPatch = serde_json::from_str(patch_json)?;
+    patch_xlsx(content, &patch)
+}
+
 pub fn patch_docx_batch_json(
     contents: Vec<Vec<u8>>,
     patch_json: &str,
@@ -280,6 +373,15 @@ pub fn patch_pptx_batch_json(
     patch_pptx_batch(contents, &patch, workers)
 }
 
+pub fn patch_xlsx_batch_json(
+    contents: Vec<Vec<u8>>,
+    patch_json: &str,
+    workers: Option<usize>,
+) -> Result<Vec<Vec<u8>>, PatchError> {
+    let patch: XlsxPatch = serde_json::from_str(patch_json)?;
+    patch_xlsx_batch(contents, &patch, workers)
+}
+
 pub fn patch_docx_batch_json_with_report(
     contents: Vec<Vec<u8>>,
     patch_json: &str,
@@ -296,6 +398,15 @@ pub fn patch_pptx_batch_json_with_report(
 ) -> Result<Vec<PatchedDocument>, PatchError> {
     let patch: PptxPatch = serde_json::from_str(patch_json)?;
     patch_pptx_batch_with_report(contents, &patch, workers)
+}
+
+pub fn patch_xlsx_batch_json_with_report(
+    contents: Vec<Vec<u8>>,
+    patch_json: &str,
+    workers: Option<usize>,
+) -> Result<Vec<PatchedDocument>, PatchError> {
+    let patch: XlsxPatch = serde_json::from_str(patch_json)?;
+    patch_xlsx_batch_with_report(contents, &patch, workers)
 }
 
 fn run_batch<T, F>(
@@ -364,6 +475,59 @@ fn apply_pptx_patch_to_parts(
 
         let targets = pptx_scope_targets(&part_names, scoped.scope);
         apply_replace_to_parts(parts, &targets, &scoped.replace, report)?;
+    }
+
+    if patch.set_core_title.is_some() || metadata_requested {
+        apply_core_title(parts, patch.set_core_title.as_deref(), report)?;
+    }
+
+    Ok(())
+}
+
+fn apply_xlsx_patch_to_parts(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    patch: &XlsxPatch,
+    report: &mut PatchReport,
+) -> Result<(), PatchError> {
+    let part_names: Vec<String> = parts.keys().cloned().collect();
+
+    for rename in &patch.rename_sheets {
+        apply_xlsx_sheet_rename(parts, rename, report)?;
+    }
+
+    let mut metadata_requested = false;
+    for scoped in &patch.scoped_replacements {
+        match scoped.scope {
+            XlsxTextScope::MetadataCoreTitle => {
+                metadata_requested = true;
+                apply_core_title_replace(parts, &scoped.replace, report)?;
+            }
+            XlsxTextScope::SheetNames => {
+                apply_xlsx_sheet_name_replace(parts, &scoped.replace, report)?;
+            }
+            XlsxTextScope::SharedStrings => {
+                apply_replace_to_xml_text_nodes_named_part(
+                    parts,
+                    "xl/sharedStrings.xml",
+                    &SHARED_STRING_TEXT_RE,
+                    &scoped.replace,
+                    report,
+                )?;
+            }
+            XlsxTextScope::InlineStrings => {
+                let targets = xlsx_inline_string_targets(&part_names);
+                apply_replace_to_xml_text_nodes_in_parts(
+                    parts,
+                    &targets,
+                    &XML_TEXT_NODE_RE,
+                    &scoped.replace,
+                    report,
+                )?;
+            }
+            XlsxTextScope::Headers | XlsxTextScope::CellText | XlsxTextScope::AllText => {
+                apply_xlsx_workbook_text_replace(parts, &part_names, &scoped.replace, report)?;
+            }
+        }
     }
 
     if patch.set_core_title.is_some() || metadata_requested {
@@ -488,6 +652,23 @@ fn build_replace_regex(replace: &TextReplace) -> Result<Regex, PatchError> {
     Ok(builder.build()?)
 }
 
+static SHARED_STRING_TEXT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?s)<t(?:\s+xml:space="preserve")?>(.*?)</t>"#).unwrap());
+static XML_TEXT_NODE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?s)<t(?:\s+xml:space="preserve")?>(.*?)</t>"#).unwrap());
+static FORMULA_NODE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<f(?:\s[^>]*)?>(.*?)</f>").unwrap());
+static CHART_FORMULA_NODE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<c:f>(.*?)</c:f>").unwrap());
+static DEFINED_NAME_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<definedName\b[^>]*>(.*?)</definedName>").unwrap());
+static SHEET_NAME_ATTR_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"<sheet\b([^>]*)\bname=\"([^\"]*)\"([^>]*)/>"#).unwrap());
+static QUOTED_SHEET_REF_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"'((?:[^']|'')+)'!").unwrap());
+static UNQUOTED_SHEET_REF_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b([A-Za-z_][A-Za-z0-9_\.]*)!").unwrap());
+
 fn docx_scope_targets(part_names: &[String], scope: DocxTextScope) -> Vec<String> {
     let mut targets = BTreeSet::new();
     for name in part_names {
@@ -498,7 +679,16 @@ fn docx_scope_targets(part_names: &[String], scope: DocxTextScope) -> Vec<String
             DocxTextScope::Comments => name == "word/comments.xml",
             DocxTextScope::Footnotes => name == "word/footnotes.xml",
             DocxTextScope::Endnotes => name == "word/endnotes.xml",
-            DocxTextScope::MetadataCoreTitle => name == "docProps/core.xml",
+            DocxTextScope::MetadataCoreTitle | DocxTextScope::MetadataCore => {
+                name == "docProps/core.xml"
+            }
+            DocxTextScope::MetadataApp => name == "docProps/app.xml",
+            DocxTextScope::MetadataCustom => name == "docProps/custom.xml",
+            DocxTextScope::MetadataAll => {
+                name == "docProps/core.xml"
+                    || name == "docProps/app.xml"
+                    || name == "docProps/custom.xml"
+            }
             DocxTextScope::AllText => {
                 name == "word/document.xml"
                     || (name.starts_with("word/header") && name.ends_with(".xml"))
@@ -528,7 +718,17 @@ fn pptx_scope_targets(part_names: &[String], scope: PptxTextScope) -> Vec<String
             PptxTextScope::Comments => {
                 name.starts_with("ppt/comments/comment") && name.ends_with(".xml")
             }
-            PptxTextScope::MetadataCoreTitle => name == "docProps/core.xml",
+            PptxTextScope::CommentAuthors => name == "ppt/commentAuthors.xml",
+            PptxTextScope::MetadataCoreTitle | PptxTextScope::MetadataCore => {
+                name == "docProps/core.xml"
+            }
+            PptxTextScope::MetadataApp => name == "docProps/app.xml",
+            PptxTextScope::MetadataCustom => name == "docProps/custom.xml",
+            PptxTextScope::MetadataAll => {
+                name == "docProps/core.xml"
+                    || name == "docProps/app.xml"
+                    || name == "docProps/custom.xml"
+            }
             PptxTextScope::AllText => {
                 (name.starts_with("ppt/slides/slide") && name.ends_with(".xml"))
                     || (name.starts_with("ppt/notesSlides/notesSlide") && name.ends_with(".xml"))
@@ -540,6 +740,332 @@ fn pptx_scope_targets(part_names: &[String], scope: PptxTextScope) -> Vec<String
         }
     }
     targets.into_iter().collect()
+}
+
+fn xlsx_inline_string_targets(part_names: &[String]) -> Vec<String> {
+    part_names
+        .iter()
+        .filter(|name| name.starts_with("xl/worksheets/sheet") && name.ends_with(".xml"))
+        .cloned()
+        .collect()
+}
+
+fn xlsx_formula_targets(part_names: &[String]) -> Vec<String> {
+    part_names
+        .iter()
+        .filter(|name| {
+            (name.starts_with("xl/worksheets/sheet") && name.ends_with(".xml"))
+                || (name.starts_with("xl/charts/chart") && name.ends_with(".xml"))
+        })
+        .cloned()
+        .collect()
+}
+
+fn apply_xlsx_workbook_text_replace(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    part_names: &[String],
+    replace: &TextReplace,
+    report: &mut PatchReport,
+) -> Result<(), PatchError> {
+    let mut matched = false;
+
+    if let Ok(()) = apply_replace_to_xml_text_nodes_named_part(
+        parts,
+        "xl/sharedStrings.xml",
+        &SHARED_STRING_TEXT_RE,
+        replace,
+        report,
+    ) {
+        matched = true;
+    }
+
+    let targets = xlsx_inline_string_targets(part_names);
+    if !targets.is_empty()
+        && apply_replace_to_xml_text_nodes_in_parts(
+            parts,
+            &targets,
+            &XML_TEXT_NODE_RE,
+            replace,
+            report,
+        )
+        .is_ok()
+    {
+        matched = true;
+    }
+
+    if matched {
+        Ok(())
+    } else {
+        Err(PatchError::TextNotFound {
+            part: "xl/sharedStrings.xml,xl/worksheets/*.xml".to_string(),
+            needle: replace.from.clone(),
+        })
+    }
+}
+
+fn apply_xlsx_sheet_name_replace(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    replace: &TextReplace,
+    report: &mut PatchReport,
+) -> Result<(), PatchError> {
+    report.parts_scanned += 1;
+    let workbook = parts
+        .get_mut("xl/workbook.xml")
+        .ok_or_else(|| PatchError::MissingPart("xl/workbook.xml".to_string()))?;
+    let original = String::from_utf8_lossy(workbook).into_owned();
+    let (updated, replacements_applied) = replace_sheet_name_attrs(&original, replace)?;
+    if replacements_applied == 0 {
+        return Err(PatchError::TextNotFound {
+            part: "xl/workbook.xml".to_string(),
+            needle: replace.from.clone(),
+        });
+    }
+    *workbook = updated.into_bytes();
+    report.parts_modified += 1;
+    report.replacements_applied += replacements_applied;
+    Ok(())
+}
+
+fn apply_xlsx_sheet_rename(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    rename: &XlsxSheetRename,
+    report: &mut PatchReport,
+) -> Result<(), PatchError> {
+    let replace = TextReplace::first(&rename.from, &rename.to);
+    apply_xlsx_sheet_name_replace(parts, &replace, report)?;
+
+    if !rename.update_references {
+        return Ok(());
+    }
+
+    if let Some(workbook) = parts.get_mut("xl/workbook.xml") {
+        report.parts_scanned += 1;
+        let original = String::from_utf8_lossy(workbook).into_owned();
+        let (updated, replacements_applied) =
+            rewrite_defined_name_refs(&original, &rename.from, &rename.to)?;
+        if replacements_applied > 0 {
+            *workbook = updated.into_bytes();
+            report.parts_modified += 1;
+            report.replacements_applied += replacements_applied;
+        }
+    }
+
+    let part_names: Vec<String> = parts.keys().cloned().collect();
+    let targets = xlsx_formula_targets(&part_names);
+    if !targets.is_empty() {
+        apply_sheet_ref_rewrite_in_parts(parts, &targets, &rename.from, &rename.to, report)?;
+    }
+    Ok(())
+}
+
+fn apply_sheet_ref_rewrite_in_parts(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    target_parts: &[String],
+    from: &str,
+    to: &str,
+    report: &mut PatchReport,
+) -> Result<(), PatchError> {
+    let mut matched = false;
+    for part in target_parts {
+        report.parts_scanned += 1;
+        let Some(data) = parts.get_mut(part) else {
+            continue;
+        };
+        let original = String::from_utf8_lossy(data).into_owned();
+        let (updated, replacements_applied) = if part.starts_with("xl/charts/") {
+            rewrite_xml_text_nodes(&original, &CHART_FORMULA_NODE_RE, |text| {
+                rewrite_formula_sheet_refs(&text, from, to)
+            })?
+        } else {
+            rewrite_xml_text_nodes(&original, &FORMULA_NODE_RE, |text| {
+                rewrite_formula_sheet_refs(&text, from, to)
+            })?
+        };
+        if replacements_applied > 0 {
+            *data = updated.into_bytes();
+            report.parts_modified += 1;
+            report.replacements_applied += replacements_applied;
+            matched = true;
+        }
+    }
+    let _ = matched;
+    Ok(())
+}
+
+fn apply_replace_to_xml_text_nodes_named_part(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    part: &str,
+    node_re: &Regex,
+    replace: &TextReplace,
+    report: &mut PatchReport,
+) -> Result<(), PatchError> {
+    report.parts_scanned += 1;
+    let data = parts
+        .get_mut(part)
+        .ok_or_else(|| PatchError::MissingPart(part.to_string()))?;
+    let original = String::from_utf8_lossy(data).into_owned();
+    let (updated, replacements_applied) = rewrite_xml_text_nodes(&original, node_re, |text| {
+        apply_replace_to_text(&text, replace)
+    })?;
+    if replacements_applied == 0 {
+        return Err(PatchError::TextNotFound {
+            part: part.to_string(),
+            needle: replace.from.clone(),
+        });
+    }
+    *data = updated.into_bytes();
+    report.parts_modified += 1;
+    report.replacements_applied += replacements_applied;
+    Ok(())
+}
+
+fn apply_replace_to_xml_text_nodes_in_parts(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    target_parts: &[String],
+    node_re: &Regex,
+    replace: &TextReplace,
+    report: &mut PatchReport,
+) -> Result<(), PatchError> {
+    let mut matched = false;
+    for part in target_parts {
+        report.parts_scanned += 1;
+        let Some(data) = parts.get_mut(part) else {
+            continue;
+        };
+        let original = String::from_utf8_lossy(data).into_owned();
+        let (updated, replacements_applied) = rewrite_xml_text_nodes(&original, node_re, |text| {
+            apply_replace_to_text(&text, replace)
+        })?;
+        if replacements_applied > 0 {
+            *data = updated.into_bytes();
+            report.parts_modified += 1;
+            report.replacements_applied += replacements_applied;
+            matched = true;
+        }
+    }
+
+    if matched {
+        Ok(())
+    } else {
+        Err(PatchError::TextNotFound {
+            part: target_parts.join(","),
+            needle: replace.from.clone(),
+        })
+    }
+}
+
+fn rewrite_xml_text_nodes<F>(
+    xml: &str,
+    node_re: &Regex,
+    mut rewrite: F,
+) -> Result<(String, usize), PatchError>
+where
+    F: FnMut(String) -> Result<(String, usize), PatchError>,
+{
+    let mut replacements_applied = 0;
+    let updated = node_re.replace_all(xml, |caps: &regex::Captures<'_>| {
+        let whole = caps.get(0).expect("whole match").as_str();
+        let inner = caps.get(1).expect("inner match").as_str();
+        let decoded = xml_unescape(inner);
+        match rewrite(decoded) {
+            Ok((rewritten, applied)) => {
+                replacements_applied += applied;
+                whole.replacen(inner, &xml_escape(&rewritten), 1)
+            }
+            Err(_) => whole.to_string(),
+        }
+    });
+    Ok((updated.into_owned(), replacements_applied))
+}
+
+fn replace_sheet_name_attrs(
+    xml: &str,
+    replace: &TextReplace,
+) -> Result<(String, usize), PatchError> {
+    let mut replacements_applied = 0;
+    let updated = SHEET_NAME_ATTR_RE.replace_all(xml, |caps: &regex::Captures<'_>| {
+        let before = caps.get(1).expect("before").as_str();
+        let name = caps.get(2).expect("name").as_str();
+        let after = caps.get(3).expect("after").as_str();
+        let decoded = xml_unescape(name);
+        match apply_replace_to_text(&decoded, replace) {
+            Ok((rewritten, applied)) if applied > 0 => {
+                replacements_applied += applied;
+                format!("<sheet{before}name=\"{}\"{after}/>", xml_escape(&rewritten))
+            }
+            _ => caps.get(0).expect("whole").as_str().to_string(),
+        }
+    });
+    Ok((updated.into_owned(), replacements_applied))
+}
+
+fn rewrite_defined_name_refs(
+    xml: &str,
+    from: &str,
+    to: &str,
+) -> Result<(String, usize), PatchError> {
+    rewrite_xml_text_nodes(xml, &DEFINED_NAME_RE, |text| {
+        rewrite_formula_sheet_refs(&text, from, to)
+    })
+}
+
+fn rewrite_formula_sheet_refs(
+    formula: &str,
+    from: &str,
+    to: &str,
+) -> Result<(String, usize), PatchError> {
+    let mut replacements_applied = 0;
+    let mut updated = QUOTED_SHEET_REF_RE
+        .replace_all(formula, |caps: &regex::Captures<'_>| {
+            let quoted_name = caps.get(1).expect("quoted").as_str();
+            let decoded = quoted_name.replace("''", "'");
+            if decoded == from {
+                replacements_applied += 1;
+                format!("{}!", excel_sheet_ref(to))
+            } else {
+                caps.get(0).expect("whole").as_str().to_string()
+            }
+        })
+        .into_owned();
+
+    updated = UNQUOTED_SHEET_REF_RE
+        .replace_all(&updated, |caps: &regex::Captures<'_>| {
+            let name = caps.get(1).expect("name").as_str();
+            if name == from {
+                replacements_applied += 1;
+                format!("{}!", excel_sheet_ref(to))
+            } else {
+                caps.get(0).expect("whole").as_str().to_string()
+            }
+        })
+        .into_owned();
+
+    Ok((updated, replacements_applied))
+}
+
+fn excel_sheet_ref(name: &str) -> String {
+    if is_valid_unquoted_sheet_name(name) {
+        name.to_string()
+    } else {
+        format!("'{}'", name.replace('\'', "''"))
+    }
+}
+
+fn is_valid_unquoted_sheet_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(ch) if ch.is_ascii_alphabetic() || ch == '_' => {}
+        _ => return false,
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.')
+}
+
+fn xml_unescape(text: &str) -> String {
+    text.replace("&apos;", "'")
+        .replace("&quot;", "\"")
+        .replace("&gt;", ">")
+        .replace("&lt;", "<")
+        .replace("&amp;", "&")
 }
 
 fn apply_core_title(
@@ -688,7 +1214,10 @@ mod tests {
         let bytes = build_zip(vec![
             ("word/document.xml", "<w:t>word body word</w:t>"),
             ("word/header1.xml", "<w:t>word header</w:t>"),
-            ("word/comments.xml", "<w:t>word comment</w:t>"),
+            (
+                "word/comments.xml",
+                "<w:comment w:author=\"Alice\"><w:t>word comment</w:t></w:comment>",
+            ),
             (
                 "docProps/core.xml",
                 "<cp:coreProperties xmlns:cp=\"cp\" xmlns:dc=\"dc\"><dc:title>old</dc:title></cp:coreProperties>",
@@ -717,11 +1246,65 @@ mod tests {
     }
 
     #[test]
+    fn typed_docx_patch_replaces_comment_author_and_metadata_properties() {
+        let bytes = build_zip(vec![
+            (
+                "word/comments.xml",
+                "<w:comments><w:comment w:id=\"0\" w:author=\"Alice\" w:initials=\"AL\"><w:p><w:r><w:t>Needs review</w:t></w:r></w:p></w:comment></w:comments>",
+            ),
+            (
+                "docProps/app.xml",
+                "<Properties><Company>Old Company</Company><Template>Old Template</Template></Properties>",
+            ),
+            (
+                "docProps/custom.xml",
+                "<Properties><property name=\"FilePath\"><vt:lpwstr>/tmp/old.docx</vt:lpwstr></property></Properties>",
+            ),
+            (
+                "docProps/core.xml",
+                "<cp:coreProperties xmlns:cp=\"cp\" xmlns:dc=\"dc\"><dc:title>old</dc:title></cp:coreProperties>",
+            ),
+        ]);
+
+        let patched = patch_docx(
+            &bytes,
+            &DocxPatch {
+                set_core_title: None,
+                replace_body_title: None,
+                scoped_replacements: vec![
+                    ScopedDocxReplace {
+                        scope: DocxTextScope::Comments,
+                        replace: TextReplace::all("Alice", "Bob"),
+                    },
+                    ScopedDocxReplace {
+                        scope: DocxTextScope::MetadataApp,
+                        replace: TextReplace::all("Old", "New"),
+                    },
+                    ScopedDocxReplace {
+                        scope: DocxTextScope::MetadataCustom,
+                        replace: TextReplace::all("/tmp/old.docx", "/tmp/new.docx"),
+                    },
+                ],
+            },
+        )
+        .unwrap();
+
+        let parts = read_parts(&patched).unwrap();
+        assert!(String::from_utf8_lossy(&parts["word/comments.xml"]).contains("w:author=\"Bob\""));
+        assert!(String::from_utf8_lossy(&parts["docProps/app.xml"]).contains("New Company"));
+        assert!(String::from_utf8_lossy(&parts["docProps/app.xml"]).contains("New Template"));
+        assert!(String::from_utf8_lossy(&parts["docProps/custom.xml"]).contains("/tmp/new.docx"));
+    }
+
+    #[test]
     fn typed_pptx_patch_replaces_comments_and_notes() {
         let bytes = build_zip(vec![
             ("ppt/slides/slide1.xml", "<a:t>word slide</a:t>"),
             ("ppt/notesSlides/notesSlide1.xml", "<a:t>word notes</a:t>"),
-            ("ppt/comments/comment1.xml", "<a:t>word comment</a:t>"),
+            (
+                "ppt/comments/comment1.xml",
+                "<p:cm authorId=\"0\"><p:text>word comment</p:text></p:cm>",
+            ),
             (
                 "docProps/core.xml",
                 "<cp:coreProperties xmlns:cp=\"cp\" xmlns:dc=\"dc\"><dc:title/></cp:coreProperties>",
@@ -750,6 +1333,56 @@ mod tests {
             String::from_utf8_lossy(&parts["ppt/comments/comment1.xml"]).contains("term comment")
         );
         assert!(String::from_utf8_lossy(&parts["docProps/core.xml"]).contains("deck title"));
+    }
+
+    #[test]
+    fn typed_pptx_patch_replaces_comment_authors_and_metadata_properties() {
+        let bytes = build_zip(vec![
+            (
+                "ppt/commentAuthors.xml",
+                "<p:cmAuthorLst><p:cmAuthor id=\"0\" name=\"Alice\" initials=\"AL\"/></p:cmAuthorLst>",
+            ),
+            (
+                "docProps/app.xml",
+                "<Properties><Company>Old Company</Company><PresentationFormat>Old Deck</PresentationFormat></Properties>",
+            ),
+            (
+                "docProps/custom.xml",
+                "<Properties><property name=\"FileName\"><vt:lpwstr>old.pptx</vt:lpwstr></property></Properties>",
+            ),
+            (
+                "docProps/core.xml",
+                "<cp:coreProperties xmlns:cp=\"cp\" xmlns:dc=\"dc\"><dc:title>old</dc:title></cp:coreProperties>",
+            ),
+        ]);
+
+        let patched = patch_pptx(
+            &bytes,
+            &PptxPatch {
+                set_core_title: None,
+                scoped_replacements: vec![
+                    ScopedPptxReplace {
+                        scope: PptxTextScope::CommentAuthors,
+                        replace: TextReplace::all("Alice", "Bob"),
+                    },
+                    ScopedPptxReplace {
+                        scope: PptxTextScope::MetadataApp,
+                        replace: TextReplace::all("Old", "New"),
+                    },
+                    ScopedPptxReplace {
+                        scope: PptxTextScope::MetadataCustom,
+                        replace: TextReplace::all("old.pptx", "new.pptx"),
+                    },
+                ],
+            },
+        )
+        .unwrap();
+
+        let parts = read_parts(&patched).unwrap();
+        assert!(String::from_utf8_lossy(&parts["ppt/commentAuthors.xml"]).contains("name=\"Bob\""));
+        assert!(String::from_utf8_lossy(&parts["docProps/app.xml"]).contains("New Company"));
+        assert!(String::from_utf8_lossy(&parts["docProps/app.xml"]).contains("New Deck"));
+        assert!(String::from_utf8_lossy(&parts["docProps/custom.xml"]).contains("new.pptx"));
     }
 
     #[test]
@@ -795,6 +1428,99 @@ mod tests {
     }
 
     #[test]
+    fn typed_xlsx_patch_renames_sheet_and_updates_references() {
+        let bytes = build_zip(vec![
+            (
+                "xl/workbook.xml",
+                concat!(
+                    r#"<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+                    r#"<sheets><sheet name="Sales Data" sheetId="1" r:id="rId1"/>"#,
+                    r#"<sheet name="Summary" sheetId="2" r:id="rId2"/></sheets>"#,
+                    r#"<definedNames><definedName name="MyRange">'Sales Data'!$A$1:$B$2</definedName></definedNames>"#,
+                    r#"</workbook>"#,
+                ),
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                "<worksheet><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Revenue</t></is></c></row></sheetData></worksheet>",
+            ),
+            (
+                "xl/worksheets/sheet2.xml",
+                "<worksheet><sheetData><row r=\"1\"><c r=\"A1\"><f>'Sales Data'!B2</f><v>10</v></c></row></sheetData></worksheet>",
+            ),
+            (
+                "xl/charts/chart1.xml",
+                "<c:chartSpace xmlns:c=\"c\"><c:lineChart><c:ser><c:val><c:numRef><c:f>'Sales Data'!$B$2:$B$3</c:f></c:numRef></c:val></c:ser></c:lineChart></c:chartSpace>",
+            ),
+        ]);
+
+        let patched = patch_xlsx_with_report(
+            &bytes,
+            &XlsxPatch {
+                set_core_title: None,
+                rename_sheets: vec![XlsxSheetRename {
+                    from: "Sales Data".to_string(),
+                    to: "Revenue Data".to_string(),
+                    update_references: true,
+                }],
+                scoped_replacements: vec![],
+            },
+        )
+        .unwrap();
+
+        let parts = read_parts(&patched.content).unwrap();
+        let workbook_xml = String::from_utf8_lossy(&parts["xl/workbook.xml"]);
+        let sheet_xml = String::from_utf8_lossy(&parts["xl/worksheets/sheet2.xml"]);
+        let chart_xml = String::from_utf8_lossy(&parts["xl/charts/chart1.xml"]);
+        assert!(workbook_xml.contains("name=\"Revenue Data\""));
+        assert!(
+            workbook_xml.contains("'Revenue Data'!$A$1:$B$2")
+                || workbook_xml.contains("&apos;Revenue Data&apos;!$A$1:$B$2")
+        );
+        assert!(
+            sheet_xml.contains("'Revenue Data'!B2")
+                || sheet_xml.contains("&apos;Revenue Data&apos;!B2")
+        );
+        assert!(
+            chart_xml.contains("'Revenue Data'!$B$2:$B$3")
+                || chart_xml.contains("&apos;Revenue Data&apos;!$B$2:$B$3")
+        );
+        assert!(patched.report.replacements_applied >= 4);
+    }
+
+    #[test]
+    fn typed_xlsx_patch_replaces_shared_strings_text() {
+        let bytes = build_zip(vec![
+            (
+                "xl/sharedStrings.xml",
+                "<sst><si><t>word alpha</t></si><si><t>word beta</t></si></sst>",
+            ),
+            (
+                "xl/workbook.xml",
+                "<workbook><sheets><sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>",
+            ),
+        ]);
+
+        let patched = patch_xlsx_with_report(
+            &bytes,
+            &XlsxPatch {
+                set_core_title: None,
+                rename_sheets: vec![],
+                scoped_replacements: vec![ScopedXlsxReplace {
+                    scope: XlsxTextScope::AllText,
+                    replace: TextReplace::all("word", "term"),
+                }],
+            },
+        )
+        .unwrap();
+
+        let parts = read_parts(&patched.content).unwrap();
+        assert!(String::from_utf8_lossy(&parts["xl/sharedStrings.xml"]).contains("term alpha"));
+        assert!(String::from_utf8_lossy(&parts["xl/sharedStrings.xml"]).contains("term beta"));
+        assert!(patched.report.replacements_applied >= 2);
+    }
+
+    #[test]
     fn patch_json_round_trip_works() {
         let patch = DocxPatch {
             set_core_title: Some("Title".to_string()),
@@ -807,6 +1533,22 @@ mod tests {
         let json = serde_json::to_string(&patch).unwrap();
         let decoded: DocxPatch = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, patch);
+
+        let xlsx_patch = XlsxPatch {
+            set_core_title: Some("Workbook".to_string()),
+            rename_sheets: vec![XlsxSheetRename {
+                from: "Sales".to_string(),
+                to: "Revenue".to_string(),
+                update_references: true,
+            }],
+            scoped_replacements: vec![ScopedXlsxReplace {
+                scope: XlsxTextScope::AllText,
+                replace: TextReplace::all("word", "term"),
+            }],
+        };
+        let json = serde_json::to_string(&xlsx_patch).unwrap();
+        let decoded: XlsxPatch = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, xlsx_patch);
     }
 
     #[test]
