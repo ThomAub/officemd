@@ -14,6 +14,9 @@ WASM_TARGET = wasm32-unknown-unknown
 OUT_DIR     = pkg
 CARGO_OUT   = ../../target/$(WASM_TARGET)
 
+# panic=abort removes unwinding tables (~10-15% smaller WASM binary).
+RELEASE_FLAGS = CARGO_PROFILE_RELEASE_PANIC=abort
+
 .PHONY: build release serve clean
 
 build:
@@ -22,7 +25,7 @@ build:
 		$(CARGO_OUT)/debug/officemd_wasm.wasm
 
 release:
-	cargo build --target $(WASM_TARGET) -p officemd_wasm --release
+	$(RELEASE_FLAGS) cargo build --target $(WASM_TARGET) -p officemd_wasm --release
 	wasm-bindgen --target web --out-dir $(OUT_DIR) \
 		$(CARGO_OUT)/release/officemd_wasm.wasm
 	@# Optional: further optimise with wasm-opt (binaryen)

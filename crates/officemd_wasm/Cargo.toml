@@ -7,7 +7,6 @@ license = "MIT"
 authors = ["Thomas Aubry"]
 repository = "https://github.com/ThomAub/officemd"
 homepage = "https://github.com/ThomAub/officemd"
-readme = "README.md"
 keywords = ["officemd", "wasm", "docx", "xlsx", "markdown"]
 categories = ["wasm", "text-processing"]
 publish = false
@@ -28,12 +27,3 @@ serde_json = "1"
 
 [package.metadata.dist]
 dist = false
-
-# Optimise for speed — ZIP decompression + XML parsing is the bottleneck.
-# panic=abort removes unwinding tables (~10-15% smaller binary).
-# wasm-opt -O3 is applied in the Makefile release target.
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-panic = "abort"

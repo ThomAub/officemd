@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use officemd_core::format::{detect_format_from_bytes, parse_format, DocumentFormat};
+use officemd_core::format::{DocumentFormat, detect_format_from_bytes, parse_format};
 
 /// One-time setup: install a panic hook so Rust panics show up in the
 /// browser console instead of the unhelpful "unreachable" default.
@@ -17,7 +17,10 @@ pub fn init_panic_hook() {
 pub fn convert_to_markdown(content: &[u8]) -> Result<Box<[JsValue]>, JsError> {
     let format = detect_format_from_bytes(content).map_err(|e| JsError::new(&e))?;
     let md = convert_with_format(content, format)?;
-    Ok(Box::new([JsValue::from_str(&format.to_string()), JsValue::from_str(&md)]))
+    Ok(Box::new([
+        JsValue::from_str(&format.to_string()),
+        JsValue::from_str(&md),
+    ]))
 }
 
 /// Convert a document to markdown with an explicit format string.
