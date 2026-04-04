@@ -13,6 +13,7 @@ members = [
   "crates/officemd_cli",
   "crates/officemd_js",
   "crates/officemd_python",
+  "crates/officemd_wasm",
   "crates/tests/rust_snapshots",
   "examples/rust",
 ]

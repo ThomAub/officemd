@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OfficeMD - Document to Markdown</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 960px; margin: 0 auto; padding: 2rem; color: #1a1a1a; }
+    h1 { margin-bottom: 0.5rem; }
+    p.subtitle { color: #666; margin-bottom: 1.5rem; }
+    #drop-zone {
+      border: 2px dashed #ccc; border-radius: 12px; padding: 3rem; text-align: center;
+      cursor: pointer; transition: border-color 0.2s, background 0.2s; margin-bottom: 1.5rem;
+    }
+    #drop-zone.dragover { border-color: #4a90d9; background: #f0f7ff; }
+    #drop-zone p { font-size: 1.1rem; color: #666; }
+    #drop-zone .formats { font-size: 0.85rem; color: #999; margin-top: 0.5rem; }
+    #file-input { display: none; }
+    #status { margin-bottom: 1rem; font-size: 0.9rem; }
+    #status.error { color: #c0392b; }
+    #status.success { color: #27ae60; }
+    #output-wrapper { display: none; }
+    #output-wrapper h2 { margin-bottom: 0.5rem; font-size: 1.1rem; }
+    #output {
+      width: 100%; min-height: 300px; max-height: 70vh; overflow: auto;
+      background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 8px;
+      padding: 1rem; font-family: 'SFMono-Regular', Consolas, monospace;
+      font-size: 0.85rem; white-space: pre-wrap; word-break: break-word;
+      line-height: 1.5;
+    }
+    .meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .meta span { font-size: 0.85rem; color: #666; }
+    button {
+      background: #4a90d9; color: white; border: none; padding: 0.4rem 1rem;
+      border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+    }
+    button:hover { background: #357abd; }
+    #loading { display: none; margin: 1rem 0; text-align: center; color: #666; }
+  </style>
+</head>
+<body>
+  <h1>OfficeMD</h1>
+  <p class="subtitle">Drag &amp; drop a document to extract markdown</p>
+
+  <div id="drop-zone">
+    <p>Drop a file here or click to browse</p>
+    <p class="formats">Supports: .docx, .xlsx, .pptx, .pdf, .csv</p>
+  </div>
+  <input type="file" id="file-input" accept=".docx,.xlsx,.pptx,.pdf,.csv">
+
+  <div id="loading">Converting...</div>
+  <p id="status"></p>
+
+  <div id="output-wrapper">
+    <div class="meta">
+      <h2>Markdown output</h2>
+      <div>
+        <span id="file-info"></span>
+        <button id="copy-btn">Copy</button>
+      </div>
+    </div>
+    <pre id="output"></pre>
+  </div>
+
+  <script type="module">
+    import init, { convert_to_markdown, detect_format } from '../pkg/officemd_wasm.js';
+
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const status = document.getElementById('status');
+    const loading = document.getElementById('loading');
+    const outputWrapper = document.getElementById('output-wrapper');
+    const output = document.getElementById('output');
+    const fileInfo = document.getElementById('file-info');
+    const copyBtn = document.getElementById('copy-btn');
+
+    let wasmReady = false;
+
+    async function initWasm() {
+      try {
+        await init();
+        wasmReady = true;
+      } catch (e) {
+        status.textContent = 'Failed to load WASM module: ' + e.message;
+        status.className = 'error';
+      }
+    }
+
+    initWasm();
+
+    async function handleFile(file) {
+      if (!wasmReady) {
+        status.textContent = 'WASM module is still loading, please wait...';
+        status.className = 'error';
+        return;
+      }
+
+      status.textContent = '';
+      status.className = '';
+      loading.style.display = 'block';
+      outputWrapper.style.display = 'none';
+
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const start = performance.now();
+        const markdown = convert_to_markdown(bytes);
+        const elapsed = (performance.now() - start).toFixed(0);
+
+        let fmt;
+        try { fmt = detect_format(bytes); } catch { fmt = '?'; }
+
+        output.textContent = markdown;
+        fileInfo.textContent = `${file.name} (${fmt}) - ${elapsed}ms`;
+        outputWrapper.style.display = 'block';
+        status.textContent = 'Conversion successful';
+        status.className = 'success';
+      } catch (e) {
+        status.textContent = 'Error: ' + e.message;
+        status.className = 'error';
+      } finally {
+        loading.style.display = 'none';
+      }
+    }
+
+    // Drag & drop
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if (file) handleFile(file);
+    });
+
+    // Click to browse
+    dropZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      if (file) handleFile(file);
+    });
+
+    // Copy button
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(output.textContent).then(() => {
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => copyBtn.textContent = 'Copy', 1500);
+      });
+    });
+  </script>
+</body>
+</html>

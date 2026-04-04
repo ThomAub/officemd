@@ -123,12 +123,19 @@ pub fn resolve_format(content: &[u8], format: Option<&str>) -> Result<DocumentFo
 
 /// Resolve the number of worker threads from an optional user hint.
 ///
-/// Returns 1 when parallelism cannot be detected.
+/// Returns 1 when parallelism cannot be detected or on WASM targets.
 #[must_use]
 pub fn resolve_worker_count(workers: Option<usize>) -> usize {
-    workers
-        .filter(|v| *v > 0)
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, usize::from))
+    workers.filter(|v| *v > 0).unwrap_or_else(|| {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            std::thread::available_parallelism().map_or(1, usize::from)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            1
+        }
+    })
 }
 
 fn strip_bom_and_whitespace(bytes: &[u8]) -> &[u8] {
