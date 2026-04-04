@@ -1,4 +1,6 @@
+#[cfg(feature = "parallel")]
 use rayon::ThreadPoolBuilder;
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
@@ -19,6 +21,7 @@ pub enum PatchError {
     Json(#[from] serde_json::Error),
     #[error("regex error: {0}")]
     Regex(#[from] regex::Error),
+    #[cfg(feature = "parallel")]
     #[error("thread pool error: {0}")]
     ThreadPool(#[from] rayon::ThreadPoolBuildError),
     #[error("missing part: {0}")]
@@ -424,6 +427,7 @@ pub fn patch_xlsx_batch_json_with_report(
     patch_xlsx_batch_with_report(contents, &patch, workers)
 }
 
+#[cfg(feature = "parallel")]
 fn run_batch<T, F>(
     contents: Vec<Vec<u8>>,
     workers: Option<usize>,
@@ -441,6 +445,18 @@ where
 
     let pool = ThreadPoolBuilder::new().num_threads(worker_count).build()?;
     pool.install(|| contents.into_par_iter().map(job).collect())
+}
+
+#[cfg(not(feature = "parallel"))]
+fn run_batch<T, F>(
+    contents: Vec<Vec<u8>>,
+    _workers: Option<usize>,
+    job: F,
+) -> Result<Vec<T>, PatchError>
+where
+    F: Fn(Vec<u8>) -> Result<T, PatchError>,
+{
+    contents.into_iter().map(job).collect()
 }
 
 fn apply_docx_patch_to_parts(
