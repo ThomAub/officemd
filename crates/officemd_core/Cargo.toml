@@ -19,7 +19,7 @@ test-helpers = []
 
 [dependencies]
 quick-xml = "0.37"
-zip = "2.2"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 thiserror = "2.0"
 serde = { version = "1", features = ["derive"] }
 regex = "1"

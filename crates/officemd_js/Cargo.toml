@@ -36,4 +36,4 @@ officemd_docling = { version = "0.1.6", path = "../officemd_docling" }
 napi-build = "2"
 
 [dev-dependencies]
-zip = "2.2"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }

@@ -19,7 +19,6 @@ crate-type = ["cdylib", "rlib"]
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
 officemd_core = { version = "0.1.6", path = "../officemd_core", default-features = false }
-officemd_markdown = { version = "0.1.6", path = "../officemd_markdown" }
 officemd_docx = { version = "0.1.6", path = "../officemd_docx" }
 officemd_xlsx = { version = "0.1.6", path = "../officemd_xlsx" }
 officemd_pptx = { version = "0.1.6", path = "../officemd_pptx" }
@@ -30,9 +29,11 @@ serde_json = "1"
 [package.metadata.dist]
 dist = false
 
-# Optimise for speed (not size) — ZIP decompression is the bottleneck.
-# wasm-opt is applied automatically by wasm-pack in --release mode.
+# Optimise for speed — ZIP decompression + XML parsing is the bottleneck.
+# panic=abort removes unwinding tables (~10-15% smaller binary).
+# wasm-opt -O3 is applied in the Makefile release target.
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
+panic = "abort"
