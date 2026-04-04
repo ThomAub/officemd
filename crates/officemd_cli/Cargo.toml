@@ -35,4 +35,4 @@ similar = "2.7"
 officemd_core = { version = "0.1.6", path = "../officemd_core", features = ["test-helpers"] }
 insta = { version = "1", features = ["filters"] }
 insta-cmd = "0.6"
-zip = "2.2"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
