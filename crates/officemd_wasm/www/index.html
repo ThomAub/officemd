@@ -113,7 +113,8 @@
 
       const bytes = new Uint8Array(await file.arrayBuffer());
       // Transfer the buffer to the worker (zero-copy).
-      worker.postMessage({ bytes, id: Date.now() }, [bytes.buffer]);
+      // Pass fileName so the worker can use explicit format for CSV (not auto-detectable).
+      worker.postMessage({ bytes, id: Date.now(), fileName: file.name }, [bytes.buffer]);
     }
 
     // Drag & drop
