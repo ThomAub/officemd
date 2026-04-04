@@ -34,8 +34,8 @@ release:
 		|| echo "wasm-opt not found, skipping (install via: cargo install wasm-opt)"
 
 serve: release
-	@echo "Serving at http://localhost:8080"
-	python3 -m http.server 8080 --directory www
+	@echo "Serving at http://localhost:8080/www/"
+	python3 -m http.server 8080
 
 clean:
 	rm -rf $(OUT_DIR)
