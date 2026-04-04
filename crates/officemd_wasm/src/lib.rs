@@ -2,6 +2,13 @@ use wasm_bindgen::prelude::*;
 
 use officemd_core::format::{detect_format_from_bytes, parse_format, DocumentFormat};
 
+/// One-time setup: install a panic hook so Rust panics show up in the
+/// browser console instead of the unhelpful "unreachable" default.
+#[wasm_bindgen(start)]
+pub fn init_panic_hook() {
+    console_error_panic_hook::set_once();
+}
+
 /// Convert a document to markdown, auto-detecting the format from file content.
 ///
 /// Accepts raw file bytes (e.g. from a `Uint8Array` in JavaScript) and returns
@@ -10,8 +17,7 @@ use officemd_core::format::{detect_format_from_bytes, parse_format, DocumentForm
 /// Supported formats: DOCX, XLSX, PPTX, PDF, CSV (CSV requires explicit format).
 #[wasm_bindgen]
 pub fn convert_to_markdown(content: &[u8]) -> Result<String, JsError> {
-    let format =
-        detect_format_from_bytes(content).map_err(|e| JsError::new(&e))?;
+    let format = detect_format_from_bytes(content).map_err(|e| JsError::new(&e))?;
     convert_with_format(content, format)
 }
 
@@ -19,10 +25,7 @@ pub fn convert_to_markdown(content: &[u8]) -> Result<String, JsError> {
 ///
 /// Format must be one of: "docx", "xlsx", "csv", "pptx", "pdf".
 #[wasm_bindgen]
-pub fn convert_to_markdown_with_format(
-    content: &[u8],
-    format: &str,
-) -> Result<String, JsError> {
+pub fn convert_to_markdown_with_format(content: &[u8], format: &str) -> Result<String, JsError> {
     let fmt = parse_format(format)
         .ok_or_else(|| JsError::new("format must be one of: docx, xlsx, csv, pptx, pdf"))?;
     convert_with_format(content, fmt)
@@ -31,17 +34,13 @@ pub fn convert_to_markdown_with_format(
 /// Convert a document to its JSON IR representation, auto-detecting format.
 #[wasm_bindgen]
 pub fn convert_to_json(content: &[u8]) -> Result<String, JsError> {
-    let format =
-        detect_format_from_bytes(content).map_err(|e| JsError::new(&e))?;
+    let format = detect_format_from_bytes(content).map_err(|e| JsError::new(&e))?;
     convert_to_json_with_format(content, &format.to_string())
 }
 
 /// Convert a document to its JSON IR representation with an explicit format.
 #[wasm_bindgen]
-pub fn convert_to_json_with_format(
-    content: &[u8],
-    format: &str,
-) -> Result<String, JsError> {
+pub fn convert_to_json_with_format(content: &[u8], format: &str) -> Result<String, JsError> {
     let fmt = parse_format(format)
         .ok_or_else(|| JsError::new("format must be one of: docx, xlsx, csv, pptx, pdf"))?;
     let ir = extract_ir(content, fmt)?;
@@ -53,25 +52,28 @@ pub fn convert_to_json_with_format(
 /// Returns a string like "docx", "xlsx", "pptx", or "pdf".
 #[wasm_bindgen]
 pub fn detect_format(content: &[u8]) -> Result<String, JsError> {
-    let format =
-        detect_format_from_bytes(content).map_err(|e| JsError::new(&e))?;
+    let format = detect_format_from_bytes(content).map_err(|e| JsError::new(&e))?;
     Ok(format.to_string())
 }
 
 fn convert_with_format(content: &[u8], format: DocumentFormat) -> Result<String, JsError> {
     match format {
-        DocumentFormat::Docx => officemd_docx::markdown_from_bytes(content)
-            .map_err(|e| JsError::new(&e.to_string())),
-        DocumentFormat::Xlsx => officemd_xlsx::markdown_from_bytes(content)
-            .map_err(|e| JsError::new(&e.to_string())),
-        DocumentFormat::Pptx => officemd_pptx::markdown_from_bytes(content)
-            .map_err(|e| JsError::new(&e.to_string())),
+        DocumentFormat::Docx => {
+            officemd_docx::markdown_from_bytes(content).map_err(|e| JsError::new(&e.to_string()))
+        }
+        DocumentFormat::Xlsx => {
+            officemd_xlsx::markdown_from_bytes(content).map_err(|e| JsError::new(&e.to_string()))
+        }
+        DocumentFormat::Pptx => {
+            officemd_pptx::markdown_from_bytes(content).map_err(|e| JsError::new(&e.to_string()))
+        }
         DocumentFormat::Pdf => {
             officemd_pdf::markdown_from_bytes_with_options(content, Default::default())
                 .map_err(|e| JsError::new(&e.to_string()))
         }
-        DocumentFormat::Csv => officemd_csv::markdown_from_bytes(content)
-            .map_err(|e| JsError::new(&e.to_string())),
+        DocumentFormat::Csv => {
+            officemd_csv::markdown_from_bytes(content).map_err(|e| JsError::new(&e.to_string()))
+        }
     }
 }
 

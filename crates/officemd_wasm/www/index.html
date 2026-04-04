@@ -41,7 +41,7 @@
 </head>
 <body>
   <h1>OfficeMD</h1>
-  <p class="subtitle">Drag &amp; drop a document to extract markdown</p>
+  <p class="subtitle">Drag &amp; drop a document to extract markdown — runs entirely in your browser via WebAssembly</p>
 
   <div id="drop-zone">
     <p>Drop a file here or click to browse</p>
@@ -64,8 +64,6 @@
   </div>
 
   <script type="module">
-    import init, { convert_to_markdown, detect_format } from '../pkg/officemd_wasm.js';
-
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
     const status = document.getElementById('status');
@@ -75,19 +73,30 @@
     const fileInfo = document.getElementById('file-info');
     const copyBtn = document.getElementById('copy-btn');
 
-    let wasmReady = false;
+    // Run conversion in a Web Worker so the UI stays responsive.
+    const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
 
-    async function initWasm() {
-      try {
-        await init();
+    let wasmReady = false;
+    let pendingFileName = '';
+
+    worker.onmessage = (e) => {
+      const msg = e.data;
+      if (msg.type === 'ready') {
         wasmReady = true;
-      } catch (e) {
-        status.textContent = 'Failed to load WASM module: ' + e.message;
+        return;
+      }
+      loading.style.display = 'none';
+      if (msg.type === 'result') {
+        output.textContent = msg.markdown;
+        fileInfo.textContent = `${pendingFileName} (${msg.fmt}) — ${msg.elapsed.toFixed(0)}ms`;
+        outputWrapper.style.display = 'block';
+        status.textContent = 'Conversion successful';
+        status.className = 'success';
+      } else if (msg.type === 'error') {
+        status.textContent = 'Error: ' + msg.error;
         status.className = 'error';
       }
-    }
-
-    initWasm();
+    };
 
     async function handleFile(file) {
       if (!wasmReady) {
@@ -96,31 +105,15 @@
         return;
       }
 
+      pendingFileName = file.name;
       status.textContent = '';
       status.className = '';
       loading.style.display = 'block';
       outputWrapper.style.display = 'none';
 
-      try {
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        const start = performance.now();
-        const markdown = convert_to_markdown(bytes);
-        const elapsed = (performance.now() - start).toFixed(0);
-
-        let fmt;
-        try { fmt = detect_format(bytes); } catch { fmt = '?'; }
-
-        output.textContent = markdown;
-        fileInfo.textContent = `${file.name} (${fmt}) - ${elapsed}ms`;
-        outputWrapper.style.display = 'block';
-        status.textContent = 'Conversion successful';
-        status.className = 'success';
-      } catch (e) {
-        status.textContent = 'Error: ' + e.message;
-        status.className = 'error';
-      } finally {
-        loading.style.display = 'none';
-      }
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      // Transfer the buffer to the worker (zero-copy).
+      worker.postMessage({ bytes, id: Date.now() }, [bytes.buffer]);
     }
 
     // Drag & drop
