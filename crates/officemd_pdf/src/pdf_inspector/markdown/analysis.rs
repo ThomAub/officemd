@@ -5,6 +5,154 @@ use std::collections::HashMap;
 use crate::pdf_inspector::types::{TextItem, TextLine};
 use log::debug;
 
+// ── Page margins & alignment ────────────────────────────────────────
+
+/// Page margin info computed from bulk text statistics.
+#[derive(Debug, Clone)]
+pub(crate) struct PageMargins {
+    /// Typical left edge of text (mode of line-start X, bucketed to 5pt).
+    pub left: f32,
+    /// Typical right edge of text (90th percentile of line-end X).
+    pub right: f32,
+    /// Midpoint of the text area.
+    pub center: f32,
+    /// Width of the text area (right − left).
+    pub width: f32,
+    /// Fraction of qualifying lines that start within ±10pt of the mode left margin.
+    /// When most lines share the same left margin (ratio > 0.6), a line that is
+    /// substantially to the right is a genuine indented block. When lines are
+    /// scattered (ratio < 0.4), there is no dominant margin to compare against.
+    pub left_margin_concentration: f32,
+}
+
+/// Alignment classification for a text line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LineAlignment {
+    Left,
+    Center,
+}
+
+/// Compute typical page margins from grouped text lines.
+///
+/// For each page, uses the **mode** (most common) left-margin bucket to define
+/// the normal text indent, and the 90th-percentile right edge for the right
+/// margin. The mode is more robust than percentiles because in many PDFs the
+/// body text has a consistent indent while only a few lines (headings, bullets)
+/// start further left. Bucketing to the nearest 5pt handles minor X-jitter.
+pub(crate) fn compute_page_margins(lines: &[TextLine]) -> HashMap<u32, PageMargins> {
+    let mut page_starts: HashMap<u32, Vec<f32>> = HashMap::new();
+    let mut page_ends: HashMap<u32, Vec<f32>> = HashMap::new();
+
+    for line in lines {
+        // Skip very short lines (labels, page numbers) that would skew margins
+        if line.items.len() < 3 {
+            continue;
+        }
+        let first = &line.items[0];
+        let last = line.items.last().unwrap();
+        let line_start = first.x;
+        let line_end = last.x + last.width;
+
+        page_starts.entry(line.page).or_default().push(line_start);
+        page_ends.entry(line.page).or_default().push(line_end);
+    }
+
+    let mut result = HashMap::new();
+    for (&page, starts) in &mut page_starts {
+        let ends = match page_ends.get_mut(&page) {
+            Some(e) => e,
+            None => continue,
+        };
+        if starts.len() < 3 {
+            continue;
+        }
+
+        // Left margin: mode of X-start positions bucketed to nearest 5pt
+        let (left, left_margin_concentration) = {
+            let mut buckets: HashMap<i32, usize> = HashMap::new();
+            for &x in starts.iter() {
+                let key = (x / 5.0).round() as i32;
+                *buckets.entry(key).or_default() += 1;
+            }
+            let (best_key, best_count) = buckets
+                .iter()
+                .max_by_key(|&(_, &count)| count)
+                .map(|(&k, &c)| (k, c))
+                .unwrap_or((0, 0));
+            let mode_x = best_key as f32 * 5.0;
+            // Count lines within ±10pt of the mode (2 adjacent buckets)
+            let near_count: usize = buckets
+                .iter()
+                .filter(|(k, _)| (*k - best_key).abs() <= 2)
+                .map(|(_, &c)| c)
+                .sum();
+            let concentration = if starts.is_empty() {
+                0.0
+            } else {
+                near_count as f32 / starts.len() as f32
+            };
+            let _ = best_count; // used indirectly via near_count
+            (mode_x, concentration)
+        };
+
+        // Right margin: 90th percentile of X-end positions
+        ends.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let right = ends[ends.len() * 9 / 10];
+        let width = (right - left).max(1.0);
+
+        result.insert(
+            page,
+            PageMargins {
+                left,
+                right,
+                center: left + width / 2.0,
+                width,
+                left_margin_concentration,
+            },
+        );
+    }
+
+    result
+}
+
+/// Detect whether a line is centered relative to page margins.
+pub(crate) fn detect_line_alignment(line: &TextLine, margins: &PageMargins) -> LineAlignment {
+    if line.items.is_empty() || margins.width < 50.0 {
+        return LineAlignment::Left;
+    }
+
+    let first = &line.items[0];
+    let last = line.items.last().unwrap();
+    let line_start = first.x;
+    let line_end = last.x + last.width;
+    let line_width = line_end - line_start;
+    let line_center = (line_start + line_end) / 2.0;
+
+    // Line must be significantly shorter than the full text area
+    if line_width > margins.width * 0.80 {
+        return LineAlignment::Left;
+    }
+
+    // Line must not start near the normal left margin
+    if line_start < margins.left + margins.width * 0.10 {
+        return LineAlignment::Left;
+    }
+
+    // Line center must be close to page center
+    let center_offset = (line_center - margins.center).abs();
+    if center_offset > margins.width * 0.08 {
+        return LineAlignment::Left;
+    }
+
+    // Limit to reasonably short text (avoid wrapped paragraphs)
+    let char_count: usize = line.items.iter().map(|i| i.text.len()).sum();
+    if char_count > 120 {
+        return LineAlignment::Left;
+    }
+
+    LineAlignment::Center
+}
+
 /// Font statistics for a document
 pub(crate) struct FontStats {
     pub(crate) most_common_size: f32,
