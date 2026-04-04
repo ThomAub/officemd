@@ -5,7 +5,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-officemd_core = { path = "../../crates/officemd_core" }
+officemd_core = { path = "../../crates/officemd_core", default-features = false }
 officemd_docx = { path = "../../crates/officemd_docx" }
 officemd_xlsx = { path = "../../crates/officemd_xlsx" }
 officemd_csv = { path = "../../crates/officemd_csv" }

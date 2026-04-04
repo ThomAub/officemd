@@ -13,7 +13,8 @@ keywords = ["officemd", "office", "docx", "xlsx", "pptx"]
 categories = ["parser-implementations", "data-structures"]
 
 [features]
-default = []
+default = ["parallel"]
+parallel = ["rayon"]
 test-helpers = []
 
 [dependencies]
@@ -22,7 +23,7 @@ zip = "2.2"
 thiserror = "2.0"
 serde = { version = "1", features = ["derive"] }
 regex = "1"
-rayon = "1.10"
+rayon = { version = "1.10", optional = true }
 serde_json = "1"
 
 [dev-dependencies]
