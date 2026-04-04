@@ -40,4 +40,4 @@ pyo3-build-config = { version = "0.27.2", features = ["resolve-config"] }
 
 [dev-dependencies]
 officemd_core = { version = "0.1.6", path = "../officemd_core", features = ["test-helpers"] }
-zip = "2.2"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
