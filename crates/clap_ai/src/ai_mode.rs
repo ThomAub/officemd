@@ -11,9 +11,7 @@
 /// ```
 #[must_use]
 pub fn is_ai_mode() -> bool {
-    std::env::var("AI")
-        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-        .unwrap_or(false)
+    std::env::var("AI").is_ok_and(|v| v.eq_ignore_ascii_case("true") || v == "1")
 }
 
 /// Trait for types that can have AI-friendly defaults applied.

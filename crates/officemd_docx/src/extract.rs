@@ -472,10 +472,11 @@ impl<'a> PartState<'a> {
                         self.start_link(target, None, LinkEnd::FieldComplex);
                     }
                 }
-                "end" => {
-                    if self.current_link.as_ref().map(|c| c.end_on) == Some(LinkEnd::FieldComplex) {
-                        self.end_link_on(LinkEnd::FieldComplex);
-                    }
+                "end"
+                    if self.current_link.as_ref().map(|c| c.end_on)
+                        == Some(LinkEnd::FieldComplex) =>
+                {
+                    self.end_link_on(LinkEnd::FieldComplex);
                 }
                 _ => {}
             }
@@ -660,15 +661,11 @@ fn extract_comments(
                     current_author = attr_value(e, "author").unwrap_or_default();
                     current_text.clear();
                 }
-                "tab" => {
-                    if current_id.is_some() {
-                        current_text.push('\t');
-                    }
+                "tab" if current_id.is_some() => {
+                    current_text.push('\t');
                 }
-                "br" | "cr" => {
-                    if current_id.is_some() {
-                        current_text.push('\n');
-                    }
+                "br" | "cr" if current_id.is_some() => {
+                    current_text.push('\n');
                 }
                 _ => {}
             },
@@ -682,15 +679,11 @@ fn extract_comments(
                         comments.insert(note.0, note.1);
                     }
                 }
-                "tab" => {
-                    if current_id.is_some() {
-                        current_text.push('\t');
-                    }
+                "tab" if current_id.is_some() => {
+                    current_text.push('\t');
                 }
-                "br" | "cr" => {
-                    if current_id.is_some() {
-                        current_text.push('\n');
-                    }
+                "br" | "cr" if current_id.is_some() => {
+                    current_text.push('\n');
                 }
                 _ => {}
             },
@@ -710,10 +703,8 @@ fn extract_comments(
                         comments.insert(note.0, note.1);
                     }
                 }
-                "p" => {
-                    if current_id.is_some() && !current_text.ends_with('\n') {
-                        current_text.push('\n');
-                    }
+                "p" if current_id.is_some() && !current_text.ends_with('\n') => {
+                    current_text.push('\n');
                 }
                 _ => {}
             },
