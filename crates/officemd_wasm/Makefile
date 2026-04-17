@@ -8,7 +8,7 @@
 # Usage:
 #   make build          # debug build (fast iteration)
 #   make release        # optimised release build
-#   make serve          # build + serve the demo on http://localhost:8080
+#   make serve          # build + serve the demo on http://localhost:8080/crates/officemd_wasm/www/
 
 WASM_TARGET = wasm32-unknown-unknown
 OUT_DIR     = pkg
@@ -34,8 +34,8 @@ release:
 		|| echo "wasm-opt not found, skipping (install via: cargo install wasm-opt)"
 
 serve: release
-	@echo "Serving at http://localhost:8080/www/"
-	python3 -m http.server 8080
+	@echo "Serving at http://localhost:8080/crates/officemd_wasm/www/"
+	cd ../.. && python3 -m http.server 8080
 
 clean:
 	rm -rf $(OUT_DIR)
