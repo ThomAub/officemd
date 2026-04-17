@@ -23,6 +23,9 @@ pub(crate) struct PageMargins {
     /// substantially to the right is a genuine indented block. When lines are
     /// scattered (ratio < 0.4), there is no dominant margin to compare against.
     pub left_margin_concentration: f32,
+    /// Whether the page has multiple strong line-start clusters that suggest
+    /// a multi-column layout rather than a single dominant text flow.
+    pub likely_multi_column: bool,
 }
 
 /// Alignment classification for a text line.
@@ -68,7 +71,7 @@ pub(crate) fn compute_page_margins(lines: &[TextLine]) -> HashMap<u32, PageMargi
         }
 
         // Left margin: mode of X-start positions bucketed to nearest 5pt
-        let (left, left_margin_concentration) = {
+        let (left, left_margin_concentration, likely_multi_column) = {
             let mut buckets: HashMap<i32, usize> = HashMap::new();
             for &x in starts.iter() {
                 let key = (x / 5.0).round() as i32;
@@ -91,8 +94,18 @@ pub(crate) fn compute_page_margins(lines: &[TextLine]) -> HashMap<u32, PageMargi
             } else {
                 near_count as f32 / starts.len() as f32
             };
+            let significant_threshold = ((starts.len() as f32) * 0.2).ceil() as usize;
+            let mut significant_clusters: Vec<i32> = buckets
+                .iter()
+                .filter_map(|(&bucket, &count)| (count >= significant_threshold).then_some(bucket))
+                .collect();
+            significant_clusters.sort_unstable();
+            let likely_multi_column = significant_clusters.windows(2).any(|pair| {
+                let gap = (pair[1] - pair[0]) as f32 * 5.0;
+                gap >= 120.0
+            });
             let _ = best_count; // used indirectly via near_count
-            (mode_x, concentration)
+            (mode_x, concentration, likely_multi_column)
         };
 
         // Right margin: 90th percentile of X-end positions
@@ -108,11 +121,94 @@ pub(crate) fn compute_page_margins(lines: &[TextLine]) -> HashMap<u32, PageMargi
                 center: left + width / 2.0,
                 width,
                 left_margin_concentration,
+                likely_multi_column,
             },
         );
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_page_margins;
+    use crate::pdf_inspector::types::{ItemType, TextItem, TextLine};
+
+    fn make_line(page: u32, x: f32, y: f32, text: &str) -> TextLine {
+        TextLine {
+            items: vec![
+                TextItem {
+                    text: text.to_string(),
+                    x,
+                    y,
+                    width: 80.0,
+                    height: 12.0,
+                    font: "F1".into(),
+                    font_size: 12.0,
+                    page,
+                    is_rotated: false,
+                    is_bold: false,
+                    is_italic: false,
+                    item_type: ItemType::Text,
+                },
+                TextItem {
+                    text: "tail".into(),
+                    x: x + 90.0,
+                    y,
+                    width: 30.0,
+                    height: 12.0,
+                    font: "F1".into(),
+                    font_size: 12.0,
+                    page,
+                    is_rotated: false,
+                    is_bold: false,
+                    is_italic: false,
+                    item_type: ItemType::Text,
+                },
+                TextItem {
+                    text: "end".into(),
+                    x: x + 130.0,
+                    y,
+                    width: 25.0,
+                    height: 12.0,
+                    font: "F1".into(),
+                    font_size: 12.0,
+                    page,
+                    is_rotated: false,
+                    is_bold: false,
+                    is_italic: false,
+                    item_type: ItemType::Text,
+                },
+            ],
+            y,
+            page,
+        }
+    }
+
+    #[test]
+    fn page_margins_mark_two_column_layouts() {
+        let mut lines = Vec::new();
+        for i in 0..12 {
+            let y = 700.0 - i as f32 * 14.0;
+            lines.push(make_line(1, 72.0, y, "Left column"));
+            lines.push(make_line(1, 350.0, y, "Right column"));
+        }
+
+        let margins = compute_page_margins(&lines);
+        assert!(margins.get(&1).unwrap().likely_multi_column);
+    }
+
+    #[test]
+    fn page_margins_keep_single_column_layouts_enabled() {
+        let mut lines = Vec::new();
+        for i in 0..20 {
+            let y = 700.0 - i as f32 * 14.0;
+            lines.push(make_line(1, 72.0, y, "Body text"));
+        }
+
+        let margins = compute_page_margins(&lines);
+        assert!(!margins.get(&1).unwrap().likely_multi_column);
+    }
 }
 
 /// Detect whether a line is centered relative to page margins.

@@ -6,8 +6,8 @@ use crate::pdf_inspector::types::TextLine;
 
 use super::MarkdownOptions;
 use super::analysis::{
-    calculate_font_stats, compute_heading_tiers, compute_page_margins, compute_paragraph_threshold,
-    detect_header_level, detect_line_alignment, has_dot_leaders, LineAlignment,
+    LineAlignment, calculate_font_stats, compute_heading_tiers, compute_page_margins,
+    compute_paragraph_threshold, detect_header_level, detect_line_alignment, has_dot_leaders,
 };
 use super::classify::{format_list_item, is_caption_line, is_list_item, is_monospace_font};
 use super::postprocess::clean_markdown;
@@ -506,9 +506,9 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
             if let Some(margins) = page_margins.get(&line.page) {
                 let line_x = line.items.first().map(|i| i.x).unwrap_or(0.0);
                 let indent_threshold = base_size * 3.0;
-                let has_dominant_margin = margins.left_margin_concentration > 0.5;
-                let is_indented =
-                    has_dominant_margin && line_x > margins.left + indent_threshold;
+                let has_dominant_margin =
+                    margins.left_margin_concentration > 0.5 && !margins.likely_multi_column;
+                let is_indented = has_dominant_margin && line_x > margins.left + indent_threshold;
 
                 if is_indented {
                     if !in_blockquote {
@@ -818,9 +818,9 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
             if let Some(margins) = page_margins.get(&line.page) {
                 let line_x = line.items.first().map(|i| i.x).unwrap_or(0.0);
                 let indent_threshold = base_size * 3.0;
-                let has_dominant_margin = margins.left_margin_concentration > 0.5;
-                let is_indented =
-                    has_dominant_margin && line_x > margins.left + indent_threshold;
+                let has_dominant_margin =
+                    margins.left_margin_concentration > 0.5 && !margins.likely_multi_column;
+                let is_indented = has_dominant_margin && line_x > margins.left + indent_threshold;
 
                 if is_indented {
                     if !in_blockquote {
