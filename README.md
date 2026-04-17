@@ -212,6 +212,10 @@ console.log(extractIrJson(content, "docx"));
 console.log(doclingFromBytes(content, "docx"));
 ```
 
+### WebAssembly demo
+
+There is also a browser demo for the WASM bindings in [crates/officemd_wasm/README.md](crates/officemd_wasm/README.md). It serves a small page at `http://localhost:8080/crates/officemd_wasm/www/` for drag-and-drop and sample-fixture testing.
+
 ## Supported Formats
 
 | Format | Extension | Markdown | JSON IR | Docling |

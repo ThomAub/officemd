@@ -9,6 +9,12 @@
     body { font-family: system-ui, -apple-system, sans-serif; max-width: 960px; margin: 0 auto; padding: 2rem; color: #1a1a1a; }
     h1 { margin-bottom: 0.5rem; }
     p.subtitle { color: #666; margin-bottom: 1.5rem; }
+    .sample-panel {
+      margin-bottom: 1.5rem; padding: 1rem; background: #f8f9fa;
+      border: 1px solid #e0e0e0; border-radius: 12px;
+    }
+    .sample-panel p { color: #555; margin-bottom: 0.75rem; font-size: 0.95rem; }
+    .sample-list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
     #drop-zone {
       border: 2px dashed #ccc; border-radius: 12px; padding: 3rem; text-align: center;
       cursor: pointer; transition: border-color 0.2s, background 0.2s; margin-bottom: 1.5rem;
@@ -43,6 +49,11 @@
   <h1>OfficeMD</h1>
   <p class="subtitle">Drag &amp; drop a document to extract markdown — runs entirely in your browser via WebAssembly</p>
 
+  <div class="sample-panel">
+    <p>Quick test fixtures from this repo:</p>
+    <div class="sample-list" id="sample-list"></div>
+  </div>
+
   <div id="drop-zone">
     <p>Drop a file here or click to browse</p>
     <p class="formats">Supports: .docx, .xlsx, .pptx, .pdf, .csv</p>
@@ -72,17 +83,29 @@
     const output = document.getElementById('output');
     const fileInfo = document.getElementById('file-info');
     const copyBtn = document.getElementById('copy-btn');
+    const sampleList = document.getElementById('sample-list');
 
     // Run conversion in a Web Worker so the UI stays responsive.
     const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
 
     let wasmReady = false;
     let pendingFileName = '';
+    const sampleFiles = [
+      { label: 'CSV', path: '../../../examples/data/showcase.csv', name: 'showcase.csv' },
+      { label: 'DOCX', path: '../../../examples/data/showcase.docx', name: 'showcase.docx' },
+      { label: 'XLSX', path: '../../../examples/data/showcase.xlsx', name: 'showcase.xlsx' },
+      { label: 'PPTX', path: '../../../examples/data/showcase.pptx', name: 'showcase.pptx' },
+      { label: 'PDF', path: '../../../examples/data/ocr_tagged_textbased.pdf', name: 'ocr_tagged_textbased.pdf' },
+    ];
+
+    status.textContent = 'Loading WASM module...';
 
     worker.onmessage = (e) => {
       const msg = e.data;
       if (msg.type === 'ready') {
         wasmReady = true;
+        status.textContent = 'WASM module ready';
+        status.className = 'success';
         return;
       }
       loading.style.display = 'none';
@@ -115,6 +138,43 @@
       // Transfer the buffer to the worker (zero-copy).
       // Pass fileName so the worker can use explicit format for CSV (not auto-detectable).
       worker.postMessage({ bytes, id: Date.now(), fileName: file.name }, [bytes.buffer]);
+    }
+
+    async function handleSample(sample) {
+      if (!wasmReady) {
+        status.textContent = 'WASM module is still loading, please wait...';
+        status.className = 'error';
+        return;
+      }
+
+      status.textContent = `Fetching ${sample.name}...`;
+      status.className = '';
+      const response = await fetch(sample.path);
+      if (!response.ok) {
+        throw new Error(`Could not fetch ${sample.name} (${response.status})`);
+      }
+
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      pendingFileName = sample.name;
+      loading.style.display = 'block';
+      outputWrapper.style.display = 'none';
+      worker.postMessage({ bytes, id: Date.now(), fileName: sample.name }, [bytes.buffer]);
+    }
+
+    for (const sample of sampleFiles) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = sample.label;
+      button.addEventListener('click', async () => {
+        try {
+          await handleSample(sample);
+        } catch (err) {
+          loading.style.display = 'none';
+          status.textContent = 'Error: ' + (err.message || String(err));
+          status.className = 'error';
+        }
+      });
+      sampleList.appendChild(button);
     }
 
     // Drag & drop
