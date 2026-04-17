@@ -197,10 +197,8 @@ fn load_shared_strings(package: &mut OpcPackage<'_>) -> Result<Vec<String>, Xlsx
                     in_si = true;
                     current.clear();
                 }
-                b"t" => {
-                    if in_si {
-                        in_t = true;
-                    }
+                b"t" if in_si => {
+                    in_t = true;
                 }
                 _ => {}
             },
@@ -264,12 +262,10 @@ fn load_styles(package: &mut OpcPackage<'_>) -> Result<StyleTable, XlsxError> {
                         table.custom_num_formats.insert(id, code);
                     }
                 }
-                b"xf" => {
-                    if in_cell_xfs {
-                        table
-                            .cell_xf_num_fmt_ids
-                            .push(attr_u32(e, b"numFmtId").unwrap_or(0));
-                    }
+                b"xf" if in_cell_xfs => {
+                    table
+                        .cell_xf_num_fmt_ids
+                        .push(attr_u32(e, b"numFmtId").unwrap_or(0));
                 }
                 _ => {}
             },
@@ -281,12 +277,10 @@ fn load_styles(package: &mut OpcPackage<'_>) -> Result<StyleTable, XlsxError> {
                         table.custom_num_formats.insert(id, code);
                     }
                 }
-                b"xf" => {
-                    if in_cell_xfs {
-                        table
-                            .cell_xf_num_fmt_ids
-                            .push(attr_u32(e, b"numFmtId").unwrap_or(0));
-                    }
+                b"xf" if in_cell_xfs => {
+                    table
+                        .cell_xf_num_fmt_ids
+                        .push(attr_u32(e, b"numFmtId").unwrap_or(0));
                 }
                 _ => {}
             },

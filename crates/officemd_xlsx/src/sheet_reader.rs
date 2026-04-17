@@ -80,12 +80,10 @@ pub(crate) fn collect_sheet_text_grid(
                 }
                 b"v" => in_value = true,
                 b"f" => in_formula = true,
-                b"t" => {
-                    if current_cell.as_ref().and_then(|c| c.cell_type.as_deref())
-                        == Some("inlineStr")
-                    {
-                        in_inline_text = true;
-                    }
+                b"t" if current_cell.as_ref().and_then(|c| c.cell_type.as_deref())
+                    == Some("inlineStr") =>
+                {
+                    in_inline_text = true;
                 }
                 _ => {}
             },
