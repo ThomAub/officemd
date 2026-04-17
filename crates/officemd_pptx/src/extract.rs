@@ -418,23 +418,17 @@ fn handle_start(
                 *shape_is_title = true;
             }
         }
-        b"tbl" => {
-            if include_tables {
-                *in_table = true;
-                table_rows.clear();
-            }
+        b"tbl" if include_tables => {
+            *in_table = true;
+            table_rows.clear();
         }
-        b"tr" => {
-            if *in_table && include_tables {
-                *in_row = true;
-                current_row.clear();
-            }
+        b"tr" if *in_table && include_tables => {
+            *in_row = true;
+            current_row.clear();
         }
-        b"tc" => {
-            if *in_table && include_tables {
-                *in_cell = true;
-                current_cell_paragraphs.clear();
-            }
+        b"tc" if *in_table && include_tables => {
+            *in_cell = true;
+            current_cell_paragraphs.clear();
         }
         b"p" => {
             *current_paragraph = Some(Paragraph {
@@ -524,38 +518,30 @@ fn handle_end(
                 }
             }
         }
-        b"tc" => {
-            if *in_table && *in_cell && include_tables {
-                if current_cell_paragraphs.is_empty() {
-                    current_cell_paragraphs.push(empty_paragraph());
-                }
-                let cell_paragraphs = std::mem::take(current_cell_paragraphs);
-                current_row.push(TableCell {
-                    content: cell_paragraphs,
-                });
-                *in_cell = false;
+        b"tc" if *in_table && *in_cell && include_tables => {
+            if current_cell_paragraphs.is_empty() {
+                current_cell_paragraphs.push(empty_paragraph());
             }
+            let cell_paragraphs = std::mem::take(current_cell_paragraphs);
+            current_row.push(TableCell {
+                content: cell_paragraphs,
+            });
+            *in_cell = false;
         }
-        b"tr" => {
-            if *in_table && *in_row && include_tables {
-                let row = std::mem::take(current_row);
-                table_rows.push(row);
-                *in_row = false;
-            }
+        b"tr" if *in_table && *in_row && include_tables => {
+            let row = std::mem::take(current_row);
+            table_rows.push(row);
+            *in_row = false;
         }
-        b"tbl" => {
-            if *in_table && include_tables {
-                let table = build_table(std::mem::take(table_rows));
-                blocks.push(Block::Table(table));
-                *in_table = false;
-            }
+        b"tbl" if *in_table && include_tables => {
+            let table = build_table(std::mem::take(table_rows));
+            blocks.push(Block::Table(table));
+            *in_table = false;
         }
-        b"sp" => {
-            if *shape_depth > 0 {
-                *shape_depth -= 1;
-                if *shape_depth == 0 {
-                    *shape_is_title = false;
-                }
+        b"sp" if *shape_depth > 0 => {
+            *shape_depth -= 1;
+            if *shape_depth == 0 {
+                *shape_is_title = false;
             }
         }
         _ => {}
