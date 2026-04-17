@@ -426,6 +426,10 @@ pub struct MarkdownOptions {
     pub include_links: bool,
     /// Insert page break markers (<!-- Page N -->) between pages
     pub include_page_numbers: bool,
+    /// Detect centered text and wrap with `<center>` tags
+    pub detect_alignment: bool,
+    /// Detect indented blocks and render as `>` blockquotes
+    pub detect_block_quotes: bool,
 }
 
 impl Default for MarkdownOptions {
@@ -443,6 +447,8 @@ impl Default for MarkdownOptions {
             include_images: true,
             include_links: true,
             include_page_numbers: false,
+            detect_alignment: true,
+            detect_block_quotes: true,
         }
     }
 }

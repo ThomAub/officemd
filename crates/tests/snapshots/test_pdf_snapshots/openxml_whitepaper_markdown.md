@@ -231,7 +231,7 @@ In addition to the DrawingML shape content, a cSld can contain other structural 
 
 ## Page: 12
 
-Layout Master Master Master Page
+<center>Layout Master Master Master Page</center>
 
 Transition X X X Timing X X X Headers and Footers X X X X Matching Name X Layout Type X Preserve X X Layout List X Text Style X
 
