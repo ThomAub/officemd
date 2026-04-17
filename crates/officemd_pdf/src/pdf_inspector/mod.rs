@@ -50,6 +50,31 @@ use std::collections::HashSet;
 use std::path::Path;
 use tounicode::FontCMaps;
 
+#[cfg(not(target_arch = "wasm32"))]
+type ProcessTimer = std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+type ProcessTimer = f64;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn start_timer() -> ProcessTimer {
+    std::time::Instant::now()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn start_timer() -> ProcessTimer {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn elapsed_ms(start: ProcessTimer) -> u64 {
+    start.elapsed().as_millis() as u64
+}
+
+#[cfg(target_arch = "wasm32")]
+fn elapsed_ms(start: ProcessTimer) -> u64 {
+    (js_sys::Date::now() - start).max(0.0) as u64
+}
+
 // =========================================================================
 // Result type
 // =========================================================================
@@ -192,7 +217,7 @@ pub fn process_pdf_with_options<P: AsRef<Path>>(
     path: P,
     options: PdfOptions,
 ) -> Result<PdfProcessResult, PdfError> {
-    let start = std::time::Instant::now();
+    let start = start_timer();
     validate_pdf_file(&path)?;
 
     // Load the document once — shared by detection AND extraction.
@@ -218,7 +243,7 @@ pub fn process_pdf_mem_with_options(
     buffer: &[u8],
     options: PdfOptions,
 ) -> Result<PdfProcessResult, PdfError> {
-    let start = std::time::Instant::now();
+    let start = start_timer();
     validate_pdf_bytes(buffer)?;
 
     let (doc, page_count) = load_document_from_mem(buffer)?;
@@ -310,7 +335,7 @@ fn process_document(
     doc: Document,
     page_count: u32,
     options: PdfOptions,
-    start: std::time::Instant,
+    start: ProcessTimer,
 ) -> Result<PdfProcessResult, PdfError> {
     // Step 1 — Detection (cheap: scans content streams for text operators)
     let detection = detector::detect_from_document(&doc, page_count, &options.detection)?;
@@ -325,7 +350,7 @@ fn process_document(
             pdf_type,
             markdown: None,
             page_count,
-            processing_time_ms: start.elapsed().as_millis() as u64,
+            processing_time_ms: elapsed_ms(start),
             pages_needing_ocr,
             title,
             confidence,
@@ -340,7 +365,7 @@ fn process_document(
             pdf_type,
             markdown: None,
             page_count,
-            processing_time_ms: start.elapsed().as_millis() as u64,
+            processing_time_ms: elapsed_ms(start),
             pages_needing_ocr,
             title,
             confidence,
@@ -390,7 +415,7 @@ fn process_document(
         pdf_type,
         markdown,
         page_count,
-        processing_time_ms: start.elapsed().as_millis() as u64,
+        processing_time_ms: elapsed_ms(start),
         pages_needing_ocr,
         title,
         confidence,
