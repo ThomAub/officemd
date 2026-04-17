@@ -126,7 +126,7 @@ pub fn resolve_format(content: &[u8], format: Option<&str>) -> Result<DocumentFo
 /// Returns 1 when parallelism cannot be detected or on WASM targets.
 #[must_use]
 pub fn resolve_worker_count(workers: Option<usize>) -> usize {
-    workers.filter(|v| *v > 0).unwrap_or_else(|| {
+    workers.filter(|v| *v > 0).unwrap_or({
         #[cfg(not(target_arch = "wasm32"))]
         {
             std::thread::available_parallelism().map_or(1, usize::from)
