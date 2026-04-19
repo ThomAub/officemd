@@ -1,0 +1,26 @@
+[project]
+name = "parse-bench-officemd"
+version = "0.1.0"
+description = "OfficeMD local provider for run-llama/ParseBench (PARSE task)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# `parse_bench` is assumed to be installed alongside this package (editable
+# install of the ParseBench checkout or a released wheel). It is intentionally
+# left out of `dependencies` so this package can be added to an existing
+# ParseBench environment without fighting version pins.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/parse_bench"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
