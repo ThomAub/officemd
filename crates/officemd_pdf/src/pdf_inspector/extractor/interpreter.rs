@@ -27,12 +27,27 @@ pub(crate) struct ExtractionSink {
     pub(crate) rects: Vec<PdfRect>,
 }
 
+/// One entry on the q/Q graphics-state stack. Per PDF 32000-1 §8.4.2, the
+/// saved state includes the text state (Tc, Tw, Th, TL, Tf, Tfs, Tr, Trise),
+/// so we capture the font name + size alongside the CTM so that `Q` restores
+/// the font that was active before the matching `q` — otherwise a `/Fx Tf`
+/// inside a nested graphics block leaks out and misroutes later decoding
+/// through the wrong font's ToUnicode CMap.
+#[derive(Debug, Clone)]
+pub(crate) struct GraphicsStackEntry {
+    ctm: [f32; 6],
+    fill_is_white: bool,
+    text_rendering_mode: i32,
+    current_font: String,
+    current_font_size: f32,
+}
+
 #[derive(Debug)]
 pub(crate) struct GraphicsState {
     pub(crate) ctm: [f32; 6],
     fill_is_white: bool,
     text_rendering_mode: i32,
-    stack: Vec<([f32; 6], bool, i32)>,
+    stack: Vec<GraphicsStackEntry>,
 }
 
 impl GraphicsState {
@@ -583,17 +598,21 @@ where
         trace!("{} {:?}", op.operator, op.operands);
         match op.operator.as_str() {
             "q" => {
-                graphics_state.stack.push((
-                    graphics_state.ctm,
-                    graphics_state.fill_is_white,
-                    graphics_state.text_rendering_mode,
-                ));
+                graphics_state.stack.push(GraphicsStackEntry {
+                    ctm: graphics_state.ctm,
+                    fill_is_white: graphics_state.fill_is_white,
+                    text_rendering_mode: graphics_state.text_rendering_mode,
+                    current_font: text_state.current_font.clone(),
+                    current_font_size: text_state.current_font_size,
+                });
             }
             "Q" => {
-                if let Some((saved_ctm, saved_fill, saved_tr)) = graphics_state.stack.pop() {
-                    graphics_state.ctm = saved_ctm;
-                    graphics_state.fill_is_white = saved_fill;
-                    graphics_state.text_rendering_mode = saved_tr;
+                if let Some(saved) = graphics_state.stack.pop() {
+                    graphics_state.ctm = saved.ctm;
+                    graphics_state.fill_is_white = saved.fill_is_white;
+                    graphics_state.text_rendering_mode = saved.text_rendering_mode;
+                    text_state.current_font = saved.current_font;
+                    text_state.current_font_size = saved.current_font_size;
                 }
             }
             "cm" => {
