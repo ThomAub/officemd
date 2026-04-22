@@ -270,6 +270,7 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
             let mut text = first.text.clone();
             let mut end_x = first.x + first.width;
             let x_gap_max = first.font_size * 0.75;
+            let mut prev = first;
 
             let mut j = i + 1;
             while j < group.len() {
@@ -281,7 +282,25 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
                 if (next.font_size - first.font_size).abs() > first.font_size * 0.20 {
                     break;
                 }
-                let gap = next.x - end_x;
+                let raw_gap = next.x - end_x;
+                // Some CID fonts declare only a default width (DW) with no W array, so every
+                // glyph — even narrow punctuation like an en-dash — reports the same wide
+                // advance. That inflates `end_x` and can mask real whitespace between items
+                // placed via their own `Tm` operator. Only trust that diagnosis when the
+                // overlap is a substantial fraction of the reported width; tight letter
+                // kerning produces a tiny negative gap that we still want to treat as a
+                // no-space continuation.
+                let gap = if raw_gap < 0.0 && -raw_gap > prev.width * 0.25 {
+                    let prev_chars = prev.text.chars().count().max(1) as f32;
+                    let honest_end = prev.x + prev_chars * prev.font_size * 0.5;
+                    if next.x > honest_end {
+                        next.x - honest_end
+                    } else {
+                        raw_gap
+                    }
+                } else {
+                    raw_gap
+                };
                 if gap > x_gap_max {
                     break;
                 }
@@ -294,6 +313,7 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
                 }
                 text.push_str(&next.text);
                 end_x = next.x + next.width;
+                prev = next;
                 j += 1;
             }
 
