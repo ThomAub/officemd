@@ -83,3 +83,5 @@ uv run pytest ../../crates/tests/snapshots/ --force-regen -q
 - Pre-commit hooks via prek: `cargo fmt`, `cargo clippy`, `oxlint`, `ruff`
 - Snapshot tests live in `crates/tests/rust_snapshots/` (Rust) and `crates/tests/snapshots/` (Python)
 - Fixtures in `examples/data/`
+- External benchmark integrations live in `integrations/` (e.g.
+  `integrations/parsebench/` for the run-llama/ParseBench PARSE provider)
