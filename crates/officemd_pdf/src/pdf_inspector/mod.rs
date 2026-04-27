@@ -469,12 +469,10 @@ fn compute_layout_complexity(
     items: &[types::TextItem],
     rects: &[types::PdfRect],
 ) -> LayoutComplexity {
-    // --- Collect unique pages ---
     let mut seen_pages: Vec<u32> = items.iter().map(|i| i.page).collect();
     seen_pages.sort();
     seen_pages.dedup();
 
-    // --- Tables: use the real rect-based table detector per page ---
     let mut pages_with_tables: Vec<u32> = Vec::new();
     for &page in &seen_pages {
         let (tables, _) = tables::detect_tables_from_rects(items, rects, page);

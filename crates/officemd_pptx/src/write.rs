@@ -1,7 +1,7 @@
 //! Generate PPTX files from the officemd IR.
 //!
 //! Converts an [`OoxmlDocument`] with `kind: Pptx` into a valid `.pptx` ZIP
-//! archive that opens in Microsoft PowerPoint and LibreOffice Impress.
+//! archive that opens in Microsoft `PowerPoint` and `LibreOffice Impress`.
 
 use std::fmt::Write as _;
 
@@ -12,8 +12,6 @@ const REL_TYPE_HYPERLINK: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 
 use crate::error::PptxError;
-
-// --- OOXML constants ---
 
 const CT_PRESENTATION: &str =
     "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml";
@@ -148,7 +146,10 @@ pub fn generate_pptx(doc: &OoxmlDocument) -> Result<Vec<u8>, PptxError> {
         });
 
         // Slide IDs start at 256 (PowerPoint convention)
-        slide_ids.push((255 + slide_num as u32, rid));
+        let slide_id = 255
+            + u32::try_from(slide_num)
+                .map_err(|_| PptxError::Xml("slide index does not fit in u32".to_string()))?;
+        slide_ids.push((slide_id, rid));
         rel_counter += 1;
     }
 
@@ -167,8 +168,6 @@ pub fn generate_pptx(doc: &OoxmlDocument) -> Result<Vec<u8>, PptxError> {
 
     Ok(w.finish()?)
 }
-
-// --- XML builders ---
 
 fn build_presentation_xml(slide_ids: &[(u32, String)]) -> String {
     let mut sld_id_lst = String::new();
@@ -424,8 +423,6 @@ fn write_drawingml_table(out: &mut String, table: &Table) {
         );
     }
 }
-
-// --- Minimal static templates ---
 
 const MINIMAL_SLIDE_MASTER: &str = "\
 <?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\

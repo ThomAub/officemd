@@ -26,7 +26,7 @@ pub fn markdown_from_bytes_with_options(
     let doc = extract_tables_ir_with_options(
         content,
         CsvExtractOptions {
-            include_document_properties: options.include_document_properties,
+            include_document_properties: options.include.document_properties,
             ..Default::default()
         },
     )?;
@@ -45,7 +45,10 @@ mod tests {
         let markdown = markdown_from_bytes_with_options(
             bytes,
             RenderOptions {
-                include_document_properties: true,
+                include: officemd_markdown::RenderIncludeOptions {
+                    document_properties: true,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         )

@@ -1,7 +1,4 @@
-//! Native Python bindings for OfficeMD extraction and rendering.
-
-// PyO3 `#[pyfunction]` signatures must take owned values, not references.
-#![allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+//! Native Python bindings for `OfficeMD` extraction and rendering.
 
 use officemd_core::format::{
     DocumentFormat, detect_format_from_bytes, parse_format, resolve_format, resolve_worker_count,
@@ -20,6 +17,7 @@ use officemd_core::{
 };
 use officemd_markdown::{MarkdownProfile, RenderOptions};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
 
@@ -38,6 +36,104 @@ fn parse_markdown_style(style: Option<&str>) -> Result<MarkdownProfile, String> 
 
 fn to_py_err(err: impl std::fmt::Display) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(err.to_string())
+}
+
+#[derive(Debug, Clone)]
+struct PythonRenderIncludeSettings {
+    document_properties: bool,
+    headers_footers: bool,
+    formulas: bool,
+}
+
+impl Default for PythonRenderIncludeSettings {
+    fn default() -> Self {
+        Self {
+            document_properties: false,
+            headers_footers: true,
+            formulas: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PythonRenderTableSettings {
+    first_row_as_header: bool,
+}
+
+impl Default for PythonRenderTableSettings {
+    fn default() -> Self {
+        Self {
+            first_row_as_header: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct PythonRenderSettings {
+    include: PythonRenderIncludeSettings,
+    table: PythonRenderTableSettings,
+    markdown_style: Option<String>,
+    force_extract: bool,
+}
+
+impl PythonRenderSettings {
+    fn from_kwargs(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+        let mut settings = Self::default();
+        let Some(kwargs) = kwargs else {
+            return Ok(settings);
+        };
+
+        settings.include.document_properties = bool_kwarg(
+            kwargs,
+            "include_document_properties",
+            settings.include.document_properties,
+        )?;
+        settings.table.first_row_as_header = bool_kwarg(
+            kwargs,
+            "use_first_row_as_header",
+            settings.table.first_row_as_header,
+        )?;
+        settings.include.headers_footers = bool_kwarg(
+            kwargs,
+            "include_headers_footers",
+            settings.include.headers_footers,
+        )?;
+        settings.include.formulas =
+            bool_kwarg(kwargs, "include_formulas", settings.include.formulas)?;
+        settings.force_extract = bool_kwarg(kwargs, "force_extract", settings.force_extract)?;
+        settings.markdown_style = string_kwarg(kwargs, "markdown_style")?;
+
+        Ok(settings)
+    }
+
+    fn render_options(&self) -> PyResult<RenderOptions> {
+        let markdown_profile =
+            parse_markdown_style(self.markdown_style.as_deref()).map_err(to_py_err)?;
+
+        Ok(RenderOptions {
+            include: officemd_markdown::RenderIncludeOptions {
+                document_properties: self.include.document_properties,
+                headers_footers: self.include.headers_footers,
+                formulas: self.include.formulas,
+            },
+            table: officemd_markdown::RenderTableOptions {
+                first_row_as_header: self.table.first_row_as_header,
+            },
+            markdown_profile,
+        })
+    }
+}
+
+fn bool_kwarg(kwargs: &Bound<'_, PyDict>, name: &str, default: bool) -> PyResult<bool> {
+    kwargs
+        .get_item(name)?
+        .map_or(Ok(default), |value| value.extract::<bool>())
+}
+
+fn string_kwarg(kwargs: &Bound<'_, PyDict>, name: &str) -> PyResult<Option<String>> {
+    kwargs
+        .get_item(name)?
+        .map_or(Ok(None), |value| value.extract::<Option<String>>())
 }
 
 fn create_document_from_markdown_impl(markdown: &str, format: &str) -> Result<Vec<u8>, String> {
@@ -80,8 +176,9 @@ fn markdown_from_owned_bytes_impl(
 #[pyfunction(signature = (content, format=None))]
 fn extract_ir_json(py: Python<'_>, content: &[u8], format: Option<String>) -> PyResult<String> {
     let owned_content = content.to_vec();
-    let format = resolve_format(&owned_content, format.as_deref()).map_err(to_py_err)?;
-    py.detach(move || match format {
+    let resolved_format = resolve_format(&owned_content, format.as_deref()).map_err(to_py_err)?;
+    drop(format);
+    py.detach(move || match resolved_format {
         DocumentFormat::Docx => {
             officemd_docx::extract_ir_json(&owned_content).map_err(|e| e.to_string())
         }
@@ -101,71 +198,34 @@ fn extract_ir_json(py: Python<'_>, content: &[u8], format: Option<String>) -> Py
     .map_err(to_py_err)
 }
 
-#[pyfunction(signature = (
-    content,
-    format=None,
-    include_document_properties=false,
-    use_first_row_as_header=true,
-    include_headers_footers=true,
-    include_formulas=true,
-    markdown_style=None,
-    force_extract=false,
-))]
+#[pyfunction(signature = (content, format=None, **render_settings))]
 fn markdown_from_bytes(
     py: Python<'_>,
     content: &[u8],
     format: Option<String>,
-    include_document_properties: bool,
-    use_first_row_as_header: bool,
-    include_headers_footers: bool,
-    include_formulas: bool,
-    markdown_style: Option<String>,
-    force_extract: bool,
+    render_settings: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<String> {
     let owned_content = content.to_vec();
-    let markdown_profile = parse_markdown_style(markdown_style.as_deref()).map_err(to_py_err)?;
-    let options = RenderOptions {
-        include_document_properties,
-        use_first_row_as_header,
-        include_headers_footers,
-        include_formulas,
-        markdown_profile,
-    };
+    let settings = PythonRenderSettings::from_kwargs(render_settings)?;
+    let options = settings.render_options()?;
+    let force_extract = settings.force_extract;
+
     py.detach(move || {
         markdown_from_owned_bytes_impl(&owned_content, format.as_deref(), options, force_extract)
     })
     .map_err(to_py_err)
 }
 
-#[pyfunction(signature = (
-    contents,
-    format=None,
-    workers=None,
-    include_document_properties=false,
-    use_first_row_as_header=true,
-    include_headers_footers=true,
-    include_formulas=true,
-    markdown_style=None,
-))]
+#[pyfunction(signature = (contents, format=None, workers=None, **render_settings))]
 fn markdown_from_bytes_batch(
     py: Python<'_>,
     contents: Vec<Vec<u8>>,
     format: Option<String>,
     workers: Option<usize>,
-    include_document_properties: bool,
-    use_first_row_as_header: bool,
-    include_headers_footers: bool,
-    include_formulas: bool,
-    markdown_style: Option<String>,
+    render_settings: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<Vec<String>> {
-    let markdown_profile = parse_markdown_style(markdown_style.as_deref()).map_err(to_py_err)?;
-    let options = RenderOptions {
-        include_document_properties,
-        use_first_row_as_header,
-        include_headers_footers,
-        include_formulas,
-        markdown_profile,
-    };
+    let settings = PythonRenderSettings::from_kwargs(render_settings)?;
+    let options = settings.render_options()?;
     let worker_count = resolve_worker_count(workers);
     py.detach(move || {
         if worker_count <= 1 || contents.len() <= 1 {
@@ -233,10 +293,11 @@ fn extract_sheet_names(py: Python<'_>, content: &[u8]) -> PyResult<Vec<String>> 
 #[pyfunction(signature = (content, format=None))]
 fn docling_from_bytes(py: Python<'_>, content: &[u8], format: Option<String>) -> PyResult<String> {
     let owned_content = content.to_vec();
-    let format = resolve_format(&owned_content, format.as_deref()).map_err(to_py_err)?;
+    let resolved_format = resolve_format(&owned_content, format.as_deref()).map_err(to_py_err)?;
+    drop(format);
     py.detach(move || {
         let doc =
-            match format {
+            match resolved_format {
                 DocumentFormat::Docx => {
                     officemd_docx::extract_ir(&owned_content).map_err(|e| e.to_string())?
                 }
@@ -578,19 +639,13 @@ mod tests {
         let bytes = b"name,value\nwidget,42\n";
         Python::initialize();
         let markdown = Python::attach(|py| {
-            markdown_from_bytes(
-                py,
-                bytes,
-                Some(".csv".to_string()),
-                false,
-                true,
-                true,
-                true,
-                Some("compact".to_string()),
-                false,
-            )
-        })
-        .expect("markdown");
+            let kwargs = PyDict::new(py);
+            kwargs
+                .set_item("markdown_style", "compact")
+                .expect("set markdown style");
+            markdown_from_bytes(py, bytes, Some(".csv".to_string()), Some(&kwargs))
+                .expect("markdown")
+        });
 
         assert!(markdown.contains("## Sheet: Sheet1"));
         assert!(markdown.contains("| name | value |"));
@@ -601,19 +656,13 @@ mod tests {
         let docs = vec![b"name,value\na,1\n".to_vec(), b"name,value\nb,2\n".to_vec()];
         Python::initialize();
         let markdowns = Python::attach(|py| {
-            markdown_from_bytes_batch(
-                py,
-                docs,
-                Some(".csv".to_string()),
-                Some(2),
-                false,
-                true,
-                true,
-                true,
-                Some("compact".to_string()),
-            )
-        })
-        .expect("markdown batch");
+            let kwargs = PyDict::new(py);
+            kwargs
+                .set_item("markdown_style", "compact")
+                .expect("set markdown style");
+            markdown_from_bytes_batch(py, docs, Some(".csv".to_string()), Some(2), Some(&kwargs))
+                .expect("batch markdown")
+        });
         assert_eq!(markdowns.len(), 2);
         assert!(markdowns[0].contains("| name | value |"));
         assert!(markdowns[1].contains("| name | value |"));
@@ -624,19 +673,16 @@ mod tests {
         let bytes = minimal_xlsx_with_doc_props();
         Python::initialize();
         let markdown = Python::attach(|py| {
-            markdown_from_bytes(
-                py,
-                &bytes,
-                Some(".xlsx".to_string()),
-                true,
-                true,
-                true,
-                true,
-                Some("human".to_string()),
-                false,
-            )
-        })
-        .expect("markdown");
+            let kwargs = PyDict::new(py);
+            kwargs
+                .set_item("include_document_properties", true)
+                .expect("set document properties option");
+            kwargs
+                .set_item("markdown_style", "human")
+                .expect("set markdown style");
+            markdown_from_bytes(py, &bytes, Some(".xlsx".to_string()), Some(&kwargs))
+                .expect("markdown")
+        });
 
         assert!(markdown.contains("### Document Properties"));
         assert!(markdown.contains("Quarterly Results"));

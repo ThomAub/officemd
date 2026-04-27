@@ -12,6 +12,10 @@ use crate::ir::DocumentProperties;
 /// Extract core, app, and custom document properties from a package.
 ///
 /// Returns `None` when all three maps are empty (no properties present).
+///
+/// # Errors
+///
+/// Returns an error if a package part cannot be read or parsed as XML.
 pub fn extract_properties(
     package: &mut OpcPackage<'_>,
 ) -> Result<Option<DocumentProperties>, OpcError> {
@@ -32,6 +36,10 @@ pub fn extract_properties(
 ///
 /// Namespace prefixes are stripped from tag names so the resulting keys are
 /// always local names such as `"title"` or `"creator"`.
+///
+/// # Errors
+///
+/// Returns an error if the package part cannot be read or if XML text cannot be decoded.
 pub fn extract_props_map(
     package: &mut OpcPackage<'_>,
     path: &str,
@@ -74,6 +82,10 @@ pub fn extract_props_map(
 }
 
 /// Parse a custom properties file (`docProps/custom.xml`) into a name-value map.
+///
+/// # Errors
+///
+/// Returns an error if the package part cannot be read or if XML text cannot be decoded.
 pub fn extract_custom_props_map(
     package: &mut OpcPackage<'_>,
     path: &str,

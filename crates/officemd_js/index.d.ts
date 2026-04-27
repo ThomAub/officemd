@@ -124,7 +124,7 @@ export declare function createDocumentFromMarkdown(markdown: string, format: str
 /**
  * Apply direct text replacements to named OOXML parts and optionally set the core title.
  *
- * The `patchJson` payload must match `officemd_core::OoxmlPatchRequest`.
+ * The `patch_json` payload must match `officemd_core::OoxmlPatchRequest`.
  *
  * # Errors
  *

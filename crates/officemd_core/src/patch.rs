@@ -112,6 +112,10 @@ pub struct TextReplace {
 }
 
 impl TextReplace {
+    /// Create a replacement that updates every matching text occurrence.
+    ///
+    /// The replacement defaults to exact matching and does not preserve
+    /// formatting unless configured with [`Self::with_preserve_formatting`].
     pub fn all(from: impl Into<String>, to: impl Into<String>) -> Self {
         Self {
             from: from.into(),
@@ -122,6 +126,10 @@ impl TextReplace {
         }
     }
 
+    /// Create a replacement that updates only the first matching text occurrence.
+    ///
+    /// The replacement defaults to exact matching and does not preserve
+    /// formatting unless configured with [`Self::with_preserve_formatting`].
     pub fn first(from: impl Into<String>, to: impl Into<String>) -> Self {
         Self {
             from: from.into(),
@@ -132,11 +140,15 @@ impl TextReplace {
         }
     }
 
+    /// Set the matching policy used to find occurrences of the source text.
+    #[must_use]
     pub fn with_match_policy(mut self, match_policy: MatchPolicy) -> Self {
         self.match_policy = match_policy;
         self
     }
 
+    /// Configure whether replacements should attempt to retain existing text formatting.
+    #[must_use]
     pub fn with_preserve_formatting(mut self, preserve_formatting: bool) -> Self {
         self.preserve_formatting = preserve_formatting;
         self
@@ -229,18 +241,38 @@ fn default_true() -> bool {
     true
 }
 
+/// Apply a DOCX patch and return the patched document bytes.
+///
+/// # Errors
+///
+/// Returns an error if the DOCX package cannot be read, patched, or written.
 pub fn patch_docx(content: &[u8], patch: &DocxPatch) -> Result<Vec<u8>, PatchError> {
     Ok(patch_docx_with_report(content, patch)?.content)
 }
 
+/// Apply a PPTX patch and return the patched document bytes.
+///
+/// # Errors
+///
+/// Returns an error if the PPTX package cannot be read, patched, or written.
 pub fn patch_pptx(content: &[u8], patch: &PptxPatch) -> Result<Vec<u8>, PatchError> {
     Ok(patch_pptx_with_report(content, patch)?.content)
 }
 
+/// Apply an XLSX patch and return the patched workbook bytes.
+///
+/// # Errors
+///
+/// Returns an error if the XLSX package cannot be read, patched, or written.
 pub fn patch_xlsx(content: &[u8], patch: &XlsxPatch) -> Result<Vec<u8>, PatchError> {
     Ok(patch_xlsx_with_report(content, patch)?.content)
 }
 
+/// Apply a DOCX patch and return the patched bytes with a patch report.
+///
+/// # Errors
+///
+/// Returns an error if the DOCX package cannot be read, patched, or written.
 pub fn patch_docx_with_report(
     content: &[u8],
     patch: &DocxPatch,
@@ -254,6 +286,11 @@ pub fn patch_docx_with_report(
     })
 }
 
+/// Apply a PPTX patch and return the patched bytes with a patch report.
+///
+/// # Errors
+///
+/// Returns an error if the PPTX package cannot be read, patched, or written.
 pub fn patch_pptx_with_report(
     content: &[u8],
     patch: &PptxPatch,
@@ -267,6 +304,11 @@ pub fn patch_pptx_with_report(
     })
 }
 
+/// Apply an XLSX patch and return the patched bytes with a patch report.
+///
+/// # Errors
+///
+/// Returns an error if the XLSX package cannot be read, patched, or written.
 pub fn patch_xlsx_with_report(
     content: &[u8],
     patch: &XlsxPatch,
@@ -280,6 +322,11 @@ pub fn patch_xlsx_with_report(
     })
 }
 
+/// Apply a DOCX patch to multiple documents and return patched bytes.
+///
+/// # Errors
+///
+/// Returns an error if any DOCX package cannot be read, patched, or written.
 pub fn patch_docx_batch(
     contents: Vec<Vec<u8>>,
     patch: &DocxPatch,
@@ -291,6 +338,11 @@ pub fn patch_docx_batch(
         .collect())
 }
 
+/// Apply a PPTX patch to multiple presentations and return patched bytes.
+///
+/// # Errors
+///
+/// Returns an error if any PPTX package cannot be read, patched, or written.
 pub fn patch_pptx_batch(
     contents: Vec<Vec<u8>>,
     patch: &PptxPatch,
@@ -302,6 +354,11 @@ pub fn patch_pptx_batch(
         .collect())
 }
 
+/// Apply an XLSX patch to multiple workbooks and return patched bytes.
+///
+/// # Errors
+///
+/// Returns an error if any XLSX package cannot be read, patched, or written.
 pub fn patch_xlsx_batch(
     contents: Vec<Vec<u8>>,
     patch: &XlsxPatch,
@@ -313,6 +370,11 @@ pub fn patch_xlsx_batch(
         .collect())
 }
 
+/// Apply a DOCX patch to multiple documents and return patch reports.
+///
+/// # Errors
+///
+/// Returns an error if any DOCX package cannot be read, patched, or written.
 pub fn patch_docx_batch_with_report(
     contents: Vec<Vec<u8>>,
     patch: &DocxPatch,
@@ -323,6 +385,11 @@ pub fn patch_docx_batch_with_report(
     })
 }
 
+/// Apply a PPTX patch to multiple presentations and return patch reports.
+///
+/// # Errors
+///
+/// Returns an error if any PPTX package cannot be read, patched, or written.
 pub fn patch_pptx_batch_with_report(
     contents: Vec<Vec<u8>>,
     patch: &PptxPatch,
@@ -333,6 +400,11 @@ pub fn patch_pptx_batch_with_report(
     })
 }
 
+/// Apply an XLSX patch to multiple workbooks and return patch reports.
+///
+/// # Errors
+///
+/// Returns an error if any XLSX package cannot be read, patched, or written.
 pub fn patch_xlsx_batch_with_report(
     contents: Vec<Vec<u8>>,
     patch: &XlsxPatch,
@@ -343,6 +415,11 @@ pub fn patch_xlsx_batch_with_report(
     })
 }
 
+/// Apply a low-level OOXML patch request and return patched package bytes.
+///
+/// # Errors
+///
+/// Returns an error if the package cannot be read, patched, or written.
 pub fn apply_ooxml_patch(
     content: &[u8],
     request: &OoxmlPatchRequest,
@@ -353,26 +430,51 @@ pub fn apply_ooxml_patch(
     write_parts(&parts)
 }
 
+/// Parse a low-level OOXML patch request from JSON and return patched package bytes.
+///
+/// # Errors
+///
+/// Returns an error if `request_json` is invalid or if the package cannot be read, patched, or written.
 pub fn apply_ooxml_patch_json(content: &[u8], request_json: &str) -> Result<Vec<u8>, PatchError> {
     let request: OoxmlPatchRequest = serde_json::from_str(request_json)?;
     apply_ooxml_patch(content, &request)
 }
 
+/// Parse a DOCX patch from JSON and return patched document bytes.
+///
+/// # Errors
+///
+/// Returns an error if `patch_json` is invalid or if the DOCX package cannot be read, patched, or written.
 pub fn patch_docx_json(content: &[u8], patch_json: &str) -> Result<Vec<u8>, PatchError> {
     let patch: DocxPatch = serde_json::from_str(patch_json)?;
     patch_docx(content, &patch)
 }
 
+/// Parse a PPTX patch from JSON and return patched presentation bytes.
+///
+/// # Errors
+///
+/// Returns an error if `patch_json` is invalid or if the PPTX package cannot be read, patched, or written.
 pub fn patch_pptx_json(content: &[u8], patch_json: &str) -> Result<Vec<u8>, PatchError> {
     let patch: PptxPatch = serde_json::from_str(patch_json)?;
     patch_pptx(content, &patch)
 }
 
+/// Parse an XLSX patch from JSON and return patched workbook bytes.
+///
+/// # Errors
+///
+/// Returns an error if `patch_json` is invalid or if the XLSX package cannot be read, patched, or written.
 pub fn patch_xlsx_json(content: &[u8], patch_json: &str) -> Result<Vec<u8>, PatchError> {
     let patch: XlsxPatch = serde_json::from_str(patch_json)?;
     patch_xlsx(content, &patch)
 }
 
+/// Parse a DOCX patch from JSON, apply it to multiple documents, and return patched bytes.
+///
+/// # Errors
+///
+/// Returns an error if `patch_json` is invalid or if any DOCX package cannot be read, patched, or written.
 pub fn patch_docx_batch_json(
     contents: Vec<Vec<u8>>,
     patch_json: &str,
@@ -382,6 +484,11 @@ pub fn patch_docx_batch_json(
     patch_docx_batch(contents, &patch, workers)
 }
 
+/// Parse a PPTX patch from JSON, apply it to multiple presentations, and return patched bytes.
+///
+/// # Errors
+///
+/// Returns an error if `patch_json` is invalid or if any PPTX package cannot be read, patched, or written.
 pub fn patch_pptx_batch_json(
     contents: Vec<Vec<u8>>,
     patch_json: &str,
@@ -391,6 +498,11 @@ pub fn patch_pptx_batch_json(
     patch_pptx_batch(contents, &patch, workers)
 }
 
+/// Parse an XLSX patch from JSON, apply it to multiple workbooks, and return patched bytes.
+///
+/// # Errors
+///
+/// Returns an error if `patch_json` is invalid or if any XLSX package cannot be read, patched, or written.
 pub fn patch_xlsx_batch_json(
     contents: Vec<Vec<u8>>,
     patch_json: &str,
@@ -400,6 +512,11 @@ pub fn patch_xlsx_batch_json(
     patch_xlsx_batch(contents, &patch, workers)
 }
 
+/// Parse a DOCX patch from JSON, apply it to multiple documents, and return patch reports.
+///
+/// # Errors
+///
+/// Returns an error if `patch_json` is invalid or if any DOCX package cannot be read, patched, or written.
 pub fn patch_docx_batch_json_with_report(
     contents: Vec<Vec<u8>>,
     patch_json: &str,
@@ -409,6 +526,11 @@ pub fn patch_docx_batch_json_with_report(
     patch_docx_batch_with_report(contents, &patch, workers)
 }
 
+/// Parse a PPTX patch from JSON, apply it to multiple presentations, and return patch reports.
+///
+/// # Errors
+///
+/// Returns an error if `patch_json` is invalid or if any PPTX package cannot be read, patched, or written.
 pub fn patch_pptx_batch_json_with_report(
     contents: Vec<Vec<u8>>,
     patch_json: &str,
@@ -418,6 +540,11 @@ pub fn patch_pptx_batch_json_with_report(
     patch_pptx_batch_with_report(contents, &patch, workers)
 }
 
+/// Parse an XLSX patch from JSON, apply it to multiple workbooks, and return patch reports.
+///
+/// # Errors
+///
+/// Returns an error if `patch_json` is invalid or if any XLSX package cannot be read, patched, or written.
 pub fn patch_xlsx_batch_json_with_report(
     contents: Vec<Vec<u8>>,
     patch_json: &str,
@@ -678,7 +805,7 @@ fn apply_preserve_formatting_replace_to_parts(
         };
         let original = String::from_utf8_lossy(data).into_owned();
         let (updated, replacements_applied) =
-            rewrite_xml_text_containers_preserving_runs(&original, container_re, node_re, replace)?;
+            rewrite_xml_text_containers_preserving_runs(&original, container_re, node_re, replace);
         if replacements_applied > 0 {
             *data = updated.into_bytes();
             report.parts_modified += 1;
@@ -761,7 +888,7 @@ fn build_replace_regex(replace: &TextReplace) -> Result<Regex, PatchError> {
     let pattern = match replace.match_policy {
         MatchPolicy::Exact | MatchPolicy::CaseInsensitive => escaped,
         MatchPolicy::WholeWord | MatchPolicy::WholeWordCaseInsensitive => {
-            format!(r"\b{}\b", escaped)
+            format!(r"\b{escaped}\b")
         }
     };
     let mut builder = RegexBuilder::new(&pattern);
@@ -801,25 +928,25 @@ fn find_match_ranges(text: &str, replace: &TextReplace) -> Result<Vec<(usize, us
 static XML_TEXT_NODE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?s)<t(?:\s+xml:space="preserve")?>(.*?)</t>"#).unwrap());
 static WORD_TEXT_NODE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?s)<w:t(?:\s+[^>]*)?>(.*?)</w:t>"#).unwrap());
+    LazyLock::new(|| Regex::new(r"(?s)<w:t(?:\s+[^>]*)?>(.*?)</w:t>").unwrap());
 static WORD_PARAGRAPH_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?s)<w:p(?:\s+[^>]*)?>.*?</w:p>"#).unwrap());
+    LazyLock::new(|| Regex::new(r"(?s)<w:p(?:\s+[^>]*)?>.*?</w:p>").unwrap());
 static DRAWING_TEXT_NODE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?s)<a:t(?:\s+[^>]*)?>(.*?)</a:t>"#).unwrap());
+    LazyLock::new(|| Regex::new(r"(?s)<a:t(?:\s+[^>]*)?>(.*?)</a:t>").unwrap());
 static DRAWING_PARAGRAPH_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?s)<a:p(?:\s+[^>]*)?>.*?</a:p>"#).unwrap());
+    LazyLock::new(|| Regex::new(r"(?s)<a:p(?:\s+[^>]*)?>.*?</a:p>").unwrap());
 static PPT_COMMENT_TEXT_NODE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?s)<p:text(?:\s+[^>]*)?>(.*?)</p:text>"#).unwrap());
+    LazyLock::new(|| Regex::new(r"(?s)<p:text(?:\s+[^>]*)?>(.*?)</p:text>").unwrap());
 static PPT_COMMENT_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?s)<p:cm(?:\s+[^>]*)?>.*?</p:cm>"#).unwrap());
+    LazyLock::new(|| Regex::new(r"(?s)<p:cm(?:\s+[^>]*)?>.*?</p:cm>").unwrap());
 static XLSX_SHARED_STRING_ITEM_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?s)<si(?:\s+[^>]*)?>.*?</si>"#).unwrap());
+    LazyLock::new(|| Regex::new(r"(?s)<si(?:\s+[^>]*)?>.*?</si>").unwrap());
 static XLSX_INLINE_STRING_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?s)<is(?:\s+[^>]*)?>.*?</is>"#).unwrap());
+    LazyLock::new(|| Regex::new(r"(?s)<is(?:\s+[^>]*)?>.*?</is>").unwrap());
 static XLSX_COMMENT_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?s)<comment(?:\s+[^>]*)?>.*?</comment>"#).unwrap());
+    LazyLock::new(|| Regex::new(r"(?s)<comment(?:\s+[^>]*)?>.*?</comment>").unwrap());
 static XLSX_THREADED_COMMENT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?s)<threadedComment(?:\s+[^>]*)?>.*?</threadedComment>"#).unwrap()
+    Regex::new(r"(?s)<threadedComment(?:\s+[^>]*)?>.*?</threadedComment>").unwrap()
 });
 static FORMULA_NODE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)<f(?:\s[^>]*)?>(.*?)</f>").unwrap());
@@ -834,11 +961,17 @@ static QUOTED_SHEET_REF_RE: LazyLock<Regex> =
 static UNQUOTED_SHEET_REF_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b([A-Za-z_][A-Za-z0-9_\.]*)!").unwrap());
 
+fn has_xml_extension(name: &str) -> bool {
+    std::path::Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("xml"))
+}
+
 fn docx_scope_matches(name: &str, scope: DocxTextScope) -> bool {
     match scope {
         DocxTextScope::Body => name == "word/document.xml",
-        DocxTextScope::Headers => name.starts_with("word/header") && name.ends_with(".xml"),
-        DocxTextScope::Footers => name.starts_with("word/footer") && name.ends_with(".xml"),
+        DocxTextScope::Headers => name.starts_with("word/header") && has_xml_extension(name),
+        DocxTextScope::Footers => name.starts_with("word/footer") && has_xml_extension(name),
         DocxTextScope::Comments => name == "word/comments.xml",
         DocxTextScope::Footnotes => name == "word/footnotes.xml",
         DocxTextScope::Endnotes => name == "word/endnotes.xml",
@@ -880,13 +1013,13 @@ fn docx_scope_targets(part_names: &[String], scope: DocxTextScope) -> Vec<String
 fn pptx_scope_matches(name: &str, scope: PptxTextScope) -> bool {
     match scope {
         PptxTextScope::SlideTitles | PptxTextScope::SlideBody => {
-            name.starts_with("ppt/slides/slide") && name.ends_with(".xml")
+            name.starts_with("ppt/slides/slide") && has_xml_extension(name)
         }
         PptxTextScope::Notes => {
-            name.starts_with("ppt/notesSlides/notesSlide") && name.ends_with(".xml")
+            name.starts_with("ppt/notesSlides/notesSlide") && has_xml_extension(name)
         }
         PptxTextScope::Comments => {
-            name.starts_with("ppt/comments/comment") && name.ends_with(".xml")
+            name.starts_with("ppt/comments/comment") && has_xml_extension(name)
         }
         PptxTextScope::CommentAuthors => name == "ppt/commentAuthors.xml",
         PptxTextScope::MetadataCoreTitle | PptxTextScope::MetadataCore => {
@@ -925,7 +1058,7 @@ fn pptx_scope_targets(part_names: &[String], scope: PptxTextScope) -> Vec<String
 fn xlsx_inline_string_targets(part_names: &[String]) -> Vec<String> {
     part_names
         .iter()
-        .filter(|name| name.starts_with("xl/worksheets/sheet") && name.ends_with(".xml"))
+        .filter(|name| name.starts_with("xl/worksheets/sheet") && has_xml_extension(name))
         .cloned()
         .collect()
 }
@@ -935,11 +1068,11 @@ fn xlsx_scope_targets(part_names: &[String], scope: XlsxTextScope) -> Vec<String
     for name in part_names {
         let matches = match scope {
             XlsxTextScope::Comments => {
-                name.starts_with("xl/comments") && name.ends_with(".xml")
-                    || (name.starts_with("xl/threadedComments/") && name.ends_with(".xml"))
+                name.starts_with("xl/comments") && has_xml_extension(name)
+                    || (name.starts_with("xl/threadedComments/") && has_xml_extension(name))
             }
             XlsxTextScope::CommentAuthors => {
-                name.starts_with("xl/persons/") && name.ends_with(".xml")
+                name.starts_with("xl/persons/") && has_xml_extension(name)
             }
             XlsxTextScope::MetadataCoreTitle | XlsxTextScope::MetadataCore => {
                 name == "docProps/core.xml"
@@ -964,8 +1097,8 @@ fn xlsx_formula_targets(part_names: &[String]) -> Vec<String> {
     part_names
         .iter()
         .filter(|name| {
-            (name.starts_with("xl/worksheets/sheet") && name.ends_with(".xml"))
-                || (name.starts_with("xl/charts/chart") && name.ends_with(".xml"))
+            (name.starts_with("xl/worksheets/sheet") && has_xml_extension(name))
+                || (name.starts_with("xl/charts/chart") && has_xml_extension(name))
         })
         .cloned()
         .collect()
@@ -1272,7 +1405,7 @@ fn apply_xlsx_sheet_name_replace(
         .get_mut("xl/workbook.xml")
         .ok_or_else(|| PatchError::MissingPart("xl/workbook.xml".to_string()))?;
     let original = String::from_utf8_lossy(workbook).into_owned();
-    let (updated, replacements_applied) = replace_sheet_name_attrs(&original, replace)?;
+    let (updated, replacements_applied) = replace_sheet_name_attrs(&original, replace);
     if replacements_applied == 0 {
         return Err(PatchError::TextNotFound {
             part: "xl/workbook.xml".to_string(),
@@ -1285,11 +1418,7 @@ fn apply_xlsx_sheet_name_replace(
     Ok(())
 }
 
-fn rename_exact_sheet_name_attr(
-    xml: &str,
-    from: &str,
-    to: &str,
-) -> Result<(String, usize), PatchError> {
+fn rename_exact_sheet_name_attr(xml: &str, from: &str, to: &str) -> (String, usize) {
     let mut replacements_applied = 0;
     let updated = SHEET_NAME_ATTR_RE.replace_all(xml, |caps: &regex::Captures<'_>| {
         let before = caps.get(1).expect("before").as_str();
@@ -1303,7 +1432,7 @@ fn rename_exact_sheet_name_attr(
             caps.get(0).expect("whole").as_str().to_string()
         }
     });
-    Ok((updated.into_owned(), replacements_applied))
+    (updated.into_owned(), replacements_applied)
 }
 
 fn apply_xlsx_sheet_rename(
@@ -1317,7 +1446,7 @@ fn apply_xlsx_sheet_rename(
         .ok_or_else(|| PatchError::MissingPart("xl/workbook.xml".to_string()))?;
     let original = String::from_utf8_lossy(workbook).into_owned();
     let (updated, replacements_applied) =
-        rename_exact_sheet_name_attr(&original, &rename.from, &rename.to)?;
+        rename_exact_sheet_name_attr(&original, &rename.from, &rename.to);
     if replacements_applied == 0 {
         return Err(PatchError::TextNotFound {
             part: "xl/workbook.xml".to_string(),
@@ -1336,7 +1465,7 @@ fn apply_xlsx_sheet_rename(
         report.parts_scanned += 1;
         let original = String::from_utf8_lossy(workbook).into_owned();
         let (updated, replacements_applied) =
-            rewrite_defined_name_refs(&original, &rename.from, &rename.to)?;
+            rewrite_defined_name_refs(&original, &rename.from, &rename.to);
         if replacements_applied > 0 {
             *workbook = updated.into_bytes();
             report.parts_modified += 1;
@@ -1347,7 +1476,7 @@ fn apply_xlsx_sheet_rename(
     let part_names: Vec<String> = parts.keys().cloned().collect();
     let targets = xlsx_formula_targets(&part_names);
     if !targets.is_empty() {
-        apply_sheet_ref_rewrite_in_parts(parts, &targets, &rename.from, &rename.to, report)?;
+        apply_sheet_ref_rewrite_in_parts(parts, &targets, &rename.from, &rename.to, report);
     }
     Ok(())
 }
@@ -1358,8 +1487,7 @@ fn apply_sheet_ref_rewrite_in_parts(
     from: &str,
     to: &str,
     report: &mut PatchReport,
-) -> Result<(), PatchError> {
-    let mut matched = false;
+) {
     for part in target_parts {
         report.parts_scanned += 1;
         let Some(data) = parts.get_mut(part) else {
@@ -1369,21 +1497,18 @@ fn apply_sheet_ref_rewrite_in_parts(
         let (updated, replacements_applied) = if part.starts_with("xl/charts/") {
             rewrite_xml_text_nodes(&original, &CHART_FORMULA_NODE_RE, |text| {
                 rewrite_formula_sheet_refs(&text, from, to)
-            })?
+            })
         } else {
             rewrite_xml_text_nodes(&original, &FORMULA_NODE_RE, |text| {
                 rewrite_formula_sheet_refs(&text, from, to)
-            })?
+            })
         };
         if replacements_applied > 0 {
             *data = updated.into_bytes();
             report.parts_modified += 1;
             report.replacements_applied += replacements_applied;
-            matched = true;
         }
     }
-    let _ = matched;
-    Ok(())
 }
 
 fn apply_replace_to_xml_text_nodes_named_part(
@@ -1399,8 +1524,11 @@ fn apply_replace_to_xml_text_nodes_named_part(
         .ok_or_else(|| PatchError::MissingPart(part.to_string()))?;
     let original = String::from_utf8_lossy(data).into_owned();
     let (updated, replacements_applied) = rewrite_xml_text_nodes(&original, node_re, |text| {
-        apply_replace_to_text(&text, replace)
-    })?;
+        match apply_replace_to_text(&text, replace) {
+            Ok(rewritten) => rewritten,
+            Err(_) => (text, 0),
+        }
+    });
     if replacements_applied == 0 {
         return Err(PatchError::TextNotFound {
             part: part.to_string(),
@@ -1428,8 +1556,11 @@ fn apply_replace_to_xml_text_nodes_in_parts(
         };
         let original = String::from_utf8_lossy(data).into_owned();
         let (updated, replacements_applied) = rewrite_xml_text_nodes(&original, node_re, |text| {
-            apply_replace_to_text(&text, replace)
-        })?;
+            match apply_replace_to_text(&text, replace) {
+                Ok(rewritten) => rewritten,
+                Err(_) => (text, 0),
+            }
+        });
         if replacements_applied > 0 {
             *data = updated.into_bytes();
             report.parts_modified += 1;
@@ -1448,28 +1579,20 @@ fn apply_replace_to_xml_text_nodes_in_parts(
     }
 }
 
-fn rewrite_xml_text_nodes<F>(
-    xml: &str,
-    node_re: &Regex,
-    mut rewrite: F,
-) -> Result<(String, usize), PatchError>
+fn rewrite_xml_text_nodes<F>(xml: &str, node_re: &Regex, mut rewrite: F) -> (String, usize)
 where
-    F: FnMut(String) -> Result<(String, usize), PatchError>,
+    F: FnMut(String) -> (String, usize),
 {
     let mut replacements_applied = 0;
     let updated = node_re.replace_all(xml, |caps: &regex::Captures<'_>| {
         let whole = caps.get(0).expect("whole match").as_str();
         let inner = caps.get(1).expect("inner match").as_str();
         let decoded = xml_unescape(inner);
-        match rewrite(decoded) {
-            Ok((rewritten, applied)) => {
-                replacements_applied += applied;
-                whole.replacen(inner, &xml_escape(&rewritten), 1)
-            }
-            Err(_) => whole.to_string(),
-        }
+        let (rewritten, applied) = rewrite(decoded);
+        replacements_applied += applied;
+        whole.replacen(inner, &xml_escape(&rewritten), 1)
     });
-    Ok((updated.into_owned(), replacements_applied))
+    (updated.into_owned(), replacements_applied)
 }
 
 #[derive(Debug, Clone)]
@@ -1484,7 +1607,7 @@ fn rewrite_xml_text_containers_preserving_runs(
     container_re: &Regex,
     node_re: &Regex,
     replace: &TextReplace,
-) -> Result<(String, usize), PatchError> {
+) -> (String, usize) {
     let mut replacements_applied = 0;
     let updated = container_re.replace_all(xml, |caps: &regex::Captures<'_>| {
         let whole = caps.get(0).expect("whole match").as_str();
@@ -1499,7 +1622,7 @@ fn rewrite_xml_text_containers_preserving_runs(
             Err(_) => whole.to_string(),
         }
     });
-    Ok((updated.into_owned(), replacements_applied))
+    (updated.into_owned(), replacements_applied)
 }
 
 fn rewrite_xml_text_nodes_preserving_runs(
@@ -1579,10 +1702,7 @@ fn rewrite_xml_text_nodes_preserving_runs(
     Ok((rewritten, matches.len()))
 }
 
-fn replace_sheet_name_attrs(
-    xml: &str,
-    replace: &TextReplace,
-) -> Result<(String, usize), PatchError> {
+fn replace_sheet_name_attrs(xml: &str, replace: &TextReplace) -> (String, usize) {
     let mut replacements_applied = 0;
     let updated = SHEET_NAME_ATTR_RE.replace_all(xml, |caps: &regex::Captures<'_>| {
         let before = caps.get(1).expect("before").as_str();
@@ -1597,24 +1717,16 @@ fn replace_sheet_name_attrs(
             _ => caps.get(0).expect("whole").as_str().to_string(),
         }
     });
-    Ok((updated.into_owned(), replacements_applied))
+    (updated.into_owned(), replacements_applied)
 }
 
-fn rewrite_defined_name_refs(
-    xml: &str,
-    from: &str,
-    to: &str,
-) -> Result<(String, usize), PatchError> {
+fn rewrite_defined_name_refs(xml: &str, from: &str, to: &str) -> (String, usize) {
     rewrite_xml_text_nodes(xml, &DEFINED_NAME_RE, |text| {
         rewrite_formula_sheet_refs(&text, from, to)
     })
 }
 
-fn rewrite_formula_sheet_refs(
-    formula: &str,
-    from: &str,
-    to: &str,
-) -> Result<(String, usize), PatchError> {
+fn rewrite_formula_sheet_refs(formula: &str, from: &str, to: &str) -> (String, usize) {
     let mut replacements_applied = 0;
     let mut updated = QUOTED_SHEET_REF_RE
         .replace_all(formula, |caps: &regex::Captures<'_>| {
@@ -1641,7 +1753,7 @@ fn rewrite_formula_sheet_refs(
         })
         .into_owned();
 
-    Ok((updated, replacements_applied))
+    (updated, replacements_applied)
 }
 
 fn excel_sheet_ref(name: &str) -> String {

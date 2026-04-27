@@ -19,15 +19,33 @@ use quick_xml::events::Event;
 /// XLSX extraction options. Defaults keep current behavior.
 #[derive(Debug, Clone, Default)]
 pub struct XlsxExtractOptions {
+    pub text: XlsxTextOptions,
+    pub sheet_filter: Option<SheetFilter>,
+    pub include: XlsxIncludeOptions,
+    pub trim: XlsxTrimOptions,
+}
+
+/// Text extraction behavior for XLSX content.
+#[derive(Debug, Clone, Default)]
+pub struct XlsxTextOptions {
     pub style_aware_values: bool,
     /// Kept for backward compatibility; extraction uses the in-house XML reader in all modes.
     pub streaming_rows: bool,
-    pub sheet_filter: Option<SheetFilter>,
-    pub include_document_properties: bool,
+}
+
+/// Optional XLSX content to include in the extracted IR.
+#[derive(Debug, Clone, Default)]
+pub struct XlsxIncludeOptions {
+    pub document_properties: bool,
+}
+
+/// XLSX grid trimming behavior.
+#[derive(Debug, Clone, Default)]
+pub struct XlsxTrimOptions {
     /// Strip trailing all-empty rows (from the bottom) and trailing all-empty
     /// columns (from the right) of each sheet grid before building the IR.
     /// Useful for LLM-compact output to avoid wasting tokens on empty cells.
-    pub trim_empty: bool,
+    pub empty_edges: bool,
 }
 
 /// Optional sheet selection applied during extraction.
@@ -38,6 +56,9 @@ pub struct SheetFilter {
 }
 
 impl SheetFilter {
+    /// Return whether a 1-based sheet index and sheet name are selected by this filter.
+    ///
+    /// An empty filter matches every sheet.
     #[must_use]
     pub fn matches(&self, idx1: usize, name: &str) -> bool {
         if self.names.is_empty() && self.indices_1_based.is_empty() {
@@ -46,6 +67,10 @@ impl SheetFilter {
         self.indices_1_based.contains(&idx1) || self.names.contains(name)
     }
 
+    /// Return the 0-based indices of sheets selected by this filter.
+    ///
+    /// The input contains `(sheet_name, relationship_id)` pairs in workbook order.
+    /// An empty filter returns every sheet index.
     #[must_use]
     pub fn selected_indices(&self, sheets: &[(String, String)]) -> Vec<usize> {
         if self.names.is_empty() && self.indices_1_based.is_empty() {
@@ -84,7 +109,7 @@ pub fn extract_tables_ir_with_options(
     // `streaming_rows` is retained for backward-compatible options surface;
     // both modes use the same in-house sheet reader.
     let style_context = StyleContext::load(&mut package)?;
-    let render_mode = if options.style_aware_values {
+    let render_mode = if options.text.style_aware_values {
         ValueRenderMode::StyleAware
     } else {
         ValueRenderMode::LegacyDefault
@@ -102,7 +127,7 @@ pub fn extract_tables_ir_with_options(
         let sheet_name = name.clone();
         let mut grid = collect_sheet_text_grid(&mut package, path, &style_context, render_mode)?;
 
-        if options.trim_empty {
+        if options.trim.empty_edges {
             trim_grid(&mut grid);
         }
 
@@ -147,7 +172,7 @@ pub fn extract_tables_ir_with_options(
         });
     }
 
-    let properties = if options.include_document_properties {
+    let properties = if options.include.document_properties {
         Some(DocumentProperties {
             core: extract_props_map(&mut package, "docProps/core.xml")?,
             app: extract_props_map(&mut package, "docProps/app.xml")?,
@@ -172,7 +197,7 @@ fn trim_grid(grid: &mut SheetTextGrid) {
     while grid
         .rows
         .last()
-        .is_some_and(|r| r.iter().all(|c| c.is_empty()))
+        .is_some_and(|r| r.iter().all(String::is_empty))
     {
         grid.rows.pop();
     }
@@ -248,11 +273,15 @@ pub fn extract_tables_ir_json_with_options(
     let doc = extract_tables_ir_with_options(
         content,
         &XlsxExtractOptions {
-            style_aware_values,
-            streaming_rows,
+            text: XlsxTextOptions {
+                style_aware_values,
+                streaming_rows,
+            },
             sheet_filter: None,
-            include_document_properties,
-            trim_empty: false,
+            include: XlsxIncludeOptions {
+                document_properties: include_document_properties,
+            },
+            trim: XlsxTrimOptions { empty_edges: false },
         },
     )?;
     serde_json::to_string(&doc).map_err(|e| XlsxError::Xml(e.to_string()))

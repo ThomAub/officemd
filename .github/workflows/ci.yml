@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ['**']
+    tags: ["**"]
   pull_request: {}
 
 env:
@@ -33,7 +33,7 @@ jobs:
       - name: rustfmt
         run: cargo fmt --all --check
       - name: clippy
-        run: cargo clippy --workspace --all-targets --exclude officemd_pdf -- -D warnings
+        run: cargo clippy --workspace --exclude officemd_pdf --all-targets -- --force-warn clippy::pedantic -D warnings
       - name: oxlint
         working-directory: crates/officemd_js
         run: npx oxlint .
@@ -41,14 +41,11 @@ jobs:
         working-directory: crates/officemd_js
         run: npx oxfmt --check .
       - name: ruff check
-        working-directory: crates/officemd_python
-        run: uv run ruff check .
+        run: uv run --project crates/officemd_python ruff check crates/officemd_python examples/python
       - name: ruff format
-        working-directory: crates/officemd_python
-        run: uv run ruff format --check .
+        run: uv run --project crates/officemd_python ruff format --check crates/officemd_python examples/python
       - name: ty check
-        working-directory: crates/officemd_python
-        run: uv run ty check python
+        run: uv run --project crates/officemd_python ty check crates/officemd_python/python examples/python
 
   test:
     name: test (${{ matrix.os }})

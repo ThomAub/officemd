@@ -27,6 +27,7 @@
   },
   "files": [
     "index.js",
+    "index.cjs",
     "index.d.ts",
     "cli.js",
     "lib",
@@ -37,8 +38,8 @@
   "main": "index.js",
   "types": "index.d.ts",
   "scripts": {
-    "build": "napi build --platform --release",
-    "build:debug": "napi build --platform",
+    "build": "napi build --platform --release && node scripts/write-esm-wrapper.mjs",
+    "build:debug": "napi build --platform && node scripts/write-esm-wrapper.mjs",
     "artifacts": "napi artifacts",
     "prepublishOnly": "napi prepublish -t npm",
     "test:cli": "node --test tests/cli-selection.test.mjs",

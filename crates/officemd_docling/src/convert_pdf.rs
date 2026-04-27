@@ -5,6 +5,7 @@ use officemd_core::ir::OoxmlDocument;
 use crate::builder::DoclingDocumentBuilder;
 use crate::model::{ContentLayer, DocItemLabel, PageItem, RefItem, Size, TextItem};
 
+/// Convert PDF-specific IR content into Docling document structures.
 pub fn convert_pdf(doc: &OoxmlDocument, builder: &mut DoclingDocumentBuilder) {
     let Some(pdf) = &doc.pdf else {
         return;

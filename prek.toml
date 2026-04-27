@@ -5,25 +5,27 @@
 [[repos]]
 repo = "builtin"
 hooks = [
-    { id = "trailing-whitespace" },
-    { id = "end-of-file-fixer" },
-    { id = "check-added-large-files", args = ["--maxkb=500"] },
-    { id = "check-merge-conflict" },
+  { id = "trailing-whitespace" },
+  { id = "end-of-file-fixer" },
+  { id = "check-added-large-files", args = [
+    "--maxkb=500",
+  ] },
+  { id = "check-merge-conflict" },
 ]
 
 [[repos]]
 repo = "local"
 hooks = [
-    # -- Rust --
-    { id = "cargo-fmt", name = "cargo fmt", language = "system", entry = "cargo fmt --all -- --check", files = "\\.rs$", pass_filenames = false },
-    { id = "clippy", name = "cargo clippy", language = "system", entry = "cargo clippy --workspace --all-targets --exclude officemd_pdf -- -D warnings", files = "\\.rs$", pass_filenames = false },
+  # -- Rust --
+  { id = "cargo-fmt", name = "cargo fmt", language = "system", entry = "cargo fmt --all -- --check", files = "\\.rs$", pass_filenames = false },
+  { id = "clippy", name = "cargo clippy", language = "system", entry = "cargo clippy --workspace --exclude officemd_pdf --all-targets -- --force-warn clippy::pedantic -D warnings", files = "\\.rs$", pass_filenames = false },
 
-    # -- JS (oxlint + oxfmt) --
-    { id = "oxlint", name = "oxlint", language = "system", entry = "sh -c 'cd crates/officemd_js && npx oxlint .'", files = "crates/officemd_js/.*\\.(js|ts)$", pass_filenames = false },
-    { id = "oxfmt", name = "oxfmt check", language = "system", entry = "sh -c 'cd crates/officemd_js && npx oxfmt --check .'", files = "crates/officemd_js/.*\\.(js|ts)$", pass_filenames = false },
+  # -- JS (oxlint + oxfmt) --
+  { id = "oxlint", name = "oxlint", language = "system", entry = "sh -c 'cd crates/officemd_js && npx oxlint .'", files = "crates/officemd_js/.*\\.(js|ts)$", pass_filenames = false },
+  { id = "oxfmt", name = "oxfmt check", language = "system", entry = "sh -c 'cd crates/officemd_js && npx oxfmt --check .'", files = "crates/officemd_js/.*\\.(js|ts)$", pass_filenames = false },
 
-    # -- Python (ruff + ty) --
-    { id = "ruff-check", name = "ruff check", language = "system", entry = "sh -c 'cd crates/officemd_python && uv run ruff check .'", files = "crates/officemd_python/.*\\.py$", pass_filenames = false },
-    { id = "ruff-format", name = "ruff format check", language = "system", entry = "sh -c 'cd crates/officemd_python && uv run ruff format --check .'", files = "crates/officemd_python/.*\\.py$", pass_filenames = false },
-    { id = "ty", name = "ty check", language = "system", entry = "sh -c 'cd crates/officemd_python && uv run ty check python'", files = "crates/officemd_python/.*\\.py$", pass_filenames = false },
+  # -- Python (ruff + ty) --
+  { id = "ruff-check", name = "ruff check", language = "system", entry = "uv run --project crates/officemd_python ruff check crates/officemd_python examples/python", files = "(crates/officemd_python|examples/python)/.*\\.py$", pass_filenames = false },
+  { id = "ruff-format", name = "ruff format check", language = "system", entry = "uv run --project crates/officemd_python ruff format --check crates/officemd_python examples/python", files = "(crates/officemd_python|examples/python)/.*\\.py$", pass_filenames = false },
+  { id = "ty", name = "ty check", language = "system", entry = "uv run --project crates/officemd_python ty check crates/officemd_python/python examples/python", files = "(crates/officemd_python|examples/python)/.*\\.py$", pass_filenames = false },
 ]

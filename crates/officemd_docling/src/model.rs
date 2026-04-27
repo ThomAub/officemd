@@ -49,6 +49,7 @@ pub struct RefItem {
 }
 
 impl RefItem {
+    /// Create a Docling reference item for the given JSON reference path.
     pub fn new(path: impl Into<String>) -> Self {
         Self { cref: path.into() }
     }

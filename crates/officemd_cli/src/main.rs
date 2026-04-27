@@ -27,23 +27,13 @@ struct Cli {
 
 /// Shared options used by convert, stream, and inspect.
 #[derive(clap::Args, Debug, Clone)]
-#[allow(clippy::struct_excessive_bools)]
 struct CommonOptions {
     /// Explicitly set the document format.
     #[arg(long, value_enum)]
     format: Option<FormatArg>,
 
-    /// Include document properties in markdown output.
-    #[arg(long, default_value_t = false)]
-    include_document_properties: bool,
-
-    /// Output format: markdown (default) or json.
-    #[arg(long, value_enum)]
-    output_format: Option<OutputFormatArg>,
-
-    /// Pretty-print JSON output.
-    #[arg(long, default_value_t = false)]
-    pretty: bool,
+    #[command(flatten)]
+    output: CommonOutputOptions,
 
     /// Filter XLSX sheets by name or 1-based index (comma-separated).
     #[arg(long)]
@@ -57,10 +47,43 @@ struct CommonOptions {
     #[arg(long)]
     slides: Option<String>,
 
+    #[command(flatten)]
+    pdf: PdfCliOptions,
+
+    #[command(flatten)]
+    xlsx: XlsxCliOptions,
+
+    #[command(flatten)]
+    include: MarkdownIncludeCliOptions,
+
+    #[command(flatten)]
+    table: MarkdownTableCliOptions,
+
+    /// Markdown style profile.
+    #[arg(long, value_enum, default_value_t = MarkdownStyleArg::Compact)]
+    markdown_style: MarkdownStyleArg,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+struct CommonOutputOptions {
+    /// Output format: markdown (default) or json.
+    #[arg(long, value_enum)]
+    output_format: Option<OutputFormatArg>,
+
+    /// Pretty-print JSON output.
+    #[arg(long, default_value_t = false)]
+    pretty: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+struct PdfCliOptions {
     /// Force extraction even for scanned/image-based PDFs.
     #[arg(long, default_value_t = false)]
     force: bool,
+}
 
+#[derive(clap::Args, Debug, Clone)]
+struct XlsxCliOptions {
     /// Use style-aware cell values for XLSX.
     #[arg(long, default_value_t = false)]
     style_aware: bool,
@@ -68,6 +91,13 @@ struct CommonOptions {
     /// Use streaming row parser for XLSX.
     #[arg(long, default_value_t = false)]
     streaming: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+struct MarkdownIncludeCliOptions {
+    /// Include document properties in markdown output.
+    #[arg(long, default_value_t = false)]
+    document_properties: bool,
 
     /// Omit DOCX header/footer sections from markdown output.
     #[arg(long, default_value_t = false)]
@@ -76,14 +106,13 @@ struct CommonOptions {
     /// Omit XLSX formula footnotes from markdown output.
     #[arg(long, default_value_t = false)]
     no_formulas: bool,
+}
 
+#[derive(clap::Args, Debug, Clone)]
+struct MarkdownTableCliOptions {
     /// Use synthetic Col1/Col2 headers instead of first data row.
     #[arg(long, default_value_t = false)]
     no_first_row_header: bool,
-
-    /// Markdown style profile.
-    #[arg(long, value_enum, default_value_t = MarkdownStyleArg::Compact)]
-    markdown_style: MarkdownStyleArg,
 }
 
 #[derive(Subcommand, Debug)]
@@ -223,8 +252,6 @@ impl Display for DocumentFormat {
     }
 }
 
-// --- Inspect info types ---
-
 #[derive(Debug, Serialize)]
 struct InspectInfo {
     format: String,
@@ -265,23 +292,23 @@ struct PdfInfo {
 impl CommonOptions {
     /// Effective output format: explicit choice, or Markdown by default.
     fn output_format(&self) -> OutputFormatArg {
-        self.output_format.unwrap_or(OutputFormatArg::Markdown)
+        self.output
+            .output_format
+            .unwrap_or(OutputFormatArg::Markdown)
     }
 }
 
 impl clap_ai::AiDefaults for CommonOptions {
     fn apply_ai_defaults(&mut self) {
         // Only override when the user did not pass --output-format explicitly.
-        if self.output_format.is_none() {
-            self.output_format = Some(OutputFormatArg::Json);
+        if self.output.output_format.is_none() {
+            self.output.output_format = Some(OutputFormatArg::Json);
         }
-        if !self.pretty {
-            self.pretty = true;
+        if !self.output.pretty {
+            self.output.pretty = true;
         }
     }
 }
-
-// --- Format detection ---
 
 fn detect_format_from_path(path: &Path) -> Option<DocumentFormat> {
     path.extension().and_then(
@@ -334,8 +361,6 @@ fn resolve_format(
     detect_format_from_bytes(content)
 }
 
-// --- IR extraction ---
-
 fn extract_ir_document(
     content: &[u8],
     format: DocumentFormat,
@@ -359,20 +384,20 @@ fn extract_ir_document(
     let doc = match format {
         DocumentFormat::Docx => officemd_docx::extract_ir(content).map_err(|e| e.to_string())?,
         DocumentFormat::Xlsx => {
-            let options = XlsxExtractOptions {
-                style_aware_values: common.style_aware,
-                streaming_rows: common.streaming,
-                sheet_filter: common.sheets.as_deref().map(parse_sheet_filter),
-                include_document_properties: common.include_document_properties
-                    || common.output_format() == OutputFormatArg::Json,
-                trim_empty: matches!(common.markdown_style, MarkdownStyleArg::Compact),
-            };
+            let mut options = XlsxExtractOptions::default();
+            options.text.style_aware_values = common.xlsx.style_aware;
+            options.text.streaming_rows = common.xlsx.streaming;
+            options.sheet_filter = common.sheets.as_deref().map(parse_sheet_filter);
+            options.include.document_properties = common.include.document_properties
+                || common.output_format() == OutputFormatArg::Json;
+            options.trim.empty_edges = matches!(common.markdown_style, MarkdownStyleArg::Compact);
+
             officemd_xlsx::extract_tables_ir_with_options(content, &options)
                 .map_err(|e| e.to_string())?
         }
         DocumentFormat::Csv => {
             let options = officemd_csv::table_ir::CsvExtractOptions {
-                include_document_properties: common.include_document_properties
+                include_document_properties: common.include.document_properties
                     || common.output_format() == OutputFormatArg::Json,
                 ..Default::default()
             };
@@ -390,24 +415,22 @@ fn extract_ir_document(
             officemd_pptx::extract_ir_with_options(content, options).map_err(|e| e.to_string())?
         }
         DocumentFormat::Pdf => {
-            officemd_pdf::extract_ir_force(content, common.force).map_err(|e| e.to_string())?
+            officemd_pdf::extract_ir_force(content, common.pdf.force).map_err(|e| e.to_string())?
         }
     };
 
     // Warn about XLSX-specific flags used with non-XLSX formats
     if format != DocumentFormat::Xlsx {
-        if common.style_aware {
+        if common.xlsx.style_aware {
             eprintln!("Warning: --style-aware is only effective with XLSX files");
         }
-        if common.streaming {
+        if common.xlsx.streaming {
             eprintln!("Warning: --streaming is only effective with XLSX files");
         }
     }
 
     Ok(doc)
 }
-
-// --- Filters ---
 
 fn parse_sheet_filter(spec: &str) -> SheetFilter {
     let mut filter = SheetFilter::default();
@@ -472,8 +495,6 @@ fn parse_number_ranges(spec: &str) -> Result<Vec<usize>, String> {
     Ok(numbers)
 }
 
-// --- Output rendering ---
-
 fn render_output(doc: &OoxmlDocument, common: &CommonOptions) -> Result<String, String> {
     match common.output_format() {
         OutputFormatArg::Markdown => {
@@ -482,10 +503,14 @@ fn render_output(doc: &OoxmlDocument, common: &CommonOptions) -> Result<String, 
                 MarkdownStyleArg::Human => officemd_markdown::MarkdownProfile::Human,
             };
             let options = officemd_markdown::RenderOptions {
-                include_document_properties: common.include_document_properties,
-                use_first_row_as_header: !common.no_first_row_header,
-                include_headers_footers: !common.no_headers_footers,
-                include_formulas: !common.no_formulas,
+                include: officemd_markdown::RenderIncludeOptions {
+                    document_properties: common.include.document_properties,
+                    headers_footers: !common.include.no_headers_footers,
+                    formulas: !common.include.no_formulas,
+                },
+                table: officemd_markdown::RenderTableOptions {
+                    first_row_as_header: !common.table.no_first_row_header,
+                },
                 markdown_profile,
             };
             Ok(officemd_markdown::render_document_with_options(
@@ -493,7 +518,7 @@ fn render_output(doc: &OoxmlDocument, common: &CommonOptions) -> Result<String, 
             ))
         }
         OutputFormatArg::Json => {
-            if common.pretty {
+            if common.output.pretty {
                 serde_json::to_string_pretty(doc).map_err(|e| e.to_string())
             } else {
                 serde_json::to_string(doc).map_err(|e| e.to_string())
@@ -502,26 +527,23 @@ fn render_output(doc: &OoxmlDocument, common: &CommonOptions) -> Result<String, 
     }
 }
 
-// --- Inspect ---
-
-#[allow(clippy::similar_names)]
 fn build_xlsx_inspect_info(
     content: &[u8],
-    sheets_filter: Option<&str>,
+    sheet_filter_spec: Option<&str>,
 ) -> Result<InspectInfo, String> {
-    let sheet_filter = sheets_filter.map(parse_sheet_filter);
-    let sheets =
+    let sheet_filter = sheet_filter_spec.map(parse_sheet_filter);
+    let sheet_summaries =
         inspect_sheet_summaries(content, sheet_filter.as_ref()).map_err(|e| e.to_string())?;
     Ok(InspectInfo {
         format: "xlsx".to_string(),
         sections: None,
         sheets: Some(
-            sheets
+            sheet_summaries
                 .into_iter()
-                .map(|sheet| SheetInfo {
-                    name: sheet.name,
-                    rows: sheet.rows,
-                    cols: sheet.cols,
+                .map(|summary| SheetInfo {
+                    name: summary.name,
+                    rows: summary.rows,
+                    cols: summary.cols,
                 })
                 .collect(),
         ),
@@ -717,8 +739,6 @@ fn render_inspect_text(info: &InspectInfo) -> String {
     out
 }
 
-// --- I/O helpers ---
-
 fn read_all_from_stdin() -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     std::io::stdin()
@@ -736,8 +756,6 @@ fn default_output_path(input: &Path, output_format: OutputFormatArg) -> PathBuf 
     out
 }
 
-// --- Helpers for markdown/render/diff ---
-
 fn extract_markdown_from_file(path: &Path, common: &CommonOptions) -> Result<String, String> {
     let bytes =
         std::fs::read(path).map_err(|e| format!("failed to read '{}': {e}", path.display()))?;
@@ -750,10 +768,14 @@ fn extract_markdown_from_file(path: &Path, common: &CommonOptions) -> Result<Str
         MarkdownStyleArg::Human => officemd_markdown::MarkdownProfile::Human,
     };
     let options = officemd_markdown::RenderOptions {
-        include_document_properties: common.include_document_properties,
-        use_first_row_as_header: !common.no_first_row_header,
-        include_headers_footers: !common.no_headers_footers,
-        include_formulas: !common.no_formulas,
+        include: officemd_markdown::RenderIncludeOptions {
+            document_properties: common.include.document_properties,
+            headers_footers: !common.include.no_headers_footers,
+            formulas: !common.include.no_formulas,
+        },
+        table: officemd_markdown::RenderTableOptions {
+            first_row_as_header: !common.table.no_first_row_header,
+        },
         markdown_profile,
     };
     let md = officemd_markdown::render_document_with_options(&doc, options);
@@ -762,24 +784,20 @@ fn extract_markdown_from_file(path: &Path, common: &CommonOptions) -> Result<Str
     if common.pages.is_some()
         && (resolved == DocumentFormat::Xlsx || resolved == DocumentFormat::Csv)
     {
-        eprintln!(
-            "Hint: use --sheets for sheet selection with {} files",
-            resolved
-        );
+        eprintln!("Hint: use --sheets for sheet selection with {resolved} files");
     }
 
     // Warn about scanned PDFs
     if resolved == DocumentFormat::Pdf && md.trim().len() < 50 {
-        warn_scanned_pdf(&bytes, common.force);
+        warn_scanned_pdf(&bytes, common.pdf.force);
     }
 
     Ok(md)
 }
 
 fn warn_scanned_pdf(content: &[u8], force: bool) {
-    let diagnostics = match officemd_pdf::inspect_pdf(content) {
-        Ok(d) => d,
-        Err(_) => return,
+    let Ok(diagnostics) = officemd_pdf::inspect_pdf(content) else {
+        return;
     };
 
     let class = format!("{:?}", diagnostics.classification);
@@ -820,33 +838,32 @@ fn warn_scanned_pdf(content: &[u8], force: bool) {
     }
 }
 
+const DIFF_RED: &str = "\x1b[31m";
+const DIFF_GREEN: &str = "\x1b[32m";
+const DIFF_CYAN: &str = "\x1b[36m";
+const DIFF_RESET: &str = "\x1b[0m";
+
 fn render_colored_diff(text_a: &str, text_b: &str, label_a: &str, label_b: &str) -> String {
     let diff = TextDiff::from_lines(text_a, text_b);
     let mut out = String::new();
 
-    // ANSI colors
-    const RED: &str = "\x1b[31m";
-    const GREEN: &str = "\x1b[32m";
-    const CYAN: &str = "\x1b[36m";
-    const RESET: &str = "\x1b[0m";
-
     for hunk in diff.unified_diff().header(label_a, label_b).iter_hunks() {
         for change in hunk.iter_changes() {
             let (color, sign) = match change.tag() {
-                ChangeTag::Delete => (RED, "-"),
-                ChangeTag::Insert => (GREEN, "+"),
+                ChangeTag::Delete => (DIFF_RED, "-"),
+                ChangeTag::Insert => (DIFF_GREEN, "+"),
                 ChangeTag::Equal => ("", " "),
             };
             if color.is_empty() {
                 let _ = write!(out, "{sign}{change}");
             } else {
-                let _ = write!(out, "{color}{sign}{change}{RESET}");
+                let _ = write!(out, "{color}{sign}{change}{DIFF_RESET}");
             }
             if change.missing_newline() {
                 out.push('\n');
             }
         }
-        let _ = writeln!(out, "{CYAN}---{RESET}");
+        let _ = writeln!(out, "{DIFF_CYAN}---{DIFF_RESET}");
     }
 
     if out.is_empty() {
@@ -856,31 +873,178 @@ fn render_colored_diff(text_a: &str, text_b: &str, label_a: &str, label_b: &str)
     out
 }
 
-// --- Main ---
+fn print_help_tree(depth: u8) {
+    let cmd = Cli::command();
+    let opts = clap_ai::HelpTreeOptions {
+        depth,
+        root_suffix: if clap_ai::is_ai_mode() {
+            Some(" [AI mode]".into())
+        } else {
+            None
+        },
+        footer_lines: if clap_ai::is_ai_mode() {
+            vec![
+                String::new(),
+                "AI mode active (AI=True): defaults to --output-format json --pretty".into(),
+            ]
+        } else {
+            vec![]
+        },
+    };
+    clap_ai::print_help_tree(&cmd, &opts);
+}
+
+fn write_stdout(output: &str) -> Result<(), String> {
+    let mut stdout = std::io::stdout().lock();
+    stdout
+        .write_all(output.as_bytes())
+        .map_err(|e| format!("failed to write stdout: {e}"))
+}
+
+fn run_markdown_command(file: &Path, common: &CommonOptions) -> Result<(), String> {
+    write_stdout(&extract_markdown_from_file(file, common)?)
+}
+
+fn run_diff_command(file_a: &Path, file_b: &Path, common: &CommonOptions) -> Result<(), String> {
+    let md_a = extract_markdown_from_file(file_a, common)?;
+    let md_b = extract_markdown_from_file(file_b, common)?;
+    let label_a = file_a.display().to_string();
+    let label_b = file_b.display().to_string();
+    write_stdout(&render_colored_diff(&md_a, &md_b, &label_a, &label_b))
+}
+
+fn run_convert_command(
+    input: &Path,
+    output: Option<PathBuf>,
+    mut common: CommonOptions,
+) -> Result<(), String> {
+    clap_ai::maybe_apply_ai_defaults(&mut common);
+    let bytes = std::fs::read(input)
+        .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?;
+    let resolved = resolve_format(&bytes, Some(input), common.format)?;
+    let doc = extract_ir_document(&bytes, resolved, &common)?;
+    let rendered = render_output(&doc, &common)?;
+    let output_path = output.unwrap_or_else(|| default_output_path(input, common.output_format()));
+    std::fs::write(&output_path, &rendered)
+        .map_err(|e| format!("failed to write output '{}': {e}", output_path.display()))?;
+    let format_label = match common.output_format() {
+        OutputFormatArg::Markdown => "markdown",
+        OutputFormatArg::Json => "JSON",
+    };
+    eprintln!(
+        "Wrote {} for {} document to {}",
+        format_label,
+        resolved,
+        output_path.display()
+    );
+    Ok(())
+}
+
+fn run_stream_command(input: &Path, mut common: CommonOptions) -> Result<(), String> {
+    clap_ai::maybe_apply_ai_defaults(&mut common);
+    let use_stdin = input == Path::new("-");
+    let bytes = if use_stdin {
+        read_all_from_stdin()?
+    } else {
+        std::fs::read(input)
+            .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?
+    };
+
+    let path_hint = if use_stdin { None } else { Some(input) };
+    let resolved = resolve_format(&bytes, path_hint, common.format)?;
+    let doc = extract_ir_document(&bytes, resolved, &common)?;
+    drop(bytes);
+    write_stdout(&render_output(&doc, &common)?)
+}
+
+fn run_inspect_command(input: &Path, mut common: CommonOptions) -> Result<(), String> {
+    clap_ai::maybe_apply_ai_defaults(&mut common);
+    let bytes = std::fs::read(input)
+        .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?;
+    let resolved = resolve_format(&bytes, Some(input), common.format)?;
+    let info = inspect_input(&bytes, resolved, &common)?;
+    let output = match common.output_format() {
+        OutputFormatArg::Json if common.output.pretty => {
+            serde_json::to_string_pretty(&info).map_err(|e| e.to_string())?
+        }
+        OutputFormatArg::Json => serde_json::to_string(&info).map_err(|e| e.to_string())?,
+        OutputFormatArg::Markdown => render_inspect_text(&info),
+    };
+    write_stdout(&output)
+}
+
+fn inspect_input(
+    bytes: &[u8],
+    resolved: DocumentFormat,
+    common: &CommonOptions,
+) -> Result<InspectInfo, String> {
+    if resolved == DocumentFormat::Xlsx {
+        if common.slides.is_some() {
+            return Err("--slides can only be used with PPTX files".to_string());
+        }
+        build_xlsx_inspect_info(bytes, common.sheets.as_deref())
+    } else if resolved == DocumentFormat::Pdf {
+        if common.sheets.is_some() {
+            eprintln!("Warning: --sheets is ignored for PDF files");
+        }
+        if common.slides.is_some() {
+            eprintln!("Warning: --slides is ignored for PDF files");
+        }
+        build_pdf_inspect_info(bytes)
+    } else {
+        let doc = extract_ir_document(bytes, resolved, common)?;
+        Ok(build_inspect_info(&doc, resolved))
+    }
+}
+
+fn run_create_command(output: &Path, input: &Path) -> Result<(), String> {
+    let use_stdin = input == Path::new("-");
+    let markdown = if use_stdin {
+        let bytes = read_all_from_stdin()?;
+        String::from_utf8(bytes).map_err(|e| format!("invalid UTF-8 in stdin: {e}"))?
+    } else {
+        std::fs::read_to_string(input)
+            .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?
+    };
+
+    let doc = officemd_markdown::parse_document(&markdown)
+        .map_err(|e| format!("failed to parse markdown: {e}"))?;
+    let bytes = create_document_bytes(output, &doc)?;
+    std::fs::write(output, &bytes)
+        .map_err(|e| format!("failed to write '{}': {e}", output.display()))?;
+    eprintln!("Created {} ({} bytes)", output.display(), bytes.len());
+    Ok(())
+}
+
+fn create_document_bytes(output: &Path, doc: &OoxmlDocument) -> Result<Vec<u8>, String> {
+    let ext = output
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+
+    match ext.as_deref() {
+        Some("docx") => {
+            officemd_docx::generate_docx(doc).map_err(|e| format!("DOCX generation failed: {e}"))
+        }
+        Some("xlsx") => {
+            officemd_xlsx::generate_xlsx(doc).map_err(|e| format!("XLSX generation failed: {e}"))
+        }
+        Some("pptx") => {
+            officemd_pptx::generate_pptx(doc).map_err(|e| format!("PPTX generation failed: {e}"))
+        }
+        _ => Err(format!(
+            "unsupported output format '{}'. Use .docx, .xlsx, or .pptx",
+            output.display()
+        )),
+    }
+}
 
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
 
     // Handle --help-tree before anything else
     if let Some(depth) = cli.help_tree {
-        let cmd = Cli::command();
-        let opts = clap_ai::HelpTreeOptions {
-            depth,
-            root_suffix: if clap_ai::is_ai_mode() {
-                Some(" [AI mode]".into())
-            } else {
-                None
-            },
-            footer_lines: if clap_ai::is_ai_mode() {
-                vec![
-                    String::new(),
-                    "AI mode active (AI=True): defaults to --output-format json --pretty".into(),
-                ]
-            } else {
-                vec![]
-            },
-        };
-        clap_ai::print_help_tree(&cmd, &opts);
+        print_help_tree(depth);
         return Ok(());
     }
 
@@ -891,162 +1055,22 @@ fn run() -> Result<(), String> {
     })?;
 
     match command {
-        Command::Markdown { file, common } => {
-            // markdown/render/diff always produce markdown — AI defaults don't apply.
-            let md = extract_markdown_from_file(&file, &common)?;
-            let mut stdout = std::io::stdout().lock();
-            stdout
-                .write_all(md.as_bytes())
-                .map_err(|e| format!("failed to write stdout: {e}"))?;
-        }
-        Command::Render { file, common } => {
-            let md = extract_markdown_from_file(&file, &common)?;
-            let mut stdout = std::io::stdout().lock();
-            stdout
-                .write_all(md.as_bytes())
-                .map_err(|e| format!("failed to write stdout: {e}"))?;
+        Command::Markdown { file, common } | Command::Render { file, common } => {
+            run_markdown_command(&file, &common)?;
         }
         Command::Diff {
             file_a,
             file_b,
             common,
-        } => {
-            let md_a = extract_markdown_from_file(&file_a, &common)?;
-            let md_b = extract_markdown_from_file(&file_b, &common)?;
-            let label_a = file_a.display().to_string();
-            let label_b = file_b.display().to_string();
-            let output = render_colored_diff(&md_a, &md_b, &label_a, &label_b);
-            let mut stdout = std::io::stdout().lock();
-            stdout
-                .write_all(output.as_bytes())
-                .map_err(|e| format!("failed to write stdout: {e}"))?;
-        }
+        } => run_diff_command(&file_a, &file_b, &common)?,
         Command::Convert {
             input,
             output,
-            mut common,
-        } => {
-            clap_ai::maybe_apply_ai_defaults(&mut common);
-            let bytes = std::fs::read(&input)
-                .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?;
-            let resolved = resolve_format(&bytes, Some(&input), common.format)?;
-            let doc = extract_ir_document(&bytes, resolved, &common)?;
-            let rendered = render_output(&doc, &common)?;
-            let output_path =
-                output.unwrap_or_else(|| default_output_path(&input, common.output_format()));
-            std::fs::write(&output_path, &rendered)
-                .map_err(|e| format!("failed to write output '{}': {e}", output_path.display()))?;
-            let format_label = match common.output_format() {
-                OutputFormatArg::Markdown => "markdown",
-                OutputFormatArg::Json => "JSON",
-            };
-            eprintln!(
-                "Wrote {} for {} document to {}",
-                format_label,
-                resolved,
-                output_path.display()
-            );
-        }
-        Command::Stream { input, mut common } => {
-            clap_ai::maybe_apply_ai_defaults(&mut common);
-            let use_stdin = input == Path::new("-");
-            let bytes = if use_stdin {
-                read_all_from_stdin()?
-            } else {
-                std::fs::read(&input)
-                    .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?
-            };
-
-            let resolved = resolve_format(
-                &bytes,
-                if use_stdin { None } else { Some(&input) },
-                common.format,
-            )?;
-            let doc = extract_ir_document(&bytes, resolved, &common)?;
-            drop(bytes);
-            let rendered = render_output(&doc, &common)?;
-
-            let mut stdout = std::io::stdout().lock();
-            stdout
-                .write_all(rendered.as_bytes())
-                .map_err(|e| format!("failed to write stdout: {e}"))?;
-        }
-        Command::Inspect { input, mut common } => {
-            clap_ai::maybe_apply_ai_defaults(&mut common);
-            let bytes = std::fs::read(&input)
-                .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?;
-            let resolved = resolve_format(&bytes, Some(&input), common.format)?;
-            let info = if resolved == DocumentFormat::Xlsx {
-                if common.slides.is_some() {
-                    return Err("--slides can only be used with PPTX files".to_string());
-                }
-                build_xlsx_inspect_info(&bytes, common.sheets.as_deref())?
-            } else if resolved == DocumentFormat::Pdf {
-                if common.sheets.is_some() {
-                    eprintln!("Warning: --sheets is ignored for PDF files");
-                }
-                if common.slides.is_some() {
-                    eprintln!("Warning: --slides is ignored for PDF files");
-                }
-                build_pdf_inspect_info(&bytes)?
-            } else {
-                let doc = extract_ir_document(&bytes, resolved, &common)?;
-                build_inspect_info(&doc, resolved)
-            };
-
-            let output = match common.output_format() {
-                OutputFormatArg::Json => {
-                    if common.pretty {
-                        serde_json::to_string_pretty(&info).map_err(|e| e.to_string())?
-                    } else {
-                        serde_json::to_string(&info).map_err(|e| e.to_string())?
-                    }
-                }
-                OutputFormatArg::Markdown => render_inspect_text(&info),
-            };
-
-            let mut stdout = std::io::stdout().lock();
-            stdout
-                .write_all(output.as_bytes())
-                .map_err(|e| format!("failed to write stdout: {e}"))?;
-        }
-        Command::Create { output, input } => {
-            let use_stdin = input == Path::new("-");
-            let markdown = if use_stdin {
-                let bytes = read_all_from_stdin()?;
-                String::from_utf8(bytes).map_err(|e| format!("invalid UTF-8 in stdin: {e}"))?
-            } else {
-                std::fs::read_to_string(&input)
-                    .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?
-            };
-
-            let doc = officemd_markdown::parse_document(&markdown)
-                .map_err(|e| format!("failed to parse markdown: {e}"))?;
-
-            let ext = output
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(str::to_ascii_lowercase);
-
-            let bytes = match ext.as_deref() {
-                Some("docx") => officemd_docx::generate_docx(&doc)
-                    .map_err(|e| format!("DOCX generation failed: {e}"))?,
-                Some("xlsx") => officemd_xlsx::generate_xlsx(&doc)
-                    .map_err(|e| format!("XLSX generation failed: {e}"))?,
-                Some("pptx") => officemd_pptx::generate_pptx(&doc)
-                    .map_err(|e| format!("PPTX generation failed: {e}"))?,
-                _ => {
-                    return Err(format!(
-                        "unsupported output format '{}'. Use .docx, .xlsx, or .pptx",
-                        output.display()
-                    ));
-                }
-            };
-
-            std::fs::write(&output, &bytes)
-                .map_err(|e| format!("failed to write '{}': {e}", output.display()))?;
-            eprintln!("Created {} ({} bytes)", output.display(), bytes.len());
-        }
+            common,
+        } => run_convert_command(&input, output, common)?,
+        Command::Stream { input, common } => run_stream_command(&input, common)?,
+        Command::Inspect { input, common } => run_inspect_command(&input, common)?,
+        Command::Create { output, input } => run_create_command(&output, &input)?,
     }
 
     Ok(())
@@ -1118,18 +1142,26 @@ mod tests {
     fn markdown_common_options() -> CommonOptions {
         CommonOptions {
             format: None,
-            include_document_properties: false,
-            output_format: Some(OutputFormatArg::Markdown),
-            pretty: false,
+            output: CommonOutputOptions {
+                output_format: Some(OutputFormatArg::Markdown),
+                pretty: false,
+            },
             sheets: None,
             pages: None,
             slides: None,
-            force: false,
-            style_aware: false,
-            streaming: false,
-            no_headers_footers: false,
-            no_formulas: false,
-            no_first_row_header: false,
+            pdf: PdfCliOptions { force: false },
+            xlsx: XlsxCliOptions {
+                style_aware: false,
+                streaming: false,
+            },
+            include: MarkdownIncludeCliOptions {
+                document_properties: false,
+                no_headers_footers: false,
+                no_formulas: false,
+            },
+            table: MarkdownTableCliOptions {
+                no_first_row_header: false,
+            },
             markdown_style: MarkdownStyleArg::Compact,
         }
     }

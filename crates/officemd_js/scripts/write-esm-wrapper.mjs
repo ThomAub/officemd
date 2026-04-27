@@ -1,4 +1,13 @@
-import nativeBinding from "./index.cjs";
+import { copyFile, writeFile } from "node:fs/promises";
+
+const cjsEntry = "index.cjs";
+const esmEntry = "index.js";
+
+await copyFile(esmEntry, cjsEntry);
+
+await writeFile(
+  esmEntry,
+  `import nativeBinding from "./index.cjs";
 
 export const detectFormat = nativeBinding.detectFormat;
 export const extractIrJson = nativeBinding.extractIrJson;
@@ -14,3 +23,5 @@ export const createDocumentFromMarkdown = nativeBinding.createDocumentFromMarkdo
 export const applyOoxmlPatchJson = nativeBinding.applyOoxmlPatchJson;
 
 export default nativeBinding;
+`,
+);

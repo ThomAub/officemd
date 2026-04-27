@@ -170,7 +170,8 @@ fn col_to_name(mut n: usize) -> String {
     let mut name = String::new();
     while n > 0 {
         let rem = (n - 1) % 26;
-        name.insert(0, (b'A' + rem as u8) as char);
+        let offset = u8::try_from(rem).expect("column remainder is less than 26");
+        name.insert(0, char::from(b'A' + offset));
         n = (n - 1) / 26;
     }
     name
@@ -196,11 +197,17 @@ fn large_sheet_xlsx(row_count: usize, col_count: usize) -> Vec<u8> {
 "#,
     );
     for row in 1..=row_count {
-        sheet.push_str(&format!("<row r=\"{}\">", row));
+        std::fmt::Write::write_fmt(&mut sheet, format_args!("<row r=\"{row}\">"))
+            .expect("write row");
         for col in 1..=col_count {
-            let cell_ref = format!("{}{}", col_to_name(col), row);
+            let col_name = col_to_name(col);
+            let cell_ref = format!("{col_name}{row}");
             let value = row * 1000 + col;
-            sheet.push_str(&format!("<c r=\"{}\"><v>{}</v></c>", cell_ref, value));
+            std::fmt::Write::write_fmt(
+                &mut sheet,
+                format_args!("<c r=\"{cell_ref}\"><v>{value}</v></c>"),
+            )
+            .expect("write cell");
         }
         sheet.push_str("</row>");
     }
@@ -230,12 +237,11 @@ fn sparse_high_row_xlsx(row_1_based: usize) -> Vec<u8> {
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
     <sheetData>
-        <row r="{row}">
-            <c r="A{row}"><v>42</v></c>
+        <row r="{row_1_based}">
+            <c r="A{row_1_based}"><v>42</v></c>
         </row>
     </sheetData>
-</worksheet>"#,
-        row = row_1_based
+</worksheet>"#
     );
 
     build_xlsx(vec![
@@ -352,7 +358,7 @@ fn extracts_basic_ir() {
 fn extracts_ir_from_fixture() {
     let fixture_path = "tests/fixtures/sample.xlsx";
     if !std::path::Path::new(fixture_path).exists() {
-        eprintln!("Skipping fixture test: {} not found", fixture_path);
+        eprintln!("Skipping fixture test: {fixture_path} not found");
         return;
     }
 
@@ -369,7 +375,7 @@ fn extracts_ir_from_fixture() {
 fn extracts_tables_ir_from_fixture() {
     let fixture_path = "tests/fixtures/sample.xlsx";
     if !std::path::Path::new(fixture_path).exists() {
-        eprintln!("Skipping fixture test: {} not found", fixture_path);
+        eprintln!("Skipping fixture test: {fixture_path} not found");
         return;
     }
 
@@ -397,7 +403,7 @@ fn extracts_tables_ir_from_fixture() {
 fn table_ir_contains_cell_text() {
     let fixture_path = "tests/fixtures/sample.xlsx";
     if !std::path::Path::new(fixture_path).exists() {
-        eprintln!("Skipping fixture test: {} not found", fixture_path);
+        eprintln!("Skipping fixture test: {fixture_path} not found");
         return;
     }
 
@@ -465,17 +471,8 @@ fn empty_sheet_gets_synthetic_table() {
 fn options_default_matches_current_behavior() {
     let content = minimal_xlsx();
     let baseline = extract_tables_ir(&content).expect("baseline extract");
-    let with_options = extract_tables_ir_with_options(
-        &content,
-        &XlsxExtractOptions {
-            style_aware_values: false,
-            streaming_rows: false,
-            sheet_filter: None,
-            include_document_properties: false,
-            trim_empty: false,
-        },
-    )
-    .expect("extract with options");
+    let with_options = extract_tables_ir_with_options(&content, &XlsxExtractOptions::default())
+        .expect("extract with options");
 
     let baseline_json = serde_json::to_string(&baseline).expect("serialize baseline");
     let options_json = serde_json::to_string(&with_options).expect("serialize options");
@@ -491,11 +488,8 @@ fn sheet_filter_is_applied_during_extraction() {
     let doc_by_index = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            style_aware_values: false,
-            streaming_rows: false,
             sheet_filter: Some(by_index),
-            include_document_properties: false,
-            trim_empty: false,
+            ..Default::default()
         },
     )
     .expect("extract with index filter");
@@ -507,11 +501,8 @@ fn sheet_filter_is_applied_during_extraction() {
     let doc_by_name = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            style_aware_values: false,
-            streaming_rows: false,
             sheet_filter: Some(by_name),
-            include_document_properties: false,
-            trim_empty: false,
+            ..Default::default()
         },
     )
     .expect("extract with name filter");
@@ -523,25 +514,16 @@ fn sheet_filter_is_applied_during_extraction() {
 fn style_aware_values_are_opt_in() {
     let content = styled_xlsx();
 
-    let default_doc = extract_tables_ir_with_options(
-        &content,
-        &XlsxExtractOptions {
-            style_aware_values: false,
-            streaming_rows: false,
-            sheet_filter: None,
-            include_document_properties: false,
-            trim_empty: false,
-        },
-    )
-    .expect("extract default");
+    let default_doc = extract_tables_ir_with_options(&content, &XlsxExtractOptions::default())
+        .expect("extract default");
     let styled_doc = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            style_aware_values: true,
-            streaming_rows: false,
-            sheet_filter: None,
-            include_document_properties: false,
-            trim_empty: false,
+            text: officemd_xlsx::table_ir::XlsxTextOptions {
+                style_aware_values: true,
+                streaming_rows: false,
+            },
+            ..Default::default()
         },
     )
     .expect("extract style-aware");
@@ -566,22 +548,22 @@ fn style_aware_values_respect_1904_date_system() {
     let dense = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            style_aware_values: true,
-            streaming_rows: false,
-            sheet_filter: None,
-            include_document_properties: false,
-            trim_empty: false,
+            text: officemd_xlsx::table_ir::XlsxTextOptions {
+                style_aware_values: true,
+                streaming_rows: false,
+            },
+            ..Default::default()
         },
     )
     .expect("extract dense");
     let streaming = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            style_aware_values: true,
-            streaming_rows: true,
-            sheet_filter: None,
-            include_document_properties: false,
-            trim_empty: false,
+            text: officemd_xlsx::table_ir::XlsxTextOptions {
+                style_aware_values: true,
+                streaming_rows: true,
+            },
+            ..Default::default()
         },
     )
     .expect("extract streaming");
@@ -594,25 +576,16 @@ fn style_aware_values_respect_1904_date_system() {
 fn streaming_rows_matches_dense_default_mode() {
     let content = minimal_xlsx();
 
-    let dense = extract_tables_ir_with_options(
-        &content,
-        &XlsxExtractOptions {
-            style_aware_values: false,
-            streaming_rows: false,
-            sheet_filter: None,
-            include_document_properties: false,
-            trim_empty: false,
-        },
-    )
-    .expect("extract dense");
+    let dense = extract_tables_ir_with_options(&content, &XlsxExtractOptions::default())
+        .expect("extract dense");
     let streaming = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            style_aware_values: false,
-            streaming_rows: true,
-            sheet_filter: None,
-            include_document_properties: false,
-            trim_empty: false,
+            text: officemd_xlsx::table_ir::XlsxTextOptions {
+                style_aware_values: false,
+                streaming_rows: true,
+            },
+            ..Default::default()
         },
     )
     .expect("extract streaming");
@@ -629,22 +602,22 @@ fn streaming_rows_matches_dense_style_aware_mode() {
     let dense = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            style_aware_values: true,
-            streaming_rows: false,
-            sheet_filter: None,
-            include_document_properties: false,
-            trim_empty: false,
+            text: officemd_xlsx::table_ir::XlsxTextOptions {
+                style_aware_values: true,
+                streaming_rows: false,
+            },
+            ..Default::default()
         },
     )
     .expect("extract dense");
     let streaming = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            style_aware_values: true,
-            streaming_rows: true,
-            sheet_filter: None,
-            include_document_properties: false,
-            trim_empty: false,
+            text: officemd_xlsx::table_ir::XlsxTextOptions {
+                style_aware_values: true,
+                streaming_rows: true,
+            },
+            ..Default::default()
         },
     )
     .expect("extract streaming");
@@ -658,25 +631,16 @@ fn streaming_rows_matches_dense_style_aware_mode() {
 fn streaming_rows_large_sheet_parity_smoke() {
     let content = large_sheet_xlsx(300, 12);
 
-    let dense = extract_tables_ir_with_options(
-        &content,
-        &XlsxExtractOptions {
-            style_aware_values: false,
-            streaming_rows: false,
-            sheet_filter: None,
-            include_document_properties: false,
-            trim_empty: false,
-        },
-    )
-    .expect("extract dense");
+    let dense = extract_tables_ir_with_options(&content, &XlsxExtractOptions::default())
+        .expect("extract dense");
     let streaming = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            style_aware_values: false,
-            streaming_rows: true,
-            sheet_filter: None,
-            include_document_properties: false,
-            trim_empty: false,
+            text: officemd_xlsx::table_ir::XlsxTextOptions {
+                style_aware_values: false,
+                streaming_rows: true,
+            },
+            ..Default::default()
         },
     )
     .expect("extract streaming");
@@ -692,11 +656,11 @@ fn streaming_rows_handles_sparse_high_row_indices() {
     let doc = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            style_aware_values: false,
-            streaming_rows: true,
-            sheet_filter: None,
-            include_document_properties: false,
-            trim_empty: false,
+            text: officemd_xlsx::table_ir::XlsxTextOptions {
+                style_aware_values: false,
+                streaming_rows: true,
+            },
+            ..Default::default()
         },
     )
     .expect("extract sparse streaming");
@@ -711,27 +675,17 @@ fn streaming_rows_handles_sparse_high_row_indices() {
 fn document_properties_are_opt_in() {
     let content = minimal_xlsx_with_doc_props();
 
-    let without_props = extract_tables_ir_with_options(
-        &content,
-        &XlsxExtractOptions {
-            style_aware_values: false,
-            streaming_rows: false,
-            sheet_filter: None,
-            include_document_properties: false,
-            trim_empty: false,
-        },
-    )
-    .expect("extract without properties");
+    let without_props = extract_tables_ir_with_options(&content, &XlsxExtractOptions::default())
+        .expect("extract without properties");
     assert!(without_props.properties.is_none());
 
     let with_props = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            style_aware_values: false,
-            streaming_rows: false,
-            sheet_filter: None,
-            include_document_properties: true,
-            trim_empty: false,
+            include: officemd_xlsx::table_ir::XlsxIncludeOptions {
+                document_properties: true,
+            },
+            ..Default::default()
         },
     )
     .expect("extract with properties");
@@ -890,19 +844,13 @@ fn all_empty_content_xlsx() -> Vec<u8> {
 fn trim_empty_strips_trailing_empty_rows_and_cols() {
     let content = sparse_trailing_xlsx();
 
-    let untrimmed = extract_tables_ir_with_options(
-        &content,
-        &XlsxExtractOptions {
-            trim_empty: false,
-            ..Default::default()
-        },
-    )
-    .expect("untrimmed");
+    let untrimmed = extract_tables_ir_with_options(&content, &XlsxExtractOptions::default())
+        .expect("untrimmed");
 
     let trimmed = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            trim_empty: true,
+            trim: officemd_xlsx::table_ir::XlsxTrimOptions { empty_edges: true },
             ..Default::default()
         },
     )
@@ -930,19 +878,13 @@ fn trim_empty_strips_trailing_empty_rows_and_cols() {
 fn trim_empty_wide_sparse_preserves_isolated_column() {
     let content = wide_sparse_xlsx();
 
-    let untrimmed = extract_tables_ir_with_options(
-        &content,
-        &XlsxExtractOptions {
-            trim_empty: false,
-            ..Default::default()
-        },
-    )
-    .expect("untrimmed");
+    let untrimmed = extract_tables_ir_with_options(&content, &XlsxExtractOptions::default())
+        .expect("untrimmed");
 
     let trimmed = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            trim_empty: true,
+            trim: officemd_xlsx::table_ir::XlsxTrimOptions { empty_edges: true },
             ..Default::default()
         },
     )
@@ -975,7 +917,7 @@ fn trim_empty_all_blank_preserves_min_table() {
     let trimmed = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            trim_empty: true,
+            trim: officemd_xlsx::table_ir::XlsxTrimOptions { empty_edges: true },
             ..Default::default()
         },
     )
@@ -1024,8 +966,7 @@ fn trim_empty_token_savings_on_sparse_trailing() {
     ] {
         assert!(
             trimmed_md.contains(value),
-            "trimmed output missing value: {}",
-            value
+            "trimmed output missing value: {value}"
         );
     }
 }

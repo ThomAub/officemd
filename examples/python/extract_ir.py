@@ -10,7 +10,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Extract IR JSON from a DOCX/XLSX/CSV/PPTX file."
     )
-    parser.add_argument("input_path", type=Path, help="Path to .docx/.xlsx/.csv/.pptx file")
+    parser.add_argument(
+        "input_path", type=Path, help="Path to .docx/.xlsx/.csv/.pptx file"
+    )
     parser.add_argument(
         "--format",
         choices=["docx", "xlsx", "csv", "pptx"],

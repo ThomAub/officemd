@@ -1,12 +1,14 @@
 //! Compare XLSX markdown output with and without `trim_empty`.
 //!
 //! Usage:
-//!   cargo run -p officemd_examples --bin compare_trim_xlsx -- <path/to/file.xlsx>
+//!   `cargo run -p officemd_examples --bin compare_trim_xlsx -- <path/to/file.xlsx>`
 
 use std::{env, fs};
 
 use officemd_markdown::{MarkdownProfile, RenderOptions};
-use officemd_xlsx::table_ir::{XlsxExtractOptions, extract_tables_ir_with_options};
+use officemd_xlsx::table_ir::{
+    XlsxExtractOptions, XlsxTrimOptions, extract_tables_ir_with_options,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = env::args().nth(1).unwrap_or_else(|| {
@@ -18,14 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let content = fs::read(&path)?;
 
-    // --- Extract without trim ---
-    let doc_no_trim = extract_tables_ir_with_options(
-        &content,
-        &XlsxExtractOptions {
-            trim_empty: false,
-            ..Default::default()
-        },
-    )?;
+    let doc_no_trim = extract_tables_ir_with_options(&content, &XlsxExtractOptions::default())?;
     let md_no_trim = officemd_markdown::render_document_with_options(
         &doc_no_trim,
         RenderOptions {
@@ -34,11 +29,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
 
-    // --- Extract with trim ---
     let doc_trim = extract_tables_ir_with_options(
         &content,
         &XlsxExtractOptions {
-            trim_empty: true,
+            trim: XlsxTrimOptions { empty_edges: true },
             ..Default::default()
         },
     )?;
@@ -50,7 +44,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
 
-    // --- Report ---
     println!("=== {path} ===\n");
 
     println!("--- WITHOUT trim_empty ({} chars) ---", md_no_trim.len());
@@ -81,13 +74,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!("{md_trim}");
     println!();
 
-    let saved = md_no_trim.len() as i64 - md_trim.len() as i64;
-    let pct = if md_no_trim.is_empty() {
-        0.0
+    let no_trim_len = md_no_trim.len();
+    let trim_len = md_trim.len();
+    let (saved_prefix, saved) = if no_trim_len >= trim_len {
+        ("", no_trim_len - trim_len)
     } else {
-        (saved as f64 / md_no_trim.len() as f64) * 100.0
+        ("-", trim_len - no_trim_len)
     };
-    println!("--- Token savings: {saved} chars ({pct:.1}% reduction) ---");
+    let pct_tenths = saved
+        .saturating_mul(1_000)
+        .checked_div(no_trim_len)
+        .unwrap_or(0);
+    let pct_whole = pct_tenths / 10;
+    let pct_fraction = pct_tenths % 10;
+    println!(
+        "--- Token savings: {saved_prefix}{saved} chars ({pct_whole}.{pct_fraction}% reduction) ---"
+    );
 
     Ok(())
 }

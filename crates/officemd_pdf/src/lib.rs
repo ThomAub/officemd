@@ -102,18 +102,11 @@ pub fn inspect_pdf_fonts(content: &[u8]) -> Result<PdfFontInspection, OoxmlPdfEr
             let lookup_name = page_font_lookup
                 .get(&page_number)
                 .and_then(|lookup| lookup.get(&item.font));
-            let entry = match lookup_name {
-                Some(font_name) => {
-                    if let Some(entry) = fonts.get_mut(font_name) {
-                        entry
-                    } else {
-                        fonts.entry(font_name.clone()).or_default()
-                    }
-                }
-                None => {
-                    let normalized = normalize_font_name(&item.font);
-                    fonts.entry(normalized).or_default()
-                }
+            let entry = if let Some(font_name) = lookup_name {
+                fonts.entry(font_name.clone()).or_default()
+            } else {
+                let normalized = normalize_font_name(&item.font);
+                fonts.entry(normalized).or_default()
             };
             entry.resource_names.insert(item.font);
             entry.pages.insert(page_number);
@@ -483,7 +476,7 @@ mod tests {
         let mut doc = Document::with_version("1.5");
         let pages_id = doc.new_object_id();
         let content_id = doc.add_object(Stream::new(dictionary! {}, Vec::new()));
-        let page_id = doc.add_object(dictionary! {
+        let leaf_page_id = doc.add_object(dictionary! {
             "Type" => "Page",
             "Parent" => pages_id,
             "Contents" => content_id,
@@ -491,7 +484,7 @@ mod tests {
         });
         let pages = dictionary! {
             "Type" => "Pages",
-            "Kids" => vec![page_id.into()],
+            "Kids" => vec![leaf_page_id.into()],
             "Count" => 1,
         };
         doc.objects.insert(pages_id, Object::Dictionary(pages));

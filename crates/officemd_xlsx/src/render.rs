@@ -1,7 +1,9 @@
 //! Glue to render XLSX bytes to Markdown via the shared renderer.
 
 use crate::error::XlsxError;
-use crate::table_ir::{XlsxExtractOptions, extract_tables_ir_with_options};
+use crate::table_ir::{
+    XlsxExtractOptions, XlsxIncludeOptions, XlsxTrimOptions, extract_tables_ir_with_options,
+};
 use officemd_markdown::RenderOptions;
 
 /// Render XLSX bytes to Markdown using table IR (single-table per sheet for now).
@@ -25,11 +27,15 @@ pub fn markdown_from_bytes_with_options(
     let doc = extract_tables_ir_with_options(
         content,
         &XlsxExtractOptions {
-            include_document_properties: options.include_document_properties,
-            trim_empty: matches!(
-                options.markdown_profile,
-                officemd_markdown::MarkdownProfile::LlmCompact
-            ),
+            include: XlsxIncludeOptions {
+                document_properties: options.include.document_properties,
+            },
+            trim: XlsxTrimOptions {
+                empty_edges: matches!(
+                    options.markdown_profile,
+                    officemd_markdown::MarkdownProfile::LlmCompact
+                ),
+            },
             ..Default::default()
         },
     )?;
@@ -100,7 +106,10 @@ mod tests {
         let markdown = markdown_from_bytes_with_options(
             &bytes,
             RenderOptions {
-                include_document_properties: true,
+                include: officemd_markdown::RenderIncludeOptions {
+                    document_properties: true,
+                    ..Default::default()
+                },
                 markdown_profile: officemd_markdown::MarkdownProfile::Human,
                 ..Default::default()
             },

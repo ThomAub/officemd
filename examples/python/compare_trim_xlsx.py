@@ -34,7 +34,9 @@ def compare(path: Path) -> None:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print("Usage: compare_trim_xlsx.py <path.xlsx> [path2.xlsx ...]", file=sys.stderr)
+        print(
+            "Usage: compare_trim_xlsx.py <path.xlsx> [path2.xlsx ...]", file=sys.stderr
+        )
         sys.exit(2)
 
     for arg in sys.argv[1:]:

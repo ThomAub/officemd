@@ -58,7 +58,9 @@ def structural_diff(ours: dict, theirs: dict, path: str = "") -> list[str]:
     diffs = []
 
     if type(ours) is not type(theirs):
-        diffs.append(f"{path}: type mismatch: {type(ours).__name__} vs {type(theirs).__name__}")
+        diffs.append(
+            f"{path}: type mismatch: {type(ours).__name__} vs {type(theirs).__name__}"
+        )
         return diffs
 
     if isinstance(ours, dict):
@@ -96,10 +98,13 @@ def main() -> None:
     docling_available = False
     try:
         from docling.document_converter import DocumentConverter
+
         docling_available = True
         converter = DocumentConverter()
     except ImportError:
-        print("docling not installed - skipping comparison, only saving Rust snapshots\n")
+        print(
+            "docling not installed - skipping comparison, only saving Rust snapshots\n"
+        )
 
     summary: list[tuple[str, int, str]] = []
 

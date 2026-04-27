@@ -23,26 +23,56 @@ pub enum MarkdownProfile {
 /// Options controlling markdown rendering behavior.
 #[derive(Debug, Clone, Copy)]
 pub struct RenderOptions {
-    /// Include document-level properties as a header block.
-    pub include_document_properties: bool,
-    /// Use the first data row as the table header instead of synthetic Col1/Col2 names.
-    pub use_first_row_as_header: bool,
-    /// Include DOCX header/footer sections in the output.
-    pub include_headers_footers: bool,
-    /// Include XLSX formula footnotes in the output.
-    pub include_formulas: bool,
+    /// Boolean switches for optional rendered sections.
+    pub include: RenderIncludeOptions,
+    /// Boolean switches for table rendering behavior.
+    pub table: RenderTableOptions,
     /// Markdown profile controlling compact vs human-oriented formatting.
     pub markdown_profile: MarkdownProfile,
+}
+
+/// Optional sections to include in markdown output.
+#[derive(Debug, Clone, Copy)]
+pub struct RenderIncludeOptions {
+    /// Include document-level properties as a header block.
+    pub document_properties: bool,
+    /// Include DOCX header/footer sections in the output.
+    pub headers_footers: bool,
+    /// Include XLSX formula footnotes in the output.
+    pub formulas: bool,
+}
+
+/// Table-specific markdown rendering switches.
+#[derive(Debug, Clone, Copy)]
+pub struct RenderTableOptions {
+    /// Use the first data row as the table header instead of synthetic Col1/Col2 names.
+    pub first_row_as_header: bool,
 }
 
 impl Default for RenderOptions {
     fn default() -> Self {
         Self {
-            include_document_properties: false,
-            use_first_row_as_header: true,
-            include_headers_footers: true,
-            include_formulas: true,
+            include: RenderIncludeOptions::default(),
+            table: RenderTableOptions::default(),
             markdown_profile: MarkdownProfile::LlmCompact,
+        }
+    }
+}
+
+impl Default for RenderIncludeOptions {
+    fn default() -> Self {
+        Self {
+            document_properties: false,
+            headers_footers: true,
+            formulas: true,
+        }
+    }
+}
+
+impl Default for RenderTableOptions {
+    fn default() -> Self {
+        Self {
+            first_row_as_header: true,
         }
     }
 }
@@ -74,17 +104,17 @@ fn render_frontmatter(doc: &OoxmlDocument, options: RenderOptions) -> String {
     };
     format!(
         "<!-- officemd: kind={kind} profile={profile} first_row_as_header={} formulas={} headers_footers={} properties={} -->\n\n",
-        options.use_first_row_as_header,
-        options.include_formulas,
-        options.include_headers_footers,
-        options.include_document_properties,
+        options.table.first_row_as_header,
+        options.include.formulas,
+        options.include.headers_footers,
+        options.include.document_properties,
     )
 }
 
 fn render_xlsx(doc: &OoxmlDocument, options: RenderOptions) -> String {
     let mut out = String::new();
 
-    if options.include_document_properties {
+    if options.include.document_properties {
         render_properties(doc, &mut out, options);
     }
 
@@ -96,7 +126,7 @@ fn render_xlsx(doc: &OoxmlDocument, options: RenderOptions) -> String {
             out.push('\n');
         }
 
-        if options.include_formulas && !sheet.formulas.is_empty() {
+        if options.include.formulas && !sheet.formulas.is_empty() {
             if matches!(options.markdown_profile, MarkdownProfile::Human) {
                 out.push_str("### Formulas\n");
             }
@@ -126,14 +156,14 @@ fn render_xlsx(doc: &OoxmlDocument, options: RenderOptions) -> String {
 fn render_docx(doc: &OoxmlDocument, options: RenderOptions) -> String {
     let mut out = String::new();
 
-    if options.include_document_properties {
+    if options.include.document_properties {
         render_properties(doc, &mut out, options);
     }
 
     let mut wrote_section = false;
 
     for section in &doc.sections {
-        if !options.include_headers_footers
+        if !options.include.headers_footers
             && (section.name.starts_with("header") || section.name.starts_with("footer"))
         {
             continue;
@@ -174,7 +204,7 @@ fn render_docx(doc: &OoxmlDocument, options: RenderOptions) -> String {
 fn render_pptx(doc: &OoxmlDocument, options: RenderOptions) -> String {
     let mut out = String::new();
 
-    if options.include_document_properties {
+    if options.include.document_properties {
         render_properties(doc, &mut out, options);
     }
 
@@ -256,7 +286,7 @@ fn is_duplicate_slide_title_paragraph(paragraph: &Paragraph, title: &str) -> boo
 fn render_pdf(doc: &OoxmlDocument, options: RenderOptions) -> String {
     let mut out = String::new();
 
-    if options.include_document_properties {
+    if options.include.document_properties {
         render_properties(doc, &mut out, options);
     }
 
@@ -317,7 +347,7 @@ fn render_table(table: &Table, options: RenderOptions) -> String {
     }
 
     let (header_labels, data_rows): (Vec<String>, &[Vec<TableCell>]) =
-        if options.use_first_row_as_header && !table.rows.is_empty() {
+        if options.table.first_row_as_header && !table.rows.is_empty() {
             let labels = table.rows[0].iter().map(render_cell).collect();
             (labels, &table.rows[1..])
         } else {
@@ -447,7 +477,9 @@ mod tests {
             synthetic_headers: true,
         };
         let opts = RenderOptions {
-            use_first_row_as_header: false,
+            table: RenderTableOptions {
+                first_row_as_header: false,
+            },
             ..Default::default()
         };
         let md = render_table(&table, opts);
@@ -514,7 +546,9 @@ mod tests {
             synthetic_headers: true,
         };
         let opts = RenderOptions {
-            use_first_row_as_header: false,
+            table: RenderTableOptions {
+                first_row_as_header: false,
+            },
             ..Default::default()
         };
         let md = render_table(&table, opts);
@@ -739,7 +773,7 @@ mod tests {
     fn renders_link_without_display() {
         let paragraph = Paragraph {
             inlines: vec![Inline::Link(Hyperlink {
-                display: "".into(),
+                display: String::new(),
                 target: "https://example.com".into(),
                 rel_id: None,
             })],
@@ -773,7 +807,10 @@ mod tests {
         let md = render_document_with_options(
             &doc,
             RenderOptions {
-                include_document_properties: true,
+                include: RenderIncludeOptions {
+                    document_properties: true,
+                    ..Default::default()
+                },
                 markdown_profile: MarkdownProfile::Human,
                 ..Default::default()
             },
@@ -809,7 +846,10 @@ mod tests {
         let md = render_document_with_options(
             &doc,
             RenderOptions {
-                include_document_properties: true,
+                include: RenderIncludeOptions {
+                    document_properties: true,
+                    ..Default::default()
+                },
                 markdown_profile: MarkdownProfile::Human,
                 ..Default::default()
             },
@@ -865,7 +905,9 @@ mod tests {
             synthetic_headers: false,
         };
         let opts = RenderOptions {
-            use_first_row_as_header: false,
+            table: RenderTableOptions {
+                first_row_as_header: false,
+            },
             ..Default::default()
         };
         let md = render_table(&table, opts);
@@ -962,7 +1004,7 @@ mod tests {
                 blocks: vec![],
                 comments: vec![CommentNote {
                     id: "c1".into(),
-                    author: "".into(),
+                    author: String::new(),
                     text: "Anonymous note".into(),
                 }],
             }],
@@ -1007,7 +1049,10 @@ mod tests {
         let md = render_document_with_options(
             &doc,
             RenderOptions {
-                include_headers_footers: false,
+                include: RenderIncludeOptions {
+                    headers_footers: false,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         );

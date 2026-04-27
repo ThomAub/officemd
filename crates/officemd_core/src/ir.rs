@@ -91,7 +91,7 @@ pub struct Table {
     pub synthetic_headers: bool,
 }
 
-/// Generate synthetic column headers: Col1, Col2, ..., ColN.
+/// Generate synthetic column headers: `Col1`, `Col2`, ..., `ColN`.
 #[must_use]
 pub fn synthetic_col_headers(cols: usize) -> Vec<String> {
     (1..=cols).map(|i| format!("Col{i}")).collect()

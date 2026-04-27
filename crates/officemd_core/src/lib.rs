@@ -152,7 +152,7 @@ mod tests {
 
         match text {
             Inline::Text(t) => assert_eq!(t, "Hello"),
-            _ => panic!("Expected Text"),
+            Inline::Link(_) => panic!("Expected Text"),
         }
 
         match link {
@@ -161,7 +161,7 @@ mod tests {
                 assert_eq!(h.target, "https://example.com");
                 assert_eq!(h.rel_id, Some("rId1".into()));
             }
-            _ => panic!("Expected Link"),
+            Inline::Text(_) => panic!("Expected Link"),
         }
     }
 

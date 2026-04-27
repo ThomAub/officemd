@@ -52,12 +52,7 @@ fn check_libreoffice(path: &Path) -> (bool, String) {
     (output.status.success() && produced, text)
 }
 
-fn main() {
-    let root = repo_root();
-    let data_dir = root.join("data");
-    let out_dir = root.join("out");
-    fs::create_dir_all(&out_dir).expect("create out dir");
-
+fn print_plan() {
     println!("Plan:");
     println!("1. Load examples/data/showcase.docx, showcase.pptx, and showcase.xlsx");
     println!(
@@ -67,7 +62,12 @@ fn main() {
     println!("4. Verify the edited files with existing officemd extractors");
     println!("5. Open-check via LibreOffice headless PDF conversion");
     println!();
+}
 
+fn patch_docx_showcase(
+    data_dir: &Path,
+    out_dir: &Path,
+) -> (PathBuf, String, serde_json::Value, bool, String) {
     let docx_bytes = fs::read(data_dir.join("showcase.docx")).expect("read docx");
     let edited_docx = patch_docx(
         &docx_bytes,
@@ -109,14 +109,22 @@ fn main() {
         },
     )
     .expect("patch docx");
+
     let docx_out = out_dir.join("showcase_edited_rust.docx");
     fs::write(&docx_out, &edited_docx).expect("write docx");
     let docx_md = officemd_docx::markdown_from_bytes(&edited_docx).expect("markdown docx");
-    let docx_ir: serde_json::Value =
+    let docx_ir =
         serde_json::from_str(&officemd_docx::extract_ir_json(&edited_docx).expect("ir docx"))
             .expect("parse ir docx");
     let (docx_ok, docx_lo) = check_libreoffice(&docx_out);
 
+    (docx_out, docx_md, docx_ir, docx_ok, docx_lo)
+}
+
+fn patch_pptx_showcase(
+    data_dir: &Path,
+    out_dir: &Path,
+) -> (PathBuf, String, serde_json::Value, bool, String) {
     let pptx_bytes = fs::read(data_dir.join("showcase.pptx")).expect("read pptx");
     let edited_pptx = patch_pptx(
         &pptx_bytes,
@@ -149,14 +157,29 @@ fn main() {
         },
     )
     .expect("patch pptx");
+
     let pptx_out = out_dir.join("showcase_edited_rust.pptx");
     fs::write(&pptx_out, &edited_pptx).expect("write pptx");
     let pptx_md = officemd_pptx::markdown_from_bytes(&edited_pptx).expect("markdown pptx");
-    let pptx_ir: serde_json::Value =
+    let pptx_ir =
         serde_json::from_str(&officemd_pptx::extract_ir_json(&edited_pptx).expect("ir pptx"))
             .expect("parse ir pptx");
     let (pptx_ok, pptx_lo) = check_libreoffice(&pptx_out);
 
+    (pptx_out, pptx_md, pptx_ir, pptx_ok, pptx_lo)
+}
+
+fn patch_xlsx_showcase(
+    data_dir: &Path,
+    out_dir: &Path,
+) -> (
+    PathBuf,
+    officemd_core::PatchedDocument,
+    String,
+    serde_json::Value,
+    bool,
+    String,
+) {
     let xlsx_bytes = fs::read(data_dir.join("showcase.xlsx")).expect("read xlsx");
     let edited_xlsx = patch_xlsx_with_report(
         &xlsx_bytes,
@@ -188,15 +211,26 @@ fn main() {
         },
     )
     .expect("patch xlsx");
+
     let xlsx_out = out_dir.join("showcase_edited_rust.xlsx");
     fs::write(&xlsx_out, &edited_xlsx.content).expect("write xlsx");
     let xlsx_md = officemd_xlsx::markdown_from_bytes(&edited_xlsx.content).expect("markdown xlsx");
-    let xlsx_ir: serde_json::Value = serde_json::from_str(
+    let xlsx_ir = serde_json::from_str(
         &officemd_xlsx::extract_ir::extract_ir_json(&edited_xlsx.content).expect("ir xlsx"),
     )
     .expect("parse ir xlsx");
     let (xlsx_ok, xlsx_lo) = check_libreoffice(&xlsx_out);
 
+    (xlsx_out, edited_xlsx, xlsx_md, xlsx_ir, xlsx_ok, xlsx_lo)
+}
+
+fn print_docx_summary(
+    docx_out: &Path,
+    docx_md: &str,
+    docx_ir: &serde_json::Value,
+    docx_ok: bool,
+    docx_lo: &str,
+) {
     println!("DOCX result: {}", docx_out.display());
     println!(
         "{}",
@@ -211,7 +245,15 @@ fn main() {
         .unwrap()
     );
     println!();
+}
 
+fn print_pptx_summary(
+    pptx_out: &Path,
+    pptx_md: &str,
+    pptx_ir: &serde_json::Value,
+    pptx_ok: bool,
+    pptx_lo: &str,
+) {
     println!("PPTX result: {}", pptx_out.display());
     println!(
         "{}",
@@ -226,7 +268,16 @@ fn main() {
         .unwrap()
     );
     println!();
+}
 
+fn print_xlsx_summary(
+    xlsx_out: &Path,
+    edited_xlsx: &officemd_core::PatchedDocument,
+    xlsx_md: &str,
+    xlsx_ir: &serde_json::Value,
+    xlsx_ok: bool,
+    xlsx_lo: &str,
+) {
     println!("XLSX result: {}", xlsx_out.display());
     println!(
         "{}",
@@ -243,5 +294,29 @@ fn main() {
             "libreoffice_output": xlsx_lo,
         }))
         .unwrap()
+    );
+}
+
+fn main() {
+    let root = repo_root();
+    let data_dir = root.join("data");
+    let out_dir = root.join("out");
+    fs::create_dir_all(&out_dir).expect("create out dir");
+    print_plan();
+
+    let (docx_out, docx_md, docx_ir, docx_ok, docx_lo) = patch_docx_showcase(&data_dir, &out_dir);
+    let (pptx_out, pptx_md, pptx_ir, pptx_ok, pptx_lo) = patch_pptx_showcase(&data_dir, &out_dir);
+    let (xlsx_out, edited_xlsx, xlsx_md, xlsx_ir, xlsx_ok, xlsx_lo) =
+        patch_xlsx_showcase(&data_dir, &out_dir);
+
+    print_docx_summary(&docx_out, &docx_md, &docx_ir, docx_ok, &docx_lo);
+    print_pptx_summary(&pptx_out, &pptx_md, &pptx_ir, pptx_ok, &pptx_lo);
+    print_xlsx_summary(
+        &xlsx_out,
+        &edited_xlsx,
+        &xlsx_md,
+        &xlsx_ir,
+        xlsx_ok,
+        &xlsx_lo,
     );
 }

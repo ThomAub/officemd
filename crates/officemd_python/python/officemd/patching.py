@@ -8,18 +8,18 @@ from pathlib import Path
 from typing import Any
 
 from officemd._officemd import (
-    _patch_docx_batch_json,  # type: ignore[unresolved-import]
-    _patch_docx_batch_json_with_report,  # type: ignore[unresolved-import]
-    _patch_docx_json,  # type: ignore[unresolved-import]
-    _patch_docx_json_with_report,  # type: ignore[unresolved-import]
-    _patch_pptx_batch_json,  # type: ignore[unresolved-import]
-    _patch_pptx_batch_json_with_report,  # type: ignore[unresolved-import]
-    _patch_pptx_json,  # type: ignore[unresolved-import]
-    _patch_pptx_json_with_report,  # type: ignore[unresolved-import]
-    _patch_xlsx_batch_json,  # type: ignore[unresolved-import]
-    _patch_xlsx_batch_json_with_report,  # type: ignore[unresolved-import]
-    _patch_xlsx_json,  # type: ignore[unresolved-import]
-    _patch_xlsx_json_with_report,  # type: ignore[unresolved-import]
+    _patch_docx_batch_json,
+    _patch_docx_batch_json_with_report,
+    _patch_docx_json,
+    _patch_docx_json_with_report,
+    _patch_pptx_batch_json,
+    _patch_pptx_batch_json_with_report,
+    _patch_pptx_json,
+    _patch_pptx_json_with_report,
+    _patch_xlsx_batch_json,
+    _patch_xlsx_batch_json_with_report,
+    _patch_xlsx_json,
+    _patch_xlsx_json_with_report,
 )
 
 
