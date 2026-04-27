@@ -96,7 +96,11 @@ struct XlsxCliOptions {
 #[derive(clap::Args, Debug, Clone)]
 struct MarkdownIncludeCliOptions {
     /// Include document properties in markdown output.
-    #[arg(long, default_value_t = false)]
+    #[arg(
+        long = "include-document-properties",
+        alias = "document-properties",
+        default_value_t = false
+    )]
     document_properties: bool,
 
     /// Omit DOCX header/footer sections from markdown output.
