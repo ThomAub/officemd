@@ -1,5 +1,8 @@
 //! Native Node/Bun bindings for `OfficeMD` extraction and rendering.
 
+// N-API `#[napi]` function signatures must take owned values, not references.
+#![allow(clippy::needless_pass_by_value)]
+
 use napi::bindgen_prelude::{Buffer, Error, Result, Status};
 use napi_derive::napi;
 use officemd_core::apply_ooxml_patch_json as apply_ooxml_patch_json_core;
@@ -327,9 +330,7 @@ fn apply_ooxml_patch_json_impl(content: &[u8], patch_json: &str) -> Result<Vec<u
 /// Returns an error if the format cannot be determined from the content.
 #[napi]
 pub fn detect_format(content: Buffer) -> Result<String> {
-    let bytes = content.to_vec();
-    drop(content);
-    detect_format_impl(&bytes)
+    detect_format_impl(content.as_ref())
 }
 
 /// Extract the intermediate representation as JSON.
@@ -339,9 +340,9 @@ pub fn detect_format(content: Buffer) -> Result<String> {
 /// Returns an error if format detection or extraction fails.
 #[napi]
 pub fn extract_ir_json(content: Buffer, format: Option<String>) -> Result<String> {
-    let bytes = content.to_vec();
-    drop(content);
-    with_optional_string(format, |format| extract_ir_json_impl(&bytes, format))
+    with_optional_string(format, |format| {
+        extract_ir_json_impl(content.as_ref(), format)
+    })
 }
 
 /// Render document bytes as Markdown.
@@ -373,10 +374,13 @@ pub fn markdown_from_bytes(
         },
         markdown_profile,
     };
-    let bytes = content.to_vec();
-    drop(content);
     with_optional_string(format, |format| {
-        markdown_from_bytes_impl(&bytes, format, options, force_extract.unwrap_or(false))
+        markdown_from_bytes_impl(
+            content.as_ref(),
+            format,
+            options,
+            force_extract.unwrap_or(false),
+        )
     })
 }
 
@@ -422,9 +426,7 @@ pub fn markdown_from_bytes_batch(
 /// Returns an error if the content is not a valid XLSX workbook.
 #[napi]
 pub fn extract_sheet_names(content: Buffer) -> Result<Vec<String>> {
-    let bytes = content.to_vec();
-    drop(content);
-    extract_sheet_names_impl(&bytes)
+    extract_sheet_names_impl(content.as_ref())
 }
 
 /// Extract XLSX table data as a JSON string.
@@ -439,10 +441,8 @@ pub fn extract_tables_ir_json(
     streaming_rows: Option<bool>,
     include_document_properties: Option<bool>,
 ) -> Result<String> {
-    let bytes = content.to_vec();
-    drop(content);
     extract_tables_ir_json_impl(
-        &bytes,
+        content.as_ref(),
         style_aware_values.unwrap_or(false),
         streaming_rows.unwrap_or(false),
         include_document_properties.unwrap_or(false),
@@ -460,9 +460,7 @@ pub fn extract_csv_tables_ir_json(
     delimiter: Option<String>,
     include_document_properties: Option<bool>,
 ) -> Result<String> {
-    let bytes = content.to_vec();
-    drop(content);
-    extract_csv_tables_ir_json_impl(&bytes, delimiter, include_document_properties)
+    extract_csv_tables_ir_json_impl(content.as_ref(), delimiter, include_document_properties)
 }
 
 /// Inspect a PDF and return diagnostics as JSON.
@@ -472,9 +470,7 @@ pub fn extract_csv_tables_ir_json(
 /// Returns an error if the content is not a valid PDF or inspection fails.
 #[napi]
 pub fn inspect_pdf_json(content: Buffer) -> Result<String> {
-    let bytes = content.to_vec();
-    drop(content);
-    inspect_pdf_json_impl(&bytes)
+    inspect_pdf_json_impl(content.as_ref())
 }
 
 /// Inspect PDF font information and return as JSON.
@@ -484,9 +480,7 @@ pub fn inspect_pdf_json(content: Buffer) -> Result<String> {
 /// Returns an error if the content is not a valid PDF or font inspection fails.
 #[napi]
 pub fn inspect_pdf_fonts_json(content: Buffer) -> Result<String> {
-    let bytes = content.to_vec();
-    drop(content);
-    inspect_pdf_fonts_json_impl(&bytes)
+    inspect_pdf_fonts_json_impl(content.as_ref())
 }
 
 /// Convert document bytes to Docling JSON format.
@@ -496,9 +490,9 @@ pub fn inspect_pdf_fonts_json(content: Buffer) -> Result<String> {
 /// Returns an error if format detection, extraction, or Docling conversion fails.
 #[napi]
 pub fn docling_from_bytes(content: Buffer, format: Option<String>) -> Result<String> {
-    let bytes = content.to_vec();
-    drop(content);
-    with_optional_string(format, |format| docling_from_bytes_impl(&bytes, format))
+    with_optional_string(format, |format| {
+        docling_from_bytes_impl(content.as_ref(), format)
+    })
 }
 
 /// Create an Office document from officemd-flavored markdown.
@@ -523,11 +517,7 @@ pub fn create_document_from_markdown(markdown: String, format: String) -> Result
 /// Returns an error if the package is invalid, a part is missing, or a replacement target is not found.
 #[napi]
 pub fn apply_ooxml_patch_json(content: Buffer, patch_json: String) -> Result<Buffer> {
-    let bytes = content.to_vec();
-    drop(content);
-    let patched = apply_ooxml_patch_json_impl(&bytes, &patch_json);
-    drop(patch_json);
-    patched.map(Buffer::from)
+    apply_ooxml_patch_json_impl(content.as_ref(), &patch_json).map(Buffer::from)
 }
 
 #[cfg(test)]
