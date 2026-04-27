@@ -2,6 +2,9 @@
 
 use super::Table;
 
+/// Render a detected PDF table as GitHub-flavored Markdown.
+///
+/// Returns an empty string when the table has no usable cell content.
 pub fn table_to_markdown(table: &Table) -> String {
     if table.cells.is_empty() || table.cells[0].is_empty() {
         return String::new();

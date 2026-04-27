@@ -27,12 +27,18 @@ pub mod fixtures {
 }
 
 /// Canonical JSON formatting for stable snapshot comparisons.
+///
+/// # Panics
+///
+/// Panics if `payload` is not valid JSON or if the parsed JSON value cannot be serialized.
+#[must_use]
 pub fn canonical_json(payload: &str) -> String {
     let value: serde_json::Value = serde_json::from_str(payload).expect("valid JSON");
     serde_json::to_string_pretty(&value).expect("JSON serialization")
 }
 
 /// Normalize line endings for stable markdown snapshot comparisons.
+#[must_use]
 pub fn normalize_markdown(payload: &str) -> String {
     payload.replace("\r\n", "\n")
 }

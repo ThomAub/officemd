@@ -39,8 +39,8 @@ fn delimiter_option_is_applied() {
     let first_row = &doc.sheets[0].tables[0].rows[0];
     let a = &first_row[0].content[0].inlines[0];
     let b = &first_row[1].content[0].inlines[0];
-    assert_eq!(format!("{:?}", a), "Text(\"name\")");
-    assert_eq!(format!("{:?}", b), "Text(\"value\")");
+    assert_eq!(format!("{a:?}"), "Text(\"name\")");
+    assert_eq!(format!("{b:?}"), "Text(\"value\")");
 }
 
 #[test]

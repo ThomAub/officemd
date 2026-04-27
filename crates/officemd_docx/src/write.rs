@@ -1,7 +1,7 @@
 //! Generate DOCX files from the officemd IR.
 //!
 //! Converts an [`OoxmlDocument`] with `kind: Docx` into a valid `.docx` ZIP
-//! archive that opens in Microsoft Word and LibreOffice.
+//! archive that opens in `Microsoft Word` and `LibreOffice`.
 
 use std::fmt::Write as _;
 
@@ -9,8 +9,6 @@ use officemd_core::ir::{Block, CommentNote, Inline, OoxmlDocument, Paragraph, Ta
 use officemd_core::opc::writer::{OpcWriter, RelEntry, xml_escape_attr, xml_escape_text};
 
 use crate::error::DocxError;
-
-// --- OOXML constants ---
 
 const CT_DOCUMENT: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml";
@@ -96,8 +94,6 @@ pub fn generate_docx(doc: &OoxmlDocument) -> Result<Vec<u8>, DocxError> {
 
     Ok(w.finish()?)
 }
-
-// --- XML builders ---
 
 fn build_document_xml(
     blocks: &[Block],

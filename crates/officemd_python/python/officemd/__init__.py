@@ -1,4 +1,4 @@
-from officemd._officemd import (  # type: ignore[unresolved-import]
+from officemd._officemd import (
     apply_ooxml_patch_json,
     create_document_from_markdown,
     detect_format,
@@ -12,6 +12,7 @@ from officemd._officemd import (  # type: ignore[unresolved-import]
     markdown_from_bytes,
     markdown_from_bytes_batch,
 )
+from officemd.diff import diff_markdown, render_diff
 from officemd.patching import (
     BatchPatchContentResult,
     BatchPatchJob,
@@ -45,21 +46,7 @@ from officemd.patching import (
     patch_xlsx_batch_with_report,
     patch_xlsx_with_report,
 )
-
-
-def _missing_rich(*_args, **_kwargs):
-    raise ModuleNotFoundError(
-        "rich is required for render/diff helpers. Install with: pip install rich"
-    )
-
-
-try:
-    from officemd.diff import diff_markdown, render_diff
-    from officemd.render import render_markdown
-except ModuleNotFoundError:
-    diff_markdown = _missing_rich  # type: ignore[invalid-assignment]
-    render_diff = _missing_rich  # type: ignore[invalid-assignment]
-    render_markdown = _missing_rich  # type: ignore[invalid-assignment]
+from officemd.render import render_markdown
 
 __all__ = [
     "BatchPatchContentResult",

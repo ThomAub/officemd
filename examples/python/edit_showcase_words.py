@@ -37,9 +37,10 @@ def _check_with_libreoffice(path: Path) -> tuple[bool, str]:
     if not soffice:
         return False, "LibreOffice CLI not found"
 
-    with tempfile.TemporaryDirectory(prefix="officemd-lo-profile-") as profile_dir, tempfile.TemporaryDirectory(
-        prefix="officemd-lo-out-"
-    ) as out_dir:
+    with (
+        tempfile.TemporaryDirectory(prefix="officemd-lo-profile-") as profile_dir,
+        tempfile.TemporaryDirectory(prefix="officemd-lo-out-") as out_dir,
+    ):
         cmd = [
             soffice,
             f"-env:UserInstallation=file://{Path(profile_dir).resolve()}",
@@ -53,7 +54,9 @@ def _check_with_libreoffice(path: Path) -> tuple[bool, str]:
         completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
         produced = sorted(Path(out_dir).glob("*.pdf"))
         output = (completed.stdout + completed.stderr).strip()
-        return completed.returncode == 0 and bool(produced), output or "LibreOffice conversion failed"
+        return completed.returncode == 0 and bool(
+            produced
+        ), output or "LibreOffice conversion failed"
 
 
 def _docx_patch() -> DocxPatch:
@@ -62,11 +65,17 @@ def _docx_patch() -> DocxPatch:
         scoped_replacements=[
             ScopedDocxReplace(
                 DocxTextScope.HEADERS,
-                TextReplace("OOXML Showcase Header", "OfficeMD Showcase Header — edited from Python"),
+                TextReplace(
+                    "OOXML Showcase Header",
+                    "OfficeMD Showcase Header — edited from Python",
+                ),
             ),
             ScopedDocxReplace(
                 DocxTextScope.BODY,
-                TextReplace("Quarterly Operations Summary", "Quarterly Operations Summary — edited from Python"),
+                TextReplace(
+                    "Quarterly Operations Summary",
+                    "Quarterly Operations Summary — edited from Python",
+                ),
             ),
             ScopedDocxReplace(
                 DocxTextScope.COMMENTS,
@@ -145,7 +154,9 @@ def _xlsx_patch() -> XlsxPatch:
 
 def _summarize(path: Path, fmt: str) -> dict[str, object]:
     content = path.read_bytes()
-    markdown = markdown_from_bytes(content, format=fmt, include_document_properties=True)
+    markdown = markdown_from_bytes(
+        content, format=fmt, include_document_properties=True
+    )
     ir = json.loads(extract_ir_json(content, format=fmt))
     libreoffice_ok, libreoffice_output = _check_with_libreoffice(path)
     result: dict[str, object] = {
@@ -156,8 +167,12 @@ def _summarize(path: Path, fmt: str) -> dict[str, object]:
     }
     if fmt == "docx":
         result["core_title"] = ir["properties"]["core"].get("title")
-        result["body_title"] = ir["sections"][0]["blocks"][0]["Paragraph"]["inlines"][0]["Text"]
-        result["header_text"] = ir["sections"][1]["blocks"][0]["Paragraph"]["inlines"][0]["Text"]
+        result["body_title"] = ir["sections"][0]["blocks"][0]["Paragraph"]["inlines"][
+            0
+        ]["Text"]
+        result["header_text"] = ir["sections"][1]["blocks"][0]["Paragraph"]["inlines"][
+            0
+        ]["Text"]
         result["has_comment"] = "Edited DOCX comment from Python patch API." in markdown
     elif fmt == "pptx":
         result["core_title"] = (ir.get("properties") or {}).get("core", {}).get("title")
@@ -166,7 +181,9 @@ def _summarize(path: Path, fmt: str) -> dict[str, object]:
     else:
         result["core_title"] = (ir.get("properties") or {}).get("core", {}).get("title")
         result["sheet_names"] = extract_sheet_names(content)
-        result["has_python_edit"] = "North Python" in markdown or "Reviewed from Python" in markdown
+        result["has_python_edit"] = (
+            "North Python" in markdown or "Reviewed from Python" in markdown
+        )
     return result
 
 
@@ -175,20 +192,28 @@ def main() -> None:
 
     print("Plan:")
     print("1. Load examples/data/showcase.docx, showcase.pptx, and showcase.xlsx")
-    print("2. Patch OOXML parts directly via officemd.patch_docx / patch_pptx / patch_xlsx")
+    print(
+        "2. Patch OOXML parts directly via officemd.patch_docx / patch_pptx / patch_xlsx"
+    )
     print("3. Showcase metadata/comment-author scopes plus ALL_TEXT semantics")
     print("4. Verify edited files via officemd markdown/IR extraction")
     print("5. Verify LibreOffice can still open them via headless PDF conversion")
     print()
 
     docx_out = OUT_DIR / "showcase_edited.docx"
-    docx_out.write_bytes(patch_docx((DATA_DIR / "showcase.docx").read_bytes(), _docx_patch()))
+    docx_out.write_bytes(
+        patch_docx((DATA_DIR / "showcase.docx").read_bytes(), _docx_patch())
+    )
 
     pptx_out = OUT_DIR / "showcase_edited.pptx"
-    pptx_out.write_bytes(patch_pptx((DATA_DIR / "showcase.pptx").read_bytes(), _pptx_patch()))
+    pptx_out.write_bytes(
+        patch_pptx((DATA_DIR / "showcase.pptx").read_bytes(), _pptx_patch())
+    )
 
     xlsx_out = OUT_DIR / "showcase_edited.xlsx"
-    xlsx_result = patch_xlsx_with_report((DATA_DIR / "showcase.xlsx").read_bytes(), _xlsx_patch())
+    xlsx_result = patch_xlsx_with_report(
+        (DATA_DIR / "showcase.xlsx").read_bytes(), _xlsx_patch()
+    )
     xlsx_out.write_bytes(xlsx_result.content)
 
     print("DOCX result:")

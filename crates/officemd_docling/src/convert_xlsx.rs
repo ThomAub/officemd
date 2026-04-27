@@ -6,6 +6,7 @@ use crate::builder::DoclingDocumentBuilder;
 use crate::convert::convert_ir_table;
 use crate::model::{ContentLayer, DocItemLabel, GroupItem, GroupLabel, RefItem, TextItem};
 
+/// Convert XLSX workbook sheets and tables from the shared IR into Docling groups and items.
 pub fn convert_xlsx(doc: &OoxmlDocument, builder: &mut DoclingDocumentBuilder) {
     for sheet in &doc.sheets {
         // Each sheet becomes a Section group under body.

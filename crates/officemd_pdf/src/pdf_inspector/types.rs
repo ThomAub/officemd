@@ -117,6 +117,7 @@ pub struct TextLine {
 }
 
 impl TextLine {
+    /// Return the plain text for this line without Markdown formatting.
     pub fn text(&self) -> String {
         self.text_with_formatting(false, false)
     }

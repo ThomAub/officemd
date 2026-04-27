@@ -6,6 +6,11 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+/// Build the static Adobe glyph-name to Unicode character lookup map.
+///
+/// The returned map contains Adobe Glyph List names and related aliases used
+/// when decoding PDF font encodings that reference glyph names instead of
+/// direct Unicode values.
 pub fn build_glyph_to_unicode_map() -> HashMap<&'static str, char> {
     let mut m = HashMap::with_capacity(4528);
     m.insert("A", 'A');

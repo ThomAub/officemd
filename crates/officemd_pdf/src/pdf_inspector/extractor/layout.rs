@@ -360,6 +360,7 @@ fn split_column_stragglers(lines: Vec<TextLine>) -> (Vec<TextLine>, Vec<TextLine
     (core, stragglers)
 }
 
+/// Group positioned PDF text items into reading-order text lines.
 pub fn group_into_lines(items: Vec<TextItem>) -> Vec<TextLine> {
     if items.is_empty() {
         return Vec::new();

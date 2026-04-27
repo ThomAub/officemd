@@ -19,6 +19,11 @@ pub struct StyleContext {
 }
 
 impl StyleContext {
+    /// Load shared strings, style definitions, and workbook date settings from an OPC package.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any required XLSX package part cannot be read or parsed.
     pub fn load(package: &mut OpcPackage<'_>) -> Result<Self, XlsxError> {
         let shared_strings = load_shared_strings(package)?;
         let mut styles = load_styles(package)?;

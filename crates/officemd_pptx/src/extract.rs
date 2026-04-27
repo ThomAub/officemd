@@ -834,8 +834,7 @@ mod tests {
         buffer
     }
 
-    #[test]
-    fn extracts_slide_order_and_content() {
+    fn slide_order_fixture_parts() -> Vec<(&'static str, &'static str)> {
         let presentation = r#"<?xml version="1.0" encoding="UTF-8"?>
 <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <p:sldIdLst>
@@ -911,7 +910,20 @@ mod tests {
 </p:sld>
 "#;
 
-        let notes = r#"<?xml version="1.0" encoding="UTF-8"?>
+        vec![
+            ("ppt/presentation.xml", presentation),
+            ("ppt/_rels/presentation.xml.rels", presentation_rels),
+            ("ppt/slides/slide1.xml", slide1),
+            ("ppt/slides/_rels/slide1.xml.rels", slide1_rels),
+            ("ppt/slides/slide2.xml", slide2),
+            ("ppt/notesSlides/notesSlide1.xml", slide_order_notes_xml()),
+            ("ppt/commentAuthors.xml", slide_order_comment_authors_xml()),
+            ("ppt/comments/comment1.xml", slide_order_comments_xml()),
+        ]
+    }
+
+    fn slide_order_notes_xml() -> &'static str {
+        r#"<?xml version="1.0" encoding="UTF-8"?>
 <p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
   <p:cSld>
     <p:spTree>
@@ -923,35 +935,26 @@ mod tests {
     </p:spTree>
   </p:cSld>
 </p:notes>
-"#;
+"#
+    }
 
-        let comment_authors = r#"<?xml version="1.0" encoding="UTF-8"?>
+    fn slide_order_comment_authors_xml() -> &'static str {
+        r#"<?xml version="1.0" encoding="UTF-8"?>
 <p:cmAuthorLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
   <p:cmAuthor id="0" name="Alice"/>
 </p:cmAuthorLst>
-"#;
+"#
+    }
 
-        let comments = r#"<?xml version="1.0" encoding="UTF-8"?>
+    fn slide_order_comments_xml() -> &'static str {
+        r#"<?xml version="1.0" encoding="UTF-8"?>
 <p:cmLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
   <p:cm authorId="0"><p:text>Needs review</p:text></p:cm>
 </p:cmLst>
-"#;
+"#
+    }
 
-        let content = build_pptx(vec![
-            ("ppt/presentation.xml", presentation),
-            ("ppt/_rels/presentation.xml.rels", presentation_rels),
-            ("ppt/slides/slide1.xml", slide1),
-            ("ppt/slides/_rels/slide1.xml.rels", slide1_rels),
-            ("ppt/slides/slide2.xml", slide2),
-            ("ppt/notesSlides/notesSlide1.xml", notes),
-            ("ppt/commentAuthors.xml", comment_authors),
-            ("ppt/comments/comment1.xml", comments),
-        ]);
-
-        let doc = extract_ir(&content).unwrap();
-        let json = extract_ir_json(&content).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed["kind"], "Pptx");
+    fn assert_slide_order_document(doc: &officemd_core::ir::OoxmlDocument) {
         assert_eq!(doc.slides.len(), 2);
         assert_eq!(doc.slides[0].number, 1);
         assert_eq!(doc.slides[0].title.as_deref(), Some("Welcome"));
@@ -972,7 +975,13 @@ mod tests {
         assert_eq!(doc.slides[0].comments.len(), 1);
         assert_eq!(doc.slides[0].comments[0].author, "Alice");
         assert_eq!(doc.slides[0].comments[0].text, "Needs review");
+        assert_eq!(
+            first_link_target(doc).as_deref(),
+            Some("https://example.com")
+        );
+    }
 
+    fn first_link_target(doc: &officemd_core::ir::OoxmlDocument) -> Option<String> {
         let first_para = doc.slides[0]
             .blocks
             .iter()
@@ -981,11 +990,22 @@ mod tests {
                 _ => None,
             })
             .unwrap();
-        let link_target = first_para.inlines.iter().find_map(|inline| match inline {
+
+        first_para.inlines.iter().find_map(|inline| match inline {
             Inline::Link(link) => Some(link.target.clone()),
-            _ => None,
-        });
-        assert_eq!(link_target.as_deref(), Some("https://example.com"));
+            Inline::Text(_) => None,
+        })
+    }
+
+    #[test]
+    fn extracts_slide_order_and_content() {
+        let content = build_pptx(slide_order_fixture_parts());
+        let doc = extract_ir(&content).unwrap();
+        let json = extract_ir_json(&content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["kind"], "Pptx");
+        assert_slide_order_document(&doc);
     }
 
     #[test]

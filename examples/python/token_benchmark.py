@@ -37,7 +37,9 @@ def default_inputs(root: Path) -> list[Path]:
     if not data_dir.exists():
         return []
     return sorted(
-        p for p in data_dir.iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
+        p
+        for p in data_dir.iterdir()
+        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
     )
 
 
@@ -57,7 +59,7 @@ def build_token_counter(
         return "approx(chars/4)", lambda text: 0 if not text else max(1, len(text) // 4)
 
     try:
-        import tiktoken  # type: ignore
+        import tiktoken
     except ModuleNotFoundError:
         print(
             "warning: tiktoken not installed, falling back to approx(chars/4)",
@@ -131,7 +133,9 @@ def build_anthropic_counter(model: str) -> tuple[str, TokenCounter]:
 def build_gemini_counter(model: str) -> tuple[str, TokenCounter]:
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        raise SystemExit("GEMINI_API_KEY or GOOGLE_API_KEY is required when --tokenizer gemini")
+        raise SystemExit(
+            "GEMINI_API_KEY or GOOGLE_API_KEY is required when --tokenizer gemini"
+        )
 
     model_name = model if model.startswith("models/") else f"models/{model}"
     endpoint = (
@@ -340,7 +344,9 @@ def main() -> int:
         print("Missing file(s): " + ", ".join(str(p) for p in missing), file=sys.stderr)
         return 3
 
-    tokenizer_name, counter = build_token_counter(args.tokenizer, args.encoding, args.model)
+    tokenizer_name, counter = build_token_counter(
+        args.tokenizer, args.encoding, args.model
+    )
 
     rows: list[BenchmarkRow] = []
     for path in inputs:

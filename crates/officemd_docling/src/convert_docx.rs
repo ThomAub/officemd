@@ -6,6 +6,7 @@ use crate::builder::DoclingDocumentBuilder;
 use crate::convert::{convert_blocks, convert_comments};
 use crate::model::{ContentLayer, DocItemLabel, GroupItem, GroupLabel, RefItem, TextItem};
 
+/// Convert DOCX sections from the shared IR into Docling groups and text items.
 pub fn convert_docx(doc: &OoxmlDocument, builder: &mut DoclingDocumentBuilder) {
     for section in &doc.sections {
         if section.name == "body" {

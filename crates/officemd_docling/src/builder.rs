@@ -18,6 +18,7 @@ pub struct DoclingDocumentBuilder {
 }
 
 impl DoclingDocumentBuilder {
+    /// Create a new Docling document builder with the provided document name.
     #[must_use]
     pub fn new(name: &str) -> Self {
         Self {

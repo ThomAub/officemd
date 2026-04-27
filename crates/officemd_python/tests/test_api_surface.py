@@ -53,18 +53,14 @@ def test_create_document_from_markdown_returns_ooxml_bytes() -> None:
     assert content[:2] == b"PK"
 
 
-def test_markdown_from_bytes_signature_includes_force_extract() -> None:
+def test_markdown_from_bytes_signature_uses_render_kwargs() -> None:
     signature = inspect.signature(officemd.markdown_from_bytes)
     assert list(signature.parameters) == [
         "content",
         "format",
-        "include_document_properties",
-        "use_first_row_as_header",
-        "include_headers_footers",
-        "include_formulas",
-        "markdown_style",
-        "force_extract",
+        "render_settings",
     ]
+    assert signature.parameters["render_settings"].kind is inspect.Parameter.VAR_KEYWORD
 
 
 def test_apply_ooxml_patch_json_returns_edited_ooxml_bytes() -> None:

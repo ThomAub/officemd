@@ -9,10 +9,11 @@ use regex::Regex;
 
 use officemd_core::ir::{
     self, Block, CommentNote, DocSection, DocumentKind, DocumentProperties, FormulaNote, Hyperlink,
-    Inline, OoxmlDocument, Paragraph, PdfDocument, PdfPage, Sheet, Slide, Table, TableCell,
+    Inline, OoxmlDocument, Paragraph, PdfDiagnostics, PdfDocument, PdfPage, Sheet, Slide, Table,
+    TableCell,
 };
 
-use crate::{MarkdownProfile, RenderOptions};
+use crate::{MarkdownProfile, RenderIncludeOptions, RenderOptions, RenderTableOptions};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -22,7 +23,7 @@ use crate::{MarkdownProfile, RenderOptions};
 ///
 /// With frontmatter present, most options are auto-detected.
 /// Manual overrides for when frontmatter is absent (e.g. hand-written markdown).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ParseOptions {
     pub markdown_profile: Option<MarkdownProfile>,
     pub assume_kind: Option<DocumentKind>,
@@ -72,7 +73,7 @@ pub fn parse_document_with_options(
         .or(render_opts.map(|o| o.markdown_profile))
         .unwrap_or(MarkdownProfile::LlmCompact);
 
-    let use_first_row_as_header = render_opts.is_none_or(|o| o.use_first_row_as_header);
+    let use_first_row_as_header = render_opts.is_none_or(|o| o.table.first_row_as_header);
 
     // Strip frontmatter line from input
     let body = if fm.is_some() {
@@ -132,10 +133,14 @@ fn parse_frontmatter(input: &str) -> Option<FrontmatterOptions> {
     Some(FrontmatterOptions {
         kind,
         render_options: RenderOptions {
-            include_document_properties: properties,
-            use_first_row_as_header: first_row_as_header,
-            include_headers_footers: headers_footers,
-            include_formulas: formulas,
+            include: RenderIncludeOptions {
+                document_properties: properties,
+                headers_footers,
+                formulas,
+            },
+            table: RenderTableOptions {
+                first_row_as_header,
+            },
             markdown_profile: profile,
         },
     })
@@ -257,7 +262,7 @@ fn parse_properties_compact(body: &str) -> Option<DocumentProperties> {
 // Section splitting
 // ---------------------------------------------------------------------------
 
-/// Split markdown at `## ` boundaries, returning (header_line, body_text) pairs.
+/// Split markdown at `## ` boundaries, returning (`header_line`, `body_text`) pairs.
 fn split_at_h2(body: &str) -> Vec<(&str, &str)> {
     split_at_line(body, |line| line.starts_with("## "))
 }
@@ -273,13 +278,13 @@ static AUTOLINK_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"<(https?://[^>]+)>").expect("autolink regex"));
 
 fn parse_inlines(text: &str) -> Vec<Inline> {
-    if text.is_empty() {
-        return vec![Inline::Text(String::new())];
-    }
-
     enum Match<'a> {
         Link(regex::Captures<'a>),
         Auto(regex::Captures<'a>),
+    }
+
+    if text.is_empty() {
+        return vec![Inline::Text(String::new())];
     }
 
     let mut inlines = Vec::new();
@@ -305,45 +310,42 @@ fn parse_inlines(text: &str) -> Vec<Inline> {
             (None, None) => None,
         };
 
-        match earliest {
-            Some(m) => {
-                let (full, inline) = match m {
-                    Match::Link(caps) => {
-                        let full = caps.get(0).unwrap();
-                        let display = caps.get(1).unwrap().as_str().to_string();
-                        let target = caps.get(2).unwrap().as_str().to_string();
-                        (
-                            full,
-                            Inline::Link(Hyperlink {
-                                display,
-                                target,
-                                rel_id: None,
-                            }),
-                        )
-                    }
-                    Match::Auto(caps) => {
-                        let full = caps.get(0).unwrap();
-                        let target = caps.get(1).unwrap().as_str().to_string();
-                        (
-                            full,
-                            Inline::Link(Hyperlink {
-                                display: String::new(),
-                                target,
-                                rel_id: None,
-                            }),
-                        )
-                    }
-                };
-                if full.start() > 0 {
-                    inlines.push(Inline::Text(remaining[..full.start()].to_string()));
+        if let Some(m) = earliest {
+            let (full, inline) = match m {
+                Match::Link(caps) => {
+                    let full = caps.get(0).unwrap();
+                    let display = caps.get(1).unwrap().as_str().to_string();
+                    let target = caps.get(2).unwrap().as_str().to_string();
+                    (
+                        full,
+                        Inline::Link(Hyperlink {
+                            display,
+                            target,
+                            rel_id: None,
+                        }),
+                    )
                 }
-                inlines.push(inline);
-                remaining = &remaining[full.end()..];
+                Match::Auto(caps) => {
+                    let full = caps.get(0).unwrap();
+                    let target = caps.get(1).unwrap().as_str().to_string();
+                    (
+                        full,
+                        Inline::Link(Hyperlink {
+                            display: String::new(),
+                            target,
+                            rel_id: None,
+                        }),
+                    )
+                }
+            };
+            if full.start() > 0 {
+                inlines.push(Inline::Text(remaining[..full.start()].to_string()));
             }
-            None => {
-                inlines.push(Inline::Text(remaining.to_string()));
-                break;
-            }
+            inlines.push(inline);
+            remaining = &remaining[full.end()..];
+        } else {
+            inlines.push(Inline::Text(remaining.to_string()));
+            break;
         }
     }
 
@@ -587,14 +589,14 @@ fn parse_pdf(body: &str) -> OoxmlDocument {
         kind: DocumentKind::Pdf,
         pdf: Some(PdfDocument {
             pages,
-            diagnostics: Default::default(),
+            diagnostics: PdfDiagnostics::default(),
         }),
         ..Default::default()
     }
 }
 
 /// Split markdown at lines matching a predicate.
-/// Returns (matched_header_line, body_text_between_headers) pairs.
+/// Returns (`matched_header_line`, `body_text_between_headers`) pairs.
 /// Body text has leading/trailing whitespace trimmed.
 fn split_at_line(body: &str, is_boundary: impl Fn(&str) -> bool) -> Vec<(&str, &str)> {
     let mut sections = Vec::new();
@@ -790,6 +792,13 @@ fn parse_docx(
 static SLIDE_HEADER_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^## Slide (\d+)(?:\s*-\s*(.+))?$").expect("slide header regex"));
 
+#[derive(PartialEq)]
+enum PptxSection {
+    Body,
+    Notes,
+    Comments,
+}
+
 fn parse_pptx(
     body: &str,
     _profile: MarkdownProfile,
@@ -808,40 +817,33 @@ fn parse_pptx(
             let mut notes: Option<Vec<Paragraph>> = None;
             let mut comments = Vec::new();
             let mut i = 0;
-
-            #[derive(PartialEq)]
-            enum Section {
-                Body,
-                Notes,
-                Comments,
-            }
-            let mut current_section = Section::Body;
+            let mut current_section = PptxSection::Body;
 
             while i < lines.len() {
                 let line = lines[i];
 
                 if line == "### Notes" {
-                    current_section = Section::Notes;
+                    current_section = PptxSection::Notes;
                     notes = Some(Vec::new());
                     i += 1;
                     continue;
                 }
 
                 if line == "### Comments" {
-                    current_section = Section::Comments;
+                    current_section = PptxSection::Comments;
                     i += 1;
                     continue;
                 }
 
                 // Don't process past a ### in the wrong section
-                if line.starts_with("### ") && current_section != Section::Body {
+                if line.starts_with("### ") && current_section != PptxSection::Body {
                     // Unknown subsection, skip
                     i += 1;
                     continue;
                 }
 
                 match current_section {
-                    Section::Body => {
+                    PptxSection::Body => {
                         if line.is_empty() {
                             i += 1;
                             continue;
@@ -871,7 +873,7 @@ fn parse_pptx(
                         }));
                         i += 1;
                     }
-                    Section::Notes => {
+                    PptxSection::Notes => {
                         if line.is_empty() {
                             i += 1;
                             continue;
@@ -883,7 +885,7 @@ fn parse_pptx(
                         }
                         i += 1;
                     }
-                    Section::Comments => {
+                    PptxSection::Comments => {
                         if line.is_empty() {
                             i += 1;
                             continue;
@@ -931,8 +933,8 @@ mod tests {
             fm.render_options.markdown_profile,
             MarkdownProfile::LlmCompact
         );
-        assert!(fm.render_options.use_first_row_as_header);
-        assert!(fm.render_options.include_formulas);
+        assert!(fm.render_options.table.first_row_as_header);
+        assert!(fm.render_options.include.formulas);
     }
 
     #[test]
@@ -1014,7 +1016,7 @@ mod tests {
                         markdown: "Page two body".into(),
                     },
                 ],
-                diagnostics: Default::default(),
+                diagnostics: PdfDiagnostics::default(),
             }),
             ..Default::default()
         };
@@ -1271,7 +1273,7 @@ mod tests {
                 blocks: vec![],
                 comments: vec![CommentNote {
                     id: "c1".into(),
-                    author: "".into(),
+                    author: String::new(),
                     text: "Anonymous note".into(),
                 }],
             }],
@@ -1349,7 +1351,9 @@ mod tests {
         };
 
         let opts = RenderOptions {
-            use_first_row_as_header: false,
+            table: RenderTableOptions {
+                first_row_as_header: false,
+            },
             ..Default::default()
         };
         let md1 = render_document_with_options(&doc, opts);

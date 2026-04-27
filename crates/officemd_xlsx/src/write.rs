@@ -1,7 +1,7 @@
 //! Generate XLSX files from the officemd IR.
 //!
 //! Converts an [`OoxmlDocument`] with `kind: Xlsx` into a valid `.xlsx` ZIP
-//! archive that opens in Microsoft Excel and LibreOffice Calc.
+//! archive that opens in Microsoft Excel and `LibreOffice` Calc.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -10,8 +10,6 @@ use officemd_core::ir::{Inline, OoxmlDocument, Paragraph, Sheet, TableCell};
 use officemd_core::opc::writer::{OpcWriter, RelEntry, xml_escape_attr, xml_escape_text};
 
 use crate::error::XlsxError;
-
-// --- OOXML constants ---
 
 const CT_WORKBOOK: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
@@ -98,8 +96,6 @@ pub fn generate_xlsx(doc: &OoxmlDocument) -> Result<Vec<u8>, XlsxError> {
     Ok(w.finish()?)
 }
 
-// --- Shared String Table ---
-
 struct SharedStringTable {
     strings: Vec<String>,
     index_map: HashMap<String, usize>,
@@ -138,13 +134,12 @@ impl SharedStringTable {
     }
 }
 
-// --- Column name conversion ---
-
 /// Convert a 0-based column index to an Excel column name (A, B, ..., Z, AA, AB, ...).
 fn col_to_name(mut col: usize) -> String {
     let mut name = String::new();
     loop {
-        name.insert(0, (b'A' + (col % 26) as u8) as char);
+        let offset = u8::try_from(col % 26).expect("column remainder is less than 26");
+        name.insert(0, char::from(b'A' + offset));
         if col < 26 {
             break;
         }
@@ -157,8 +152,6 @@ fn col_to_name(mut col: usize) -> String {
 fn cell_ref(row: usize, col: usize) -> String {
     format!("{}{}", col_to_name(col), row + 1)
 }
-
-// --- XML builders ---
 
 fn build_workbook_xml(sheets: &[(String, usize)]) -> String {
     let mut xml = format!(

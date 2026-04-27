@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use super::fonts::{resolve_array, resolve_dict};
 use super::get_number;
 
+/// Extract hyperlink annotations from a PDF page as positioned text items.
 pub fn extract_page_links(doc: &Document, page_id: ObjectId, page_num: u32) -> Vec<TextItem> {
     let mut links = Vec::new();
 

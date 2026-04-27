@@ -8,6 +8,7 @@ use crate::model::{
     ContentLayer, DocItemLabel, GroupItem, GroupLabel, PageItem, RefItem, Size, TextItem,
 };
 
+/// Convert PPTX slides, notes, comments, and speaker metadata into Docling items.
 pub fn convert_pptx(doc: &OoxmlDocument, builder: &mut DoclingDocumentBuilder) {
     for slide in &doc.slides {
         // Each slide becomes a Section group + a page entry.
