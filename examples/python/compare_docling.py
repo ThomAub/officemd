@@ -97,7 +97,7 @@ def main() -> None:
     # Try to import docling for comparison
     docling_available = False
     try:
-        from docling.document_converter import DocumentConverter
+        from docling.document_converter import DocumentConverter  # ty: ignore[unresolved-import]
 
         docling_available = True
         converter = DocumentConverter()

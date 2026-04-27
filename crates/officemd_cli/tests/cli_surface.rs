@@ -51,7 +51,7 @@ fn markdown_help_snapshot() {
     let _guard = bind_common_filters();
     assert_cmd_snapshot!(
         cli().args(["markdown", "--help"]),
-        @r###"
+        @r#"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -65,8 +65,6 @@ fn markdown_help_snapshot() {
     Options:
           --format <FORMAT>
               Explicitly set the document format [possible values: docx, xlsx, csv, pptx, pdf]
-          --include-document-properties
-              Include document properties in markdown output
           --output-format <OUTPUT_FORMAT>
               Output format: markdown (default) or json [possible values: markdown, json]
           --pretty
@@ -85,6 +83,8 @@ fn markdown_help_snapshot() {
               Use style-aware cell values for XLSX
           --streaming
               Use streaming row parser for XLSX
+          --include-document-properties
+              Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
           --no-formulas
@@ -97,7 +97,7 @@ fn markdown_help_snapshot() {
               Print help
 
     ----- stderr -----
-    "###,
+    "#,
     );
 }
 
@@ -106,7 +106,7 @@ fn render_help_snapshot() {
     let _guard = bind_common_filters();
     assert_cmd_snapshot!(
         cli().args(["render", "--help"]),
-        @r###"
+        @r#"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -120,8 +120,6 @@ fn render_help_snapshot() {
     Options:
           --format <FORMAT>
               Explicitly set the document format [possible values: docx, xlsx, csv, pptx, pdf]
-          --include-document-properties
-              Include document properties in markdown output
           --output-format <OUTPUT_FORMAT>
               Output format: markdown (default) or json [possible values: markdown, json]
           --pretty
@@ -140,6 +138,8 @@ fn render_help_snapshot() {
               Use style-aware cell values for XLSX
           --streaming
               Use streaming row parser for XLSX
+          --include-document-properties
+              Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
           --no-formulas
@@ -152,7 +152,7 @@ fn render_help_snapshot() {
               Print help
 
     ----- stderr -----
-    "###,
+    "#,
     );
 }
 
@@ -161,7 +161,7 @@ fn diff_help_snapshot() {
     let _guard = bind_common_filters();
     assert_cmd_snapshot!(
         cli().args(["diff", "--help"]),
-        @r###"
+        @r#"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -176,8 +176,6 @@ fn diff_help_snapshot() {
     Options:
           --format <FORMAT>
               Explicitly set the document format [possible values: docx, xlsx, csv, pptx, pdf]
-          --include-document-properties
-              Include document properties in markdown output
           --output-format <OUTPUT_FORMAT>
               Output format: markdown (default) or json [possible values: markdown, json]
           --pretty
@@ -196,6 +194,8 @@ fn diff_help_snapshot() {
               Use style-aware cell values for XLSX
           --streaming
               Use streaming row parser for XLSX
+          --include-document-properties
+              Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
           --no-formulas
@@ -208,7 +208,7 @@ fn diff_help_snapshot() {
               Print help
 
     ----- stderr -----
-    "###,
+    "#,
     );
 }
 
@@ -217,7 +217,7 @@ fn convert_help_snapshot() {
     let _guard = bind_common_filters();
     assert_cmd_snapshot!(
         cli().args(["convert", "--help"]),
-        @r###"
+        @r#"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -233,8 +233,6 @@ fn convert_help_snapshot() {
               Output file path. Defaults to <input>.md or <input>.json
           --format <FORMAT>
               Explicitly set the document format [possible values: docx, xlsx, csv, pptx, pdf]
-          --include-document-properties
-              Include document properties in markdown output
           --output-format <OUTPUT_FORMAT>
               Output format: markdown (default) or json [possible values: markdown, json]
           --pretty
@@ -243,16 +241,18 @@ fn convert_help_snapshot() {
               Filter XLSX sheets by name or 1-based index (comma-separated)
           --pages <PAGES>
               Select PDF pages/PPTX slides or XLSX/CSV sheet indices (e.g. "1,3-5")
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --slides <SLIDES>
               Filter PPTX slides by number or range (e.g. "1-3,5")
           --force
               Force extraction even for scanned/image-based PDFs
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --style-aware
               Use style-aware cell values for XLSX
           --streaming
               Use streaming row parser for XLSX
+          --include-document-properties
+              Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
           --no-formulas
@@ -265,7 +265,7 @@ fn convert_help_snapshot() {
               Print help
 
     ----- stderr -----
-    "###,
+    "#,
     );
 }
 
@@ -274,7 +274,7 @@ fn stream_help_snapshot() {
     let _guard = bind_common_filters();
     assert_cmd_snapshot!(
         cli().args(["stream", "--help"]),
-        @r###"
+        @r#"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -288,8 +288,6 @@ fn stream_help_snapshot() {
     Options:
           --format <FORMAT>
               Explicitly set the document format [possible values: docx, xlsx, csv, pptx, pdf]
-          --include-document-properties
-              Include document properties in markdown output
           --output-format <OUTPUT_FORMAT>
               Output format: markdown (default) or json [possible values: markdown, json]
           --pretty
@@ -308,6 +306,8 @@ fn stream_help_snapshot() {
               Use style-aware cell values for XLSX
           --streaming
               Use streaming row parser for XLSX
+          --include-document-properties
+              Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
           --no-formulas
@@ -320,7 +320,7 @@ fn stream_help_snapshot() {
               Print help
 
     ----- stderr -----
-    "###,
+    "#,
     );
 }
 
@@ -329,7 +329,7 @@ fn inspect_help_snapshot() {
     let _guard = bind_common_filters();
     assert_cmd_snapshot!(
         cli().args(["inspect", "--help"]),
-        @r###"
+        @r#"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -343,8 +343,6 @@ fn inspect_help_snapshot() {
     Options:
           --format <FORMAT>
               Explicitly set the document format [possible values: docx, xlsx, csv, pptx, pdf]
-          --include-document-properties
-              Include document properties in markdown output
           --output-format <OUTPUT_FORMAT>
               Output format: markdown (default) or json [possible values: markdown, json]
           --pretty
@@ -363,6 +361,8 @@ fn inspect_help_snapshot() {
               Use style-aware cell values for XLSX
           --streaming
               Use streaming row parser for XLSX
+          --include-document-properties
+              Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
           --no-formulas
@@ -375,7 +375,7 @@ fn inspect_help_snapshot() {
               Print help
 
     ----- stderr -----
-    "###,
+    "#,
     );
 }
 
