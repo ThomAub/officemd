@@ -43,6 +43,11 @@ class ContractFunction:
     js_return_type: str
     python_runtime_type: str | None = None
     js_runtime_type: str | None = None
+    # When set, the Python binding fulfills the kwargs in `params` via a single
+    # **kwargs catch-all (e.g. `**render_settings`). The named explicit params
+    # come first, then this catch-all replaces the remaining contract kwargs.
+    python_kwargs_param: str | None = None
+    python_explicit_params: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -160,6 +165,8 @@ CONTRACT: dict[str, ContractFunction] = {
             "force_extract": False,
         },
         js_return_type="str",
+        python_kwargs_param="render_settings",
+        python_explicit_params=("content", "format"),
     ),
     "markdown_from_bytes_batch": ContractFunction(
         name="markdown_from_bytes_batch",
@@ -183,6 +190,8 @@ CONTRACT: dict[str, ContractFunction] = {
             "markdown_style": None,
         },
         js_return_type="list[str]",
+        python_kwargs_param="render_settings",
+        python_explicit_params=("contents", "format", "workers"),
     ),
 }
 
@@ -392,9 +401,30 @@ def extract_js_rust_surface() -> dict[str, RustBindingFunction]:
     return surface
 
 
+def split_top_level_commas(text: str) -> list[str]:
+    """Split on commas that are not nested inside <>, [], (), or {}."""
+    parts: list[str] = []
+    depth = 0
+    current = []
+    for ch in text:
+        if ch in "<[({":
+            depth += 1
+        elif ch in ">])}":
+            depth = max(depth - 1, 0)
+        if ch == "," and depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+    tail = "".join(current).strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
 def parse_python_rust_params(fn_args: str) -> tuple[str, ...]:
     params: list[str] = []
-    for raw_param in [chunk.strip() for chunk in fn_args.split(",") if chunk.strip()]:
+    for raw_param in split_top_level_commas(fn_args):
         name = raw_param.split(":", 1)[0].strip()
         if name == "py":
             continue
@@ -449,14 +479,19 @@ def compare_surfaces(
         if None in (js_fn, py_fn, js_rust_fn, py_rust_fn):
             continue
 
-        for label, fn_params in (
-            ("JS", js_fn.params),
-            ("Python", py_fn.params),
-            ("JS Rust", js_rust_fn.params),
-            ("Python Rust", py_rust_fn.params),
+        if contract.python_kwargs_param is not None:
+            py_expected = (*contract.python_explicit_params, contract.python_kwargs_param)
+        else:
+            py_expected = contract.params
+
+        for label, fn_params, expected in (
+            ("JS", js_fn.params, contract.params),
+            ("Python", py_fn.params, py_expected),
+            ("JS Rust", js_rust_fn.params, contract.params),
+            ("Python Rust", py_rust_fn.params, py_expected),
         ):
-            if fn_params != contract.params:
-                problems.append(f"{label} parameters for {name}: expected {list(contract.params)}, got {list(fn_params)}")
+            if fn_params != expected:
+                problems.append(f"{label} parameters for {name}: expected {list(expected)}, got {list(fn_params)}")
 
         expected_optional = frozenset(contract.python_defaults)
         if js_fn.optional_params != expected_optional:
@@ -473,6 +508,11 @@ def compare_surfaces(
                 problems.append(f"{label} return type for {name}: expected {contract.js_return_type}, got {ret_type}")
 
         for param, expected in contract.python_defaults.items():
+            if (
+                contract.python_kwargs_param is not None
+                and param not in contract.python_explicit_params
+            ):
+                continue
             observed = py_fn.defaults.get(param, object())
             if observed != expected:
                 problems.append(
