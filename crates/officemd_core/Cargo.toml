@@ -1,6 +1,6 @@
 [package]
 name = "officemd_core"
-version = "0.1.6"
+version = "0.1.7"
 edition.workspace = true
 description = "Shared IR, package reading, and relationships for OfficeMD"
 license = "MIT"
