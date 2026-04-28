@@ -368,11 +368,22 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
                 // Insert space at word boundaries. Base threshold raised to
                 // 0.13 to tolerate Tc/Tw character-spacing on French financial
                 // PDFs that shift advance widths relative to Td positioning.
+                //
+                // Uppercase-uppercase boundaries get a wider threshold (~1.4x)
+                // because all-caps headings carry intentional kerning that the
+                // base threshold misreads as a word break (regression seen on
+                // headings such as `INTERNATIONALIZATION` splitting into
+                // `INTERNATIONALIZATIO N`).
                 let threshold = {
                     let next_first = next.text.trim_start().chars().next();
+                    let prev_last = text.chars().rev().find(|c| !c.is_whitespace());
                     // Never insert space before joining punctuation
                     if next_first.is_some_and(|c| matches!(c, '.' | ',' | ';' | ')' | ']' | '}')) {
                         first.font_size * 0.25
+                    } else if prev_last.is_some_and(|c| c.is_ascii_uppercase())
+                        && next_first.is_some_and(|c| c.is_ascii_uppercase())
+                    {
+                        first.font_size * 0.18
                     } else {
                         first.font_size * 0.13
                     }

@@ -313,6 +313,56 @@ pub(crate) fn fix_letterspaced_items(items: &mut [TextItem]) -> f32 {
             .all(|(i, &c)| if i % 2 == 0 { c != ' ' } else { c == ' ' })
     }
 
+    // Per-item heuristic for substantial, unambiguous letter-spacing.  Used
+    // when the page-wide letter-spaced ratio is below the 50% gate.
+    fn is_substantial_letterspaced(text: &str) -> bool {
+        if !is_letterspaced(text) {
+            return false;
+        }
+        let letters: Vec<char> = text.chars().filter(|c| c.is_alphabetic()).collect();
+        if letters.len() < 5 {
+            return false;
+        }
+        // Require either a lowercase letter (mixed-case word) or an accented
+        // Latin character so we don't collapse alphabetic labels like
+        // "A B C D E F" while still catching `p r é s e n t a t i o n`.
+        letters.iter().any(|c| {
+            c.is_lowercase()
+                || matches!(
+                    c,
+                    'é' | 'è'
+                        | 'ê'
+                        | 'ë'
+                        | 'à'
+                        | 'â'
+                        | 'ä'
+                        | 'ô'
+                        | 'ö'
+                        | 'î'
+                        | 'ï'
+                        | 'û'
+                        | 'ü'
+                        | 'ù'
+                        | 'ç'
+                        | 'É'
+                        | 'È'
+                        | 'Ê'
+                        | 'Ë'
+                        | 'À'
+                        | 'Â'
+                        | 'Ä'
+                        | 'Ô'
+                        | 'Ö'
+                        | 'Î'
+                        | 'Ï'
+                        | 'Û'
+                        | 'Ü'
+                        | 'Ù'
+                        | 'Ç'
+                )
+        })
+    }
+
     // Count how many items are letter-spaced vs total non-trivial items
     let mut letterspaced_count = 0u32;
     let mut total_text_items = 0u32;
@@ -340,6 +390,20 @@ pub(crate) fn fix_letterspaced_items(items: &mut [TextItem]) -> f32 {
             let threshold = compute_canva_join_threshold(items);
             if threshold > 0.40 {
                 return threshold;
+            }
+        }
+
+        // Third detection path: substantial letter-spaced items on a normal
+        // page (e.g. French headings rendered with intentional kerning like
+        // `p r é s e n t a t i o n`).  When the page-wide gate fails but a
+        // single item is unambiguously letter-spaced (≥5 letters, mixed case
+        // or accented), collapse just that item.  The mixed-case/accented
+        // requirement avoids false positives on alphabetic labels such as
+        // "A B C D E F".
+        for item in items.iter_mut() {
+            if is_substantial_letterspaced(&item.text) {
+                let fixed: String = item.text.chars().filter(|&c| c != ' ').collect();
+                item.text = fixed;
             }
         }
         return DEFAULT;
@@ -1155,6 +1219,75 @@ mod tests {
             !should_join_items(&ized, &fo, threshold),
             "ized→fo: ratio={:.3}, should split (word boundary)",
             (fo.x - (ized.x + ized.width)) / fs
+        );
+    }
+
+    #[test]
+    fn fix_letterspaced_items_collapses_substantial_french_heading() {
+        // A normal page that contains a single letter-spaced French heading
+        // (`p r é s e n t a t i o n`) should still get that heading collapsed,
+        // even though the page-wide ≥50% gate does not fire.
+        let fs = 12.0;
+        let make = |text: &str, x: f32| TextItem {
+            text: text.to_string(),
+            x,
+            y: 100.0,
+            width: text.chars().count() as f32 * fs * 0.5,
+            height: fs,
+            font: "F1".into(),
+            font_size: fs,
+            page: 1,
+            is_bold: false,
+            is_italic: false,
+            item_type: ItemType::Text,
+            mcid: None,
+        };
+        let mut items = vec![
+            make("Rapport avec refus d'attester", 0.0),
+            make("En notre qualité d'expert-comptable", 0.0),
+            make("nous avons effectué une mission", 0.0),
+            make("p r é s e n t a t i o n", 0.0),
+            make("des comptes annuels de l'entreprise", 0.0),
+        ];
+        fix_letterspaced_items(&mut items);
+        assert_eq!(
+            items[3].text, "présentation",
+            "expected substantial French letter-spaced item to collapse"
+        );
+        // Other items must remain untouched.
+        assert_eq!(items[0].text, "Rapport avec refus d'attester");
+    }
+
+    #[test]
+    fn fix_letterspaced_items_preserves_alphabetic_labels() {
+        // Pure-uppercase short labels like `A B C D E F` should NOT be
+        // collapsed: they are likely table column headers, not letter-spaced
+        // words.  Five letters and no lowercase / accented chars → keep.
+        let fs = 12.0;
+        let make = |text: &str, x: f32| TextItem {
+            text: text.to_string(),
+            x,
+            y: 100.0,
+            width: text.chars().count() as f32 * fs * 0.5,
+            height: fs,
+            font: "F1".into(),
+            font_size: fs,
+            page: 1,
+            is_bold: false,
+            is_italic: false,
+            item_type: ItemType::Text,
+            mcid: None,
+        };
+        let mut items = vec![
+            make("Some normal text body", 0.0),
+            make("Another block of running text", 0.0),
+            make("More running text", 0.0),
+            make("A B C D E", 0.0),
+        ];
+        fix_letterspaced_items(&mut items);
+        assert_eq!(
+            items[3].text, "A B C D E",
+            "all-uppercase 5-letter label must remain untouched"
         );
     }
 }
