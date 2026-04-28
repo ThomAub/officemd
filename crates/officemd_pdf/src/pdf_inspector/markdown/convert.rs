@@ -7,8 +7,9 @@ use crate::pdf_inspector::types::TextLine;
 
 use super::MarkdownOptions;
 use super::analysis::{
-    bold_heading_level, calculate_font_stats, compute_heading_tiers, compute_paragraph_threshold,
-    detect_header_level, font_size_rarity, has_dot_leaders,
+    LineAlignment, bold_heading_level, calculate_font_stats, compute_heading_tiers,
+    compute_page_margins, compute_paragraph_threshold, detect_header_level, detect_line_alignment,
+    font_size_rarity, has_dot_leaders,
 };
 use super::classify::{
     format_list_item, is_caption_line, is_list_item, is_monospace_font, starts_with_bullet_marker,
@@ -401,12 +402,17 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
     // Detect struct heading levels that are overused (body text mistagged as headings)
     let overused_heading_levels = detect_overused_struct_heading_levels(&lines, struct_roles);
 
+    // officemd vendor (98e6bf3): compute page margins for alignment and
+    // blockquote detection.
+    let page_margins = compute_page_margins(&lines);
+
     let mut output = String::new();
     let mut current_page = 0u32;
     let mut prev_y = f32::MAX;
     let mut prev_x = 0.0f32;
     let mut in_list = false;
     let mut in_paragraph = false;
+    let mut in_blockquote = false;
     let mut last_list_x: Option<f32> = None;
     let mut in_code_block = false;
     let mut prev_had_dot_leaders = false;
@@ -440,6 +446,10 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
                     &mut output,
                     &mut in_paragraph,
                 );
+                if in_blockquote {
+                    output.push('\n');
+                    in_blockquote = false;
+                }
                 if in_paragraph {
                     output.push_str("\n\n");
                     in_paragraph = false;
@@ -486,6 +496,10 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
             for (idx, (table_y, table_md)) in tables.iter().enumerate() {
                 // Insert table when we pass its Y position
                 if *table_y > line.y && !inserted_tables.contains(&(current_page, idx)) {
+                    if in_blockquote {
+                        output.push('\n');
+                        in_blockquote = false;
+                    }
                     if in_paragraph {
                         output.push_str("\n\n");
                         in_paragraph = false;
@@ -503,6 +517,10 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
             for (idx, (image_y, image_md)) in images.iter().enumerate() {
                 // Insert image when we pass its Y position
                 if *image_y > line.y && !inserted_images.contains(&(current_page, idx)) {
+                    if in_blockquote {
+                        output.push('\n');
+                        in_blockquote = false;
+                    }
                     if in_paragraph {
                         output.push_str("\n\n");
                         in_paragraph = false;
@@ -512,6 +530,20 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
                     output.push('\n');
                     inserted_images.insert((current_page, idx));
                 }
+            }
+        }
+
+        // Get text early for bold-boundary check
+        let plain_text = line.text();
+        let plain_trimmed = plain_text.trim();
+
+        // Force paragraph break before fully-bold short lines (likely section headers)
+        if in_paragraph && options.detect_bold && !line.items.is_empty() {
+            let all_bold = line.items.iter().all(|i| i.is_bold);
+            let word_count = plain_trimmed.split_whitespace().count();
+            if all_bold && word_count <= 15 {
+                output.push_str("\n\n");
+                in_paragraph = false;
             }
         }
 
@@ -531,6 +563,10 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
             output.push_str("\n\n");
             in_paragraph = false;
         }
+        if is_para_break && in_blockquote {
+            output.push('\n');
+            in_blockquote = false;
+        }
         // Don't immediately end list on paragraph break
         // Let the continuation check below decide if we're still in a list
         prev_y = line.y;
@@ -539,10 +575,6 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
         // Get text with optional bold/italic formatting
         let text = line.text_with_formatting(options.detect_bold, options.detect_italic);
         let trimmed = text.trim();
-
-        // Also get plain text for pattern matching (list detection, captions, etc.)
-        let plain_text = line.text();
-        let plain_trimmed = plain_text.trim();
 
         if trimmed.is_empty() {
             continue;
@@ -569,6 +601,10 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
             .is_some_and(|r| matches!(r, StructRole::Caption))
             || is_caption_line(plain_trimmed)
         {
+            if in_blockquote {
+                output.push('\n');
+                in_blockquote = false;
+            }
             if in_paragraph {
                 output.push_str("\n\n");
                 in_paragraph = false;
@@ -653,6 +689,10 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
         };
 
         if let Some(level) = struct_heading.or(heuristic_heading) {
+            if in_blockquote {
+                output.push('\n');
+                in_blockquote = false;
+            }
             if in_paragraph {
                 output.push_str("\n\n");
                 in_paragraph = false;
@@ -688,6 +728,10 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
 
         // Detect list items
         if options.detect_lists && is_list_item(plain_trimmed) {
+            if in_blockquote {
+                output.push('\n');
+                in_blockquote = false;
+            }
             if in_paragraph {
                 output.push_str("\n\n");
                 in_paragraph = false;
@@ -729,11 +773,15 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
             }
         }
 
-        // Structure-tree block quote
+        // Structure-tree block quote (upstream's tagged-PDF blockquote path).
         if struct_role
             .as_ref()
             .is_some_and(|r| matches!(r, StructRole::BlockQuote))
         {
+            if in_blockquote {
+                output.push('\n');
+                in_blockquote = false;
+            }
             if in_paragraph {
                 output.push_str("\n\n");
                 in_paragraph = false;
@@ -742,8 +790,65 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
             continue;
         }
 
+        // officemd vendor (98e6bf3): detect centered text and wrap with
+        // <center> tags.
+        if options.detect_alignment {
+            if let Some(margins) = page_margins.get(&line.page) {
+                if detect_line_alignment(&line, margins) == LineAlignment::Center {
+                    if in_blockquote {
+                        output.push('\n');
+                        in_blockquote = false;
+                    }
+                    if in_paragraph {
+                        output.push_str("\n\n");
+                        in_paragraph = false;
+                    }
+                    output.push_str("<center>");
+                    output.push_str(trimmed);
+                    output.push_str("</center>\n\n");
+                    continue;
+                }
+            }
+        }
+
+        // officemd vendor (98e6bf3): heuristic indentation-aware blockquote
+        // for untagged PDFs (the StructRole::BlockQuote case is handled
+        // above).  Only triggers when the page has a dominant left margin
+        // (concentration > 0.5) so scattered layouts don't produce false
+        // positives.
+        if options.detect_block_quotes && !in_list {
+            if let Some(margins) = page_margins.get(&line.page) {
+                let line_x = line.items.first().map(|i| i.x).unwrap_or(0.0);
+                let indent_threshold = base_size * 3.0;
+                let has_dominant_margin =
+                    margins.left_margin_concentration > 0.5 && !margins.likely_multi_column;
+                let is_indented = has_dominant_margin && line_x > margins.left + indent_threshold;
+
+                if is_indented {
+                    if !in_blockquote {
+                        if in_paragraph {
+                            output.push_str("\n\n");
+                            in_paragraph = false;
+                        }
+                        in_blockquote = true;
+                    }
+                    output.push_str("> ");
+                    output.push_str(trimmed);
+                    output.push('\n');
+                    continue;
+                } else if in_blockquote {
+                    output.push('\n');
+                    in_blockquote = false;
+                }
+            }
+        }
+
         // Code block accumulation (struct-tree Code role or monospace font)
         if is_code_line {
+            if in_blockquote {
+                output.push('\n');
+                in_blockquote = false;
+            }
             if in_paragraph {
                 output.push_str("\n\n");
                 in_paragraph = false;
@@ -802,6 +907,11 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
         );
     }
 
+    // Close final blockquote
+    if in_blockquote {
+        output.push('\n');
+    }
+
     // Close final paragraph
     if in_paragraph {
         output.push('\n');
@@ -837,11 +947,15 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
 
     let isolated_lines = find_isolated_lines(&lines, base_size, para_threshold);
 
+    // Compute page margins for alignment and blockquote detection
+    let page_margins = compute_page_margins(&lines);
+
     let mut output = String::new();
     let mut current_page = 0u32;
     let mut prev_y = f32::MAX;
     let mut in_list = false;
     let mut in_paragraph = false;
+    let mut in_blockquote = false;
     let mut last_list_x: Option<f32> = None;
     let mut prev_had_dot_leaders = false;
 
@@ -849,6 +963,10 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
         // Page break
         if line.page != current_page {
             if current_page > 0 {
+                if in_blockquote {
+                    output.push('\n');
+                    in_blockquote = false;
+                }
                 if in_paragraph {
                     output.push_str("\n\n");
                     in_paragraph = false;
@@ -866,6 +984,20 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
             }
         }
 
+        // Get plain text early for bold-boundary check
+        let plain_text = line.text();
+        let plain_trimmed = plain_text.trim();
+
+        // Force paragraph break before fully-bold short lines (likely section headers)
+        if in_paragraph && options.detect_bold && !line.items.is_empty() {
+            let all_bold = line.items.iter().all(|i| i.is_bold);
+            let word_count = plain_trimmed.split_whitespace().count();
+            if all_bold && word_count <= 15 {
+                output.push_str("\n\n");
+                in_paragraph = false;
+            }
+        }
+
         // Paragraph break: large forward Y gap (normal) or large backward jump
         // (newspaper columns emitted sequentially on the same page).
         let y_gap = prev_y - line.y;
@@ -873,6 +1005,10 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
         if is_para_break && in_paragraph {
             output.push_str("\n\n");
             in_paragraph = false;
+        }
+        if is_para_break && in_blockquote {
+            output.push('\n');
+            in_blockquote = false;
         }
         // Don't immediately end list on paragraph break
         // Let the continuation check below decide if we're still in a list
@@ -882,10 +1018,6 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
         let text = line.text_with_formatting(options.detect_bold, options.detect_italic);
         let trimmed = text.trim();
 
-        // Also get plain text for pattern matching
-        let plain_text = line.text();
-        let plain_trimmed = plain_text.trim();
-
         if trimmed.is_empty() {
             continue;
         }
@@ -893,6 +1025,10 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
         // Detect figure/table captions and source citations
         // These should be on their own line followed by a paragraph break
         if is_caption_line(plain_trimmed) {
+            if in_blockquote {
+                output.push('\n');
+                in_blockquote = false;
+            }
             if in_paragraph {
                 output.push_str("\n\n");
                 in_paragraph = false;
@@ -932,6 +1068,10 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
                     None
                 })
             {
+                if in_blockquote {
+                    output.push('\n');
+                    in_blockquote = false;
+                }
                 if in_paragraph {
                     output.push_str("\n\n");
                     in_paragraph = false;
@@ -946,6 +1086,10 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
 
         // Detect list items
         if options.detect_lists && is_list_item(plain_trimmed) {
+            if in_blockquote {
+                output.push('\n');
+                in_blockquote = false;
+            }
             if in_paragraph {
                 output.push_str("\n\n");
                 in_paragraph = false;
@@ -990,6 +1134,10 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
         if options.detect_code {
             let is_mono = line.items.iter().any(|i| is_monospace_font(&i.font));
             if is_mono {
+                if in_blockquote {
+                    output.push('\n');
+                    in_blockquote = false;
+                }
                 if in_paragraph {
                     output.push_str("\n\n");
                     in_paragraph = false;
@@ -997,6 +1145,56 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
                 // Use plain text for code blocks
                 output.push_str(&format!("```\n{}\n```\n", plain_trimmed));
                 continue;
+            }
+        }
+
+        // Detect centered text and wrap with <center> tags
+        if options.detect_alignment {
+            if let Some(margins) = page_margins.get(&line.page) {
+                if detect_line_alignment(&line, margins) == LineAlignment::Center {
+                    if in_blockquote {
+                        output.push('\n');
+                        in_blockquote = false;
+                    }
+                    if in_paragraph {
+                        output.push_str("\n\n");
+                        in_paragraph = false;
+                    }
+                    output.push_str("<center>");
+                    output.push_str(trimmed);
+                    output.push_str("</center>\n\n");
+                    continue;
+                }
+            }
+        }
+
+        // Detect indented blocks and render as blockquotes.
+        // Only apply when the page has a dominant left margin (concentration > 0.5)
+        // so that scattered layouts don't produce false positives.
+        if options.detect_block_quotes && !in_list {
+            if let Some(margins) = page_margins.get(&line.page) {
+                let line_x = line.items.first().map(|i| i.x).unwrap_or(0.0);
+                let indent_threshold = base_size * 3.0;
+                let has_dominant_margin =
+                    margins.left_margin_concentration > 0.5 && !margins.likely_multi_column;
+                let is_indented = has_dominant_margin && line_x > margins.left + indent_threshold;
+
+                if is_indented {
+                    if !in_blockquote {
+                        if in_paragraph {
+                            output.push_str("\n\n");
+                            in_paragraph = false;
+                        }
+                        in_blockquote = true;
+                    }
+                    output.push_str("> ");
+                    output.push_str(trimmed);
+                    output.push('\n');
+                    continue;
+                } else if in_blockquote {
+                    output.push('\n');
+                    in_blockquote = false;
+                }
             }
         }
 
@@ -1012,6 +1210,11 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
         output.push_str(trimmed);
         in_paragraph = true;
         prev_had_dot_leaders = cur_dot_leaders;
+    }
+
+    // Close final blockquote
+    if in_blockquote {
+        output.push('\n');
     }
 
     // Close final paragraph

@@ -1084,7 +1084,10 @@ mod tests {
         assert!(matches!(fixed, std::borrow::Cow::Borrowed(_)));
     }
 
+    // officemd vendor: ignored because the fixture lives in upstream's
+    // tests/fixtures/ which is not part of the vendored tree.
     #[test]
+    #[ignore = "fixture not vendored"]
     fn test_bare_name_struct_types() {
         // Some PDF generators (e.g. fpdf2) write /S Code instead of /S /Code.
         // lopdf silently drops objects with invalid tokens. Our pre-processor
@@ -1112,7 +1115,10 @@ mod tests {
         );
     }
 
+    // officemd vendor: ignored because the fixture lives in upstream's
+    // tests/fixtures/ which is not part of the vendored tree.
     #[test]
+    #[ignore = "fixture not vendored"]
     fn test_parse_real_tagged_pdf() {
         let doc = Document::load("tests/fixtures/2013-app2.pdf").unwrap();
         let tree = StructTree::from_doc(&doc);

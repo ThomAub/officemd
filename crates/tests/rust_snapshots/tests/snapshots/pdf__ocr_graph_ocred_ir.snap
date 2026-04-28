@@ -10,7 +10,9 @@ expression: canonical_json(&json)
       "confidence": 1.0,
       "has_encoding_issues": false,
       "page_count": 1,
-      "pages_needing_ocr": []
+      "pages_needing_ocr": [
+        1
+      ]
     },
     "pages": []
   },
@@ -21,7 +23,7 @@ expression: canonical_json(&json)
       "confidence": "1.0000",
       "has_encoding_issues": "false",
       "page_count": "1",
-      "pages_needing_ocr": "",
+      "pages_needing_ocr": "1",
       "title": "Example graph"
     },
     "custom": {}

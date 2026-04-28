@@ -14,7 +14,7 @@ expression: canonical_json(&json)
     },
     "pages": [
       {
-        "markdown": "**Table of Contents**\n\nHeading ... 1\nPage 2 Heading ... 2\n\n# Heading\n\nDocument text.\n\n*Table 1: Table caption*\n\nColumn 1 Column 2 Cell 1 Cell 2 Cell 3 Cell 4",
+        "markdown": "## Table of Contents\n\nHeading ... 1\nPage 2 Heading ... 2\n\n# Heading\n\nDocument text.\n\n*Table 1: Table caption*\n\n|Column 1|Column 2|\n|---|---|\n|Cell 1|Cell 2|\n|Cell 3|Cell 4|",
         "number": 1
       },
       {

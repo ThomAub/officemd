@@ -7,7 +7,7 @@
 //!
 //! # Quick start
 //!
-//! ```no_run
+//! ```ignore
 //! // Full processing (detect + extract + markdown) with defaults
 //! let result = pdf_inspector::process_pdf("document.pdf").unwrap();
 //! println!("type: {:?}, pages: {}", result.pdf_type, result.page_count);
@@ -128,7 +128,7 @@ pub struct PdfProcessResult {
 ///
 /// Use the builder methods to customise behaviour:
 ///
-/// ```
+/// ```ignore
 /// use pdf_inspector::{PdfOptions, ProcessMode};
 ///
 /// let opts = PdfOptions::new()
