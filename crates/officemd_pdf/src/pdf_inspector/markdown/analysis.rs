@@ -5,253 +5,27 @@ use std::collections::HashMap;
 use crate::pdf_inspector::types::{TextItem, TextLine};
 use log::debug;
 
-// ── Page margins & alignment ────────────────────────────────────────
-
-/// Page margin info computed from bulk text statistics.
-#[derive(Debug, Clone)]
-pub(crate) struct PageMargins {
-    /// Typical left edge of text (mode of line-start X, bucketed to 5pt).
-    pub left: f32,
-    /// Typical right edge of text (90th percentile of line-end X).
-    pub right: f32,
-    /// Midpoint of the text area.
-    pub center: f32,
-    /// Width of the text area (right − left).
-    pub width: f32,
-    /// Fraction of qualifying lines that start within ±10pt of the mode left margin.
-    /// When most lines share the same left margin (ratio > 0.6), a line that is
-    /// substantially to the right is a genuine indented block. When lines are
-    /// scattered (ratio < 0.4), there is no dominant margin to compare against.
-    pub left_margin_concentration: f32,
-    /// Whether the page has multiple strong line-start clusters that suggest
-    /// a multi-column layout rather than a single dominant text flow.
-    pub likely_multi_column: bool,
-}
-
-/// Alignment classification for a text line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LineAlignment {
-    Left,
-    Center,
-}
-
-/// Compute typical page margins from grouped text lines.
-///
-/// For each page, uses the **mode** (most common) left-margin bucket to define
-/// the normal text indent, and the 90th-percentile right edge for the right
-/// margin. The mode is more robust than percentiles because in many PDFs the
-/// body text has a consistent indent while only a few lines (headings, bullets)
-/// start further left. Bucketing to the nearest 5pt handles minor X-jitter.
-pub(crate) fn compute_page_margins(lines: &[TextLine]) -> HashMap<u32, PageMargins> {
-    let mut page_starts: HashMap<u32, Vec<f32>> = HashMap::new();
-    let mut page_ends: HashMap<u32, Vec<f32>> = HashMap::new();
-
-    for line in lines {
-        // Skip very short lines (labels, page numbers) that would skew margins
-        if line.items.len() < 3 {
-            continue;
-        }
-        let first = &line.items[0];
-        let last = line.items.last().unwrap();
-        let line_start = first.x;
-        let line_end = last.x + last.width;
-
-        page_starts.entry(line.page).or_default().push(line_start);
-        page_ends.entry(line.page).or_default().push(line_end);
-    }
-
-    let mut result = HashMap::new();
-    for (&page, starts) in &mut page_starts {
-        let ends = match page_ends.get_mut(&page) {
-            Some(e) => e,
-            None => continue,
-        };
-        if starts.len() < 3 {
-            continue;
-        }
-
-        // Left margin: mode of X-start positions bucketed to nearest 5pt
-        let (left, left_margin_concentration, likely_multi_column) = {
-            let mut buckets: HashMap<i32, usize> = HashMap::new();
-            for &x in starts.iter() {
-                let key = (x / 5.0).round() as i32;
-                *buckets.entry(key).or_default() += 1;
-            }
-            let (best_key, best_count) = buckets
-                .iter()
-                .max_by_key(|&(_, &count)| count)
-                .map(|(&k, &c)| (k, c))
-                .unwrap_or((0, 0));
-            let mode_x = best_key as f32 * 5.0;
-            // Count lines within ±10pt of the mode (2 adjacent buckets)
-            let near_count: usize = buckets
-                .iter()
-                .filter(|(k, _)| (*k - best_key).abs() <= 2)
-                .map(|(_, &c)| c)
-                .sum();
-            let concentration = if starts.is_empty() {
-                0.0
-            } else {
-                near_count as f32 / starts.len() as f32
-            };
-            let significant_threshold = ((starts.len() as f32) * 0.2).ceil() as usize;
-            let mut significant_clusters: Vec<i32> = buckets
-                .iter()
-                .filter_map(|(&bucket, &count)| (count >= significant_threshold).then_some(bucket))
-                .collect();
-            significant_clusters.sort_unstable();
-            let likely_multi_column = significant_clusters.windows(2).any(|pair| {
-                let gap = (pair[1] - pair[0]) as f32 * 5.0;
-                gap >= 120.0
-            });
-            let _ = best_count; // used indirectly via near_count
-            (mode_x, concentration, likely_multi_column)
-        };
-
-        // Right margin: 90th percentile of X-end positions
-        ends.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let right = ends[ends.len() * 9 / 10];
-        let width = (right - left).max(1.0);
-
-        result.insert(
-            page,
-            PageMargins {
-                left,
-                right,
-                center: left + width / 2.0,
-                width,
-                left_margin_concentration,
-                likely_multi_column,
-            },
-        );
-    }
-
-    result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::compute_page_margins;
-    use crate::pdf_inspector::types::{ItemType, TextItem, TextLine};
-
-    fn make_line(page: u32, x: f32, y: f32, text: &str) -> TextLine {
-        TextLine {
-            items: vec![
-                TextItem {
-                    text: text.to_string(),
-                    x,
-                    y,
-                    width: 80.0,
-                    height: 12.0,
-                    font: "F1".into(),
-                    font_size: 12.0,
-                    page,
-                    is_rotated: false,
-                    is_bold: false,
-                    is_italic: false,
-                    item_type: ItemType::Text,
-                },
-                TextItem {
-                    text: "tail".into(),
-                    x: x + 90.0,
-                    y,
-                    width: 30.0,
-                    height: 12.0,
-                    font: "F1".into(),
-                    font_size: 12.0,
-                    page,
-                    is_rotated: false,
-                    is_bold: false,
-                    is_italic: false,
-                    item_type: ItemType::Text,
-                },
-                TextItem {
-                    text: "end".into(),
-                    x: x + 130.0,
-                    y,
-                    width: 25.0,
-                    height: 12.0,
-                    font: "F1".into(),
-                    font_size: 12.0,
-                    page,
-                    is_rotated: false,
-                    is_bold: false,
-                    is_italic: false,
-                    item_type: ItemType::Text,
-                },
-            ],
-            y,
-            page,
-        }
-    }
-
-    #[test]
-    fn page_margins_mark_two_column_layouts() {
-        let mut lines = Vec::new();
-        for i in 0..12 {
-            let y = 700.0 - i as f32 * 14.0;
-            lines.push(make_line(1, 72.0, y, "Left column"));
-            lines.push(make_line(1, 350.0, y, "Right column"));
-        }
-
-        let margins = compute_page_margins(&lines);
-        assert!(margins.get(&1).unwrap().likely_multi_column);
-    }
-
-    #[test]
-    fn page_margins_keep_single_column_layouts_enabled() {
-        let mut lines = Vec::new();
-        for i in 0..20 {
-            let y = 700.0 - i as f32 * 14.0;
-            lines.push(make_line(1, 72.0, y, "Body text"));
-        }
-
-        let margins = compute_page_margins(&lines);
-        assert!(!margins.get(&1).unwrap().likely_multi_column);
-    }
-}
-
-/// Detect whether a line is centered relative to page margins.
-pub(crate) fn detect_line_alignment(line: &TextLine, margins: &PageMargins) -> LineAlignment {
-    if line.items.is_empty() || margins.width < 50.0 {
-        return LineAlignment::Left;
-    }
-
-    let first = &line.items[0];
-    let last = line.items.last().unwrap();
-    let line_start = first.x;
-    let line_end = last.x + last.width;
-    let line_width = line_end - line_start;
-    let line_center = (line_start + line_end) / 2.0;
-
-    // Line must be significantly shorter than the full text area
-    if line_width > margins.width * 0.80 {
-        return LineAlignment::Left;
-    }
-
-    // Line must not start near the normal left margin
-    if line_start < margins.left + margins.width * 0.10 {
-        return LineAlignment::Left;
-    }
-
-    // Line center must be close to page center
-    let center_offset = (line_center - margins.center).abs();
-    if center_offset > margins.width * 0.08 {
-        return LineAlignment::Left;
-    }
-
-    // Limit to reasonably short text (avoid wrapped paragraphs)
-    let char_count: usize = line.items.iter().map(|i| i.text.len()).sum();
-    if char_count > 120 {
-        return LineAlignment::Left;
-    }
-
-    LineAlignment::Center
-}
-
 /// Font statistics for a document
 pub(crate) struct FontStats {
     pub(crate) most_common_size: f32,
+    /// Font size frequency distribution (size_key → line count).
+    /// Used for rarity-based heading detection.
+    pub(crate) size_counts: HashMap<i32, usize>,
+    /// Total number of lines counted.
+    pub(crate) total_lines: usize,
+}
+
+/// Compute how rare a font size is in the document (0.0 = most common, 1.0 = unique).
+/// Mirrors opendataloader's font rarity boosting approach: heading fonts appear on
+/// far fewer lines than body text, so their percentile rank is high.
+pub(crate) fn font_size_rarity(font_size: f32, stats: &FontStats) -> f32 {
+    if stats.total_lines == 0 {
+        return 0.0;
+    }
+    let key = (font_size * 10.0) as i32;
+    let count = stats.size_counts.get(&key).copied().unwrap_or(0);
+    // Rarity = 1 - (frequency ratio). A size used on 1/100 lines has rarity ~0.99.
+    1.0 - (count as f32 / stats.total_lines as f32)
 }
 
 /// Calculate font stats directly from items (before grouping into lines)
@@ -265,6 +39,8 @@ pub(crate) fn calculate_font_stats_from_items(items: &[TextItem]) -> FontStats {
         }
     }
 
+    let total_lines = size_counts.values().sum();
+
     // Break ties by preferring the smaller font size for deterministic output
     let most_common_size = size_counts
         .iter()
@@ -274,7 +50,11 @@ pub(crate) fn calculate_font_stats_from_items(items: &[TextItem]) -> FontStats {
         .map(|(size, _)| *size as f32 / 10.0)
         .unwrap_or(12.0);
 
-    FontStats { most_common_size }
+    FontStats {
+        most_common_size,
+        size_counts,
+        total_lines,
+    }
 }
 
 /// Calculate font stats from grouped lines
@@ -292,6 +72,8 @@ pub(crate) fn calculate_font_stats(lines: &[TextLine]) -> FontStats {
         }
     }
 
+    let total_lines = size_counts.values().sum();
+
     // Break ties by preferring the smaller font size for deterministic output
     let most_common_size = size_counts
         .iter()
@@ -301,7 +83,23 @@ pub(crate) fn calculate_font_stats(lines: &[TextLine]) -> FontStats {
         .map(|(size, _)| *size as f32 / 10.0)
         .unwrap_or(12.0);
 
-    FontStats { most_common_size }
+    FontStats {
+        most_common_size,
+        size_counts,
+        total_lines,
+    }
+}
+
+/// Determine the heading level for a bold-only line that didn't meet the font-size
+/// threshold.  These are common in academic papers where section headings are bold
+/// at the same size as body text.
+///
+/// Returns a level below the lowest font-size tier (or H2 when no tiers exist).
+pub(crate) fn bold_heading_level(heading_tiers: &[f32]) -> usize {
+    let level = heading_tiers.len() + 1;
+    // Clamp to 1..=6 — if no font-size tiers, bold headings become H2
+    // (H1 is reserved for titles which are typically larger)
+    level.clamp(2, 6)
 }
 
 /// Detect TOC-style lines that contain dot leaders (e.g., "Section Name .... 42").
@@ -365,7 +163,7 @@ pub(crate) fn compute_paragraph_threshold(lines: &[TextLine], base_size: f32) ->
         return fallback;
     }
 
-    gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    gaps.sort_by(|a, b| a.total_cmp(b));
 
     let median = gaps[gaps.len() / 2];
 
@@ -465,7 +263,7 @@ pub(crate) fn compute_heading_tiers(lines: &[TextLine], base_size: f32) -> Vec<f
     }
 
     // Sort descending
-    heading_sizes.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    heading_sizes.sort_by(|a, b| b.total_cmp(a));
 
     // Cluster sizes within 0.5pt into same tier (use first value as representative)
     let mut tiers: Vec<f32> = Vec::new();

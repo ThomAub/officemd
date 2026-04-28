@@ -14,9 +14,6 @@ pub(crate) fn clean_markdown(mut text: String, options: &MarkdownOptions) -> Str
         text = fix_hyphenation(&text);
     }
 
-    text = remove_chart_noise_lines(&text);
-    text = split_dense_bold_metric_lines(&text);
-
     // Remove standalone page numbers
     if options.remove_page_numbers {
         text = remove_page_numbers(&text);
@@ -26,6 +23,12 @@ pub(crate) fn clean_markdown(mut text: String, options: &MarkdownOptions) -> Str
     if options.format_urls {
         text = format_urls(&text);
     }
+
+    // Collapse consecutive spaces within text lines.
+    // OCR text layers and some PDF producers emit trailing spaces on each
+    // text item, which combine with gap-based space insertion to produce
+    // double spaces ("Vice  President" instead of "Vice President").
+    collapse_consecutive_spaces(&mut text);
 
     // Remove excessive newlines (more than 2 in a row)
     while text.contains("\n\n\n") {
@@ -37,6 +40,35 @@ pub(crate) fn clean_markdown(mut text: String, options: &MarkdownOptions) -> Str
     text.push('\n');
 
     text
+}
+
+/// Collapse runs of 2+ spaces to a single space within each line.
+/// Preserves leading indentation and markdown table pipe alignment.
+fn collapse_consecutive_spaces(text: &mut String) {
+    let mut result = String::with_capacity(text.len());
+    for line in text.split('\n') {
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        // Preserve leading whitespace
+        let trimmed = line.trim_start();
+        let leading = &line[..line.len() - trimmed.len()];
+        result.push_str(leading);
+        // Collapse inner runs of spaces to single space
+        let mut prev_space = false;
+        for ch in trimmed.chars() {
+            if ch == ' ' {
+                if !prev_space {
+                    result.push(' ');
+                }
+                prev_space = true;
+            } else {
+                prev_space = false;
+                result.push(ch);
+            }
+        }
+    }
+    *text = result;
 }
 
 /// Collapse dot leaders (runs of 4+ dots) into " ... "
@@ -66,116 +98,6 @@ fn fix_hyphenation(text: &str) -> String {
         .to_string();
 
     result
-}
-
-fn is_numeric_tick_token(token: &str) -> bool {
-    let trimmed = token.trim_matches(|c: char| matches!(c, ',' | ';' | ':' | '.'));
-    let trimmed = trimmed.strip_prefix('-').unwrap_or(trimmed);
-    !trimmed.is_empty() && trimmed.chars().all(|c| c.is_ascii_digit())
-}
-
-fn is_year_marker_token(token: &str) -> bool {
-    let trimmed = token.trim_matches(|c: char| matches!(c, ',' | ';' | ':' | '.'));
-    trimmed.eq_ignore_ascii_case("exercice") || matches!(trimmed, "N" | "N-1" | "N-2" | "N-3" | "E")
-}
-
-fn is_chart_noise_line(trimmed: &str) -> bool {
-    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
-    if tokens.len() < 5 {
-        return false;
-    }
-
-    let numeric_tokens = tokens.iter().filter(|t| is_numeric_tick_token(t)).count();
-    let year_marker_tokens = tokens.iter().filter(|t| is_year_marker_token(t)).count();
-    let alpha_tokens = tokens
-        .iter()
-        .filter(|token| token.chars().any(|c| c.is_alphabetic()))
-        .count();
-    let short_or_abbrev_tokens = tokens
-        .iter()
-        .filter(|token| {
-            let cleaned: String = token.chars().filter(|c| c.is_alphabetic()).collect();
-            !cleaned.is_empty() && (cleaned.chars().count() <= 5 || token.contains('.'))
-        })
-        .count();
-
-    (year_marker_tokens >= 2 && numeric_tokens >= 8)
-        || (numeric_tokens >= 14 && alpha_tokens <= 6)
-        || (numeric_tokens == 0
-            && alpha_tokens >= 5
-            && short_or_abbrev_tokens >= alpha_tokens.saturating_sub(1))
-}
-
-fn remove_chart_noise_lines(text: &str) -> String {
-    text.lines()
-        .filter(|line| !is_chart_noise_line(line.trim()))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn split_dense_bold_metric_lines(text: &str) -> String {
-    use once_cell::sync::Lazy;
-
-    static BOLD_SEGMENT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\*\*\*[^*].*?\*\*\*").unwrap());
-
-    fn strip_bold(segment: &str) -> &str {
-        segment
-            .strip_prefix("***")
-            .and_then(|s| s.strip_suffix("***"))
-            .unwrap_or(segment)
-            .trim()
-    }
-
-    fn is_numeric_heavy(segment: &str) -> bool {
-        let text = strip_bold(segment);
-        let digits = text.chars().filter(|c| c.is_ascii_digit()).count();
-        let alpha = text.chars().filter(|c| c.is_alphabetic()).count();
-        digits >= 3 && alpha <= 4
-    }
-
-    fn is_metric_label(segment: &str) -> bool {
-        let text = strip_bold(segment).to_lowercase();
-        text.starts_with("% sur ") || text.contains("capacité") || text.contains("résultat")
-    }
-
-    text.lines()
-        .flat_map(|line| {
-            let trimmed = line.trim();
-            let segments: Vec<&str> = BOLD_SEGMENT_RE
-                .find_iter(trimmed)
-                .map(|m| m.as_str())
-                .collect();
-            let should_split = segments.len() >= 3
-                && trimmed.len() >= 80
-                && trimmed.chars().any(|c| c.is_ascii_digit());
-
-            if !should_split {
-                return vec![line.to_string()];
-            }
-
-            let mut rebuilt = Vec::new();
-            let mut i = 0usize;
-            while i < segments.len() {
-                if i + 1 < segments.len()
-                    && is_metric_label(segments[i])
-                    && is_numeric_heavy(segments[i + 1])
-                {
-                    rebuilt.push(format!("{} {}", segments[i], segments[i + 1]));
-                    i += 2;
-                } else {
-                    rebuilt.push(segments[i].to_string());
-                    i += 1;
-                }
-            }
-
-            if rebuilt.is_empty() {
-                vec![line.to_string()]
-            } else {
-                rebuilt
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 /// Remove standalone page numbers (lines that are just 1-4 digit numbers)
@@ -391,26 +313,186 @@ fn format_urls(text: &str) -> String {
 mod tests {
     use super::*;
 
+    // --- collapse_dot_leaders ---
+
     #[test]
-    fn remove_chart_noise_lines_filters_axis_rows() {
-        let input = "Rotations (en jours)\nExercice N-2 34 000 N-1 32 000 Exercice N 30 000 28 000 26 000 24 000\nCrédit clients 161,77 193,50\nC.A. Marge M.B.P. V.A. E.B.E. Résultat C.A.F.";
-        let cleaned = remove_chart_noise_lines(input);
-        assert!(cleaned.contains("Rotations (en jours)"));
-        assert!(cleaned.contains("Crédit clients 161,77 193,50"));
-        assert!(!cleaned.contains("Exercice N-2 34 000"));
-        assert!(!cleaned.contains("C.A. Marge"));
+    fn test_collapse_dot_leaders_four_or_more_dots() {
+        assert_eq!(
+            collapse_dot_leaders("Introduction............................1"),
+            "Introduction ... 1"
+        );
     }
 
     #[test]
-    fn split_dense_bold_metric_lines_breaks_blob_into_rows() {
-        let input = "***Marge brute de production (282) (9 682) 9 400-97,08*** ***% sur production-818,17 N/S*** ***Valeur ajoutée (14 071) (24 490) 10 419-42,54***";
-        let cleaned = split_dense_bold_metric_lines(input);
-        let lines: Vec<&str> = cleaned.lines().collect();
-        assert!(lines.len() >= 3);
+    fn test_collapse_dot_leaders_three_dots_unchanged() {
+        assert_eq!(collapse_dot_leaders("wait...what"), "wait...what");
+    }
+
+    #[test]
+    fn test_collapse_dot_leaders_no_dots() {
+        assert_eq!(collapse_dot_leaders("Hello World"), "Hello World");
+    }
+
+    #[test]
+    fn test_collapse_dot_leaders_mixed() {
+        let input = "Chapter 1.......10\nSome text... ok\nChapter 2........20";
+        let result = collapse_dot_leaders(input);
+        assert!(result.contains("Chapter 1 ... 10"));
+        assert!(result.contains("Some text... ok"));
+        assert!(result.contains("Chapter 2 ... 20"));
+    }
+
+    // --- fix_hyphenation ---
+
+    #[test]
+    fn test_fix_hyphenation_spaced_hyphen() {
+        assert_eq!(fix_hyphenation("Limoeiro - Norte"), "Limoeiro-Norte");
+    }
+
+    #[test]
+    fn test_fix_hyphenation_list_item_unchanged() {
         assert_eq!(
-            lines[0],
-            "***Marge brute de production (282) (9 682) 9 400-97,08***"
+            fix_hyphenation("- item one\n- item two"),
+            "- item one\n- item two"
         );
-        assert_eq!(lines[1], "***% sur production-818,17 N/S***");
+    }
+
+    #[test]
+    fn test_fix_hyphenation_accented_chars() {
+        assert_eq!(fix_hyphenation("São - Paulo"), "São-Paulo");
+    }
+
+    #[test]
+    fn test_fix_hyphenation_multiple_instances() {
+        assert_eq!(
+            fix_hyphenation("one - two and three - four"),
+            "one-two and three-four"
+        );
+    }
+
+    // --- is_page_number_line ---
+
+    #[test]
+    fn test_is_page_number_digits_1_to_4() {
+        assert!(is_page_number_line("1"));
+        assert!(is_page_number_line("42"));
+        assert!(is_page_number_line("123"));
+        assert!(is_page_number_line("9999"));
+        assert!(!is_page_number_line("12345"));
+    }
+
+    #[test]
+    fn test_is_page_number_page_x() {
+        assert!(is_page_number_line("Page 5"));
+        assert!(is_page_number_line("page 12"));
+    }
+
+    #[test]
+    fn test_is_page_number_page_x_of_y() {
+        assert!(is_page_number_line("Page 3 of 10"));
+        assert!(is_page_number_line("page 1 of 5"));
+    }
+
+    #[test]
+    fn test_is_page_number_x_of_y() {
+        assert!(is_page_number_line("3 of 10"));
+    }
+
+    #[test]
+    fn test_is_page_number_centered_dash() {
+        assert!(is_page_number_line("- 5 -"));
+        assert!(is_page_number_line("-12-"));
+    }
+
+    #[test]
+    fn test_is_page_number_page_of() {
+        assert!(is_page_number_line("Page of"));
+        assert!(is_page_number_line("page of 10"));
+    }
+
+    #[test]
+    fn test_is_page_number_empty() {
+        assert!(!is_page_number_line(""));
+    }
+
+    #[test]
+    fn test_is_page_number_non_match() {
+        assert!(!is_page_number_line("Hello World"));
+        assert!(!is_page_number_line("Chapter 1"));
+        assert!(!is_page_number_line("Total: 500"));
+    }
+
+    // --- remove_page_numbers ---
+
+    #[test]
+    fn test_remove_page_numbers_isolated_number() {
+        let input = "Some text\n\n42\n\nMore text";
+        let result = remove_page_numbers(input);
+        assert!(!result.contains("\n42\n"));
+        assert!(result.contains("Some text"));
+        assert!(result.contains("More text"));
+    }
+
+    #[test]
+    fn test_remove_page_numbers_before_break() {
+        let input = "Content\n\n5\n---\nNext page";
+        let result = remove_page_numbers(input);
+        assert!(!result.contains("\n5\n"));
+    }
+
+    #[test]
+    fn test_remove_page_numbers_in_context_kept() {
+        let input = "Line A\nLine B\n42\nLine C\nLine D";
+        let result = remove_page_numbers(input);
+        assert!(result.contains("42"));
+    }
+
+    #[test]
+    fn test_remove_page_numbers_multiple_patterns() {
+        let input = "\n1\n\nContent\n\n2\n\n---\nMore\n\n3\n";
+        let result = remove_page_numbers(input);
+        assert!(!result.contains("\n1\n"));
+        assert!(!result.contains("\n2\n"));
+        assert!(!result.contains("\n3\n"));
+    }
+
+    #[test]
+    fn test_remove_page_numbers_empty() {
+        assert_eq!(remove_page_numbers(""), "");
+    }
+
+    // --- format_urls ---
+
+    #[test]
+    fn test_format_urls_bare_url() {
+        let result = format_urls("Visit https://example.com for info");
+        assert!(result.contains("[https://example.com](https://example.com)"));
+    }
+
+    #[test]
+    fn test_format_urls_already_linked() {
+        let input = "[click](https://example.com)";
+        assert_eq!(format_urls(input), input);
+    }
+
+    #[test]
+    fn test_format_urls_inside_brackets() {
+        let input = "[https://example.com](https://example.com)";
+        let result = format_urls(input);
+        assert!(!result.contains("[["));
+    }
+
+    #[test]
+    fn test_format_urls_multiple() {
+        let input = "See https://a.com and https://b.com";
+        let result = format_urls(input);
+        assert!(result.contains("[https://a.com](https://a.com)"));
+        assert!(result.contains("[https://b.com](https://b.com)"));
+    }
+
+    #[test]
+    fn test_format_urls_no_urls() {
+        let input = "No links here";
+        assert_eq!(format_urls(input), input);
     }
 }

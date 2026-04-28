@@ -8,6 +8,10 @@ use std::collections::HashMap;
 
 use crate::pdf_inspector::text_utils::should_join_items;
 
+/// Result tuple returned by page-level text extraction: text items, rectangles, line segments,
+/// and whether fonts with unresolvable gid-encoded glyphs were encountered.
+pub(crate) type PageExtraction = (Vec<TextItem>, Vec<PdfRect>, Vec<PdfLine>);
+
 // ── Font types (crate-internal) ──────────────────────────────────────
 
 /// Font encoding map: maps byte codes to Unicode characters
@@ -69,6 +73,16 @@ pub struct LayoutComplexity {
     pub pages_with_columns: Vec<u32>,
 }
 
+/// A line segment from PDF path operators (`m`/`l`/`S`).
+#[derive(Debug, Clone)]
+pub struct PdfLine {
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+    pub page: u32,
+}
+
 /// A rectangle from a PDF `re` operator (cell boundary, border, etc.)
 #[derive(Debug, Clone)]
 pub struct PdfRect {
@@ -98,14 +112,15 @@ pub struct TextItem {
     pub font_size: f32,
     /// Page number (1-indexed)
     pub page: u32,
-    /// Whether the text baseline is rotated away from normal horizontal reading order.
-    pub is_rotated: bool,
     /// Whether the font is bold
     pub is_bold: bool,
     /// Whether the font is italic
     pub is_italic: bool,
     /// Type of item (text, image, link)
     pub item_type: ItemType,
+    /// Marked Content ID from the content stream's BDC/BMC operator.
+    /// Used to link this item to the PDF structure tree for tagged PDFs.
+    pub mcid: Option<i64>,
 }
 
 /// A line of text (grouped text items)
@@ -114,10 +129,13 @@ pub struct TextLine {
     pub items: Vec<TextItem>,
     pub y: f32,
     pub page: u32,
+    /// Adaptive join threshold from page-level letter-spacing detection.
+    /// Default 0.10 for normal PDFs; higher for Canva-style PDFs.
+    #[doc(hidden)]
+    pub adaptive_threshold: f32,
 }
 
 impl TextLine {
-    /// Return the plain text for this line without Markdown formatting.
     pub fn text(&self) -> String {
         self.text_with_formatting(false, false)
     }
@@ -127,6 +145,8 @@ impl TextLine {
         if !format_bold && !format_italic {
             return self.text_plain();
         }
+
+        let single_char_threshold = self.adaptive_threshold;
 
         let mut result = String::new();
         let mut current_bold = false;
@@ -146,7 +166,7 @@ impl TextLine {
                 false
             } else {
                 let prev_item = &self.items[i - 1];
-                self.needs_space_between(prev_item, item, &result)
+                self.needs_space_between(prev_item, item, &result, single_char_threshold)
             };
 
             // Preserve leading whitespace from the item text.
@@ -201,6 +221,8 @@ impl TextLine {
 
     /// Get plain text without formatting
     fn text_plain(&self) -> String {
+        let single_char_threshold = self.adaptive_threshold;
+
         let mut result = String::new();
         for (i, item) in self.items.iter().enumerate() {
             let text = item.text.as_str();
@@ -208,7 +230,7 @@ impl TextLine {
                 result.push_str(text);
             } else {
                 let prev_item = &self.items[i - 1];
-                if self.needs_space_between(prev_item, item, &result) {
+                if self.needs_space_between(prev_item, item, &result, single_char_threshold) {
                     result.push(' ');
                 }
                 result.push_str(text);
@@ -218,7 +240,13 @@ impl TextLine {
     }
 
     /// Determine if a space is needed between two items
-    fn needs_space_between(&self, prev_item: &TextItem, item: &TextItem, result: &str) -> bool {
+    fn needs_space_between(
+        &self,
+        prev_item: &TextItem,
+        item: &TextItem,
+        result: &str,
+        single_char_threshold: f32,
+    ) -> bool {
         let text = item.text.as_str();
 
         // Don't add space before/after hyphens for hyphenated words
@@ -235,7 +263,7 @@ impl TextLine {
         let was_sub_super = reverse_font_ratio < 0.85 && y_diff > 1.0;
 
         // Use position-based spacing detection
-        let should_join = should_join_items(prev_item, item);
+        let should_join = should_join_items(prev_item, item, single_char_threshold);
 
         // Check if space already exists
         let prev_ends_with_space = result.ends_with(' ');

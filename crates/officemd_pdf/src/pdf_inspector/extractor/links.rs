@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use super::fonts::{resolve_array, resolve_dict};
 use super::get_number;
 
-/// Extract hyperlink annotations from a PDF page as positioned text items.
 pub fn extract_page_links(doc: &Document, page_id: ObjectId, page_num: u32) -> Vec<TextItem> {
     let mut links = Vec::new();
 
@@ -77,10 +76,10 @@ pub fn extract_page_links(doc: &Document, page_id: ObjectId, page_num: u32) -> V
                             font: String::new(),
                             font_size: 0.0,
                             page: page_num,
-                            is_rotated: false,
                             is_bold: false,
                             is_italic: false,
                             item_type: ItemType::Link(url),
+                            mcid: None,
                         });
                     }
                 }
@@ -315,9 +314,9 @@ pub(crate) fn walk_form_fields(
         font: String::new(),
         font_size: 0.0,
         page: page_num,
-        is_rotated: false,
         is_bold: false,
         is_italic: false,
         item_type: ItemType::FormField,
+        mcid: None,
     });
 }

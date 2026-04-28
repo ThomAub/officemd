@@ -4,13 +4,11 @@
 pub(crate) fn is_caption_line(text: &str) -> bool {
     let trimmed = text.trim();
 
-    // Common caption prefixes in multiple languages
-    let caption_prefixes = [
-        "Figure ",
+    // Caption prefixes that always match (always followed by identifiers)
+    let always_prefixes = [
         "Figura ",
         "Fig. ",
         "Fig ",
-        "Table ",
         "Tabela ",
         "Source:",
         "Fonte:",
@@ -27,21 +25,59 @@ pub(crate) fn is_caption_line(text: &str) -> bool {
         "Photo ",
         "Foto ",
     ];
-
-    // Check if line starts with a caption prefix
-    for prefix in &caption_prefixes {
+    for prefix in &always_prefixes {
         if trimmed.starts_with(prefix) {
             return true;
         }
     }
 
-    // Check case-insensitive patterns
+    // "Figure" and "Table" need a digit/reference after them to distinguish
+    // captions ("Table 1", "Figure 3.2") from headings ("Table of Contents")
+    for prefix in ["Figure ", "Table "] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            if rest
+                .trim_start()
+                .starts_with(|c: char| c.is_ascii_digit() || c == '(' || c == '#')
+            {
+                return true;
+            }
+        }
+    }
+
+    // Check case-insensitive patterns — require digit or punctuation after
+    // prefix to avoid matching "Table of Contents" or "Figure drawing" etc.
     let lower = trimmed.to_lowercase();
-    if lower.starts_with("figure ") || lower.starts_with("table ") || lower.starts_with("source:") {
+    for pfx in ["figure ", "table "] {
+        if let Some(rest) = lower.strip_prefix(pfx) {
+            if rest
+                .trim_start()
+                .starts_with(|c: char| c.is_ascii_digit() || c == '(' || c == '#')
+            {
+                return true;
+            }
+        }
+    }
+    if lower.starts_with("source:") {
         return true;
     }
 
     false
+}
+
+/// Check if text starts with an unambiguous bullet marker (●, •, ○, ◦).
+///
+/// Narrower than [`is_list_item`]: it excludes numbered/lettered patterns
+/// like `1.` or `a)`, which legitimately appear as section headings in many
+/// documents. Used by the heading classifier to reject bullet lines without
+/// also demoting numbered headings.
+pub(crate) fn starts_with_bullet_marker(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("• ")
+        || trimmed.starts_with("● ")
+        || trimmed.starts_with("○ ")
+        || trimmed.starts_with("◦ ")
+        || trimmed.starts_with("- ")
+        || trimmed.starts_with("* ")
 }
 
 /// Check if text looks like a list item
@@ -94,6 +130,16 @@ pub(crate) fn format_list_item(text: &str) -> String {
     for bullet in &['•', '○', '●', '◦'] {
         if let Some(rest) = trimmed.strip_prefix(*bullet) {
             return format!("- {}", rest.trim_start());
+        }
+        // Bullet inside a leading bold/italic run (e.g. "**● Label:** rest").
+        // The run wraps both the marker and the following label because both
+        // use a bold font in the PDF.
+        for wrapper in ["**", "*"] {
+            if let Some(after_open) = trimmed.strip_prefix(wrapper) {
+                if let Some(rest) = after_open.strip_prefix(*bullet) {
+                    return format!("- {}{}", wrapper, rest.trim_start());
+                }
+            }
         }
     }
 
@@ -177,4 +223,43 @@ pub(crate) fn is_monospace_font(font_name: &str) -> bool {
     ];
 
     patterns.iter().any(|p| lower.contains(p))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_list_item_plain_bullet() {
+        assert_eq!(format_list_item("● Item"), "- Item");
+        assert_eq!(format_list_item("• Item"), "- Item");
+    }
+
+    #[test]
+    fn format_list_item_bullet_inside_bold() {
+        // PDF that uses bold font for both the marker and the label produces
+        // a single bold run like "**● Label:** rest"; the bullet must still
+        // be stripped and the bold wrapper preserved on the label.
+        assert_eq!(
+            format_list_item("**● Fraud: Willing cooperation;**"),
+            "- **Fraud: Willing cooperation;**"
+        );
+        assert_eq!(
+            format_list_item("**● Label:** rest of line"),
+            "- **Label:** rest of line"
+        );
+        assert_eq!(format_list_item("*● Italic:* rest"), "- *Italic:* rest");
+    }
+
+    #[test]
+    fn format_list_item_already_dash() {
+        assert_eq!(format_list_item("- existing"), "- existing");
+    }
+
+    #[test]
+    fn is_list_item_with_bullet_space() {
+        assert!(is_list_item("● Item"));
+        assert!(is_list_item("• Item"));
+        assert!(is_list_item("- Item"));
+    }
 }
