@@ -1084,65 +1084,166 @@ mod tests {
         assert!(matches!(fixed, std::borrow::Cow::Borrowed(_)));
     }
 
-    // officemd vendor: ignored because the fixture lives in upstream's
-    // tests/fixtures/ which is not part of the vendored tree.
+    fn tagged_pdf_with_structure() -> Vec<u8> {
+        use lopdf::{Stream, dictionary};
+
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let struct_root_id = doc.new_object_id();
+        let document_elem_id = doc.new_object_id();
+        let h1_elem_id = doc.new_object_id();
+        let paragraph_elem_id = doc.new_object_id();
+        let code_elem_id = doc.new_object_id();
+
+        let content_id = doc.add_object(Stream::new(dictionary! {}, Vec::new()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        });
+
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+
+        doc.objects.insert(
+            struct_root_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "StructTreeRoot",
+                "K" => Object::Reference(document_elem_id),
+            }),
+        );
+        doc.objects.insert(
+            document_elem_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "StructElem",
+                "S" => Object::Name(b"Document".to_vec()),
+                "P" => Object::Reference(struct_root_id),
+                "K" => vec![
+                    Object::Reference(h1_elem_id),
+                    Object::Reference(paragraph_elem_id),
+                    Object::Reference(code_elem_id),
+                ],
+            }),
+        );
+        doc.objects.insert(
+            h1_elem_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "StructElem",
+                "S" => Object::Name(b"H1".to_vec()),
+                "P" => Object::Reference(document_elem_id),
+                "Pg" => Object::Reference(page_id),
+                "K" => 0,
+            }),
+        );
+        doc.objects.insert(
+            paragraph_elem_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "StructElem",
+                "S" => Object::Name(b"P".to_vec()),
+                "P" => Object::Reference(document_elem_id),
+                "Pg" => Object::Reference(page_id),
+                "K" => 1,
+            }),
+        );
+        doc.objects.insert(
+            code_elem_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "StructElem",
+                "S" => Object::Name(b"Code".to_vec()),
+                "P" => Object::Reference(document_elem_id),
+                "Pg" => Object::Reference(page_id),
+                "K" => 2,
+            }),
+        );
+
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+            "StructTreeRoot" => Object::Reference(struct_root_id),
+        });
+        doc.trailer.set("Root", catalog_id);
+
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("save tagged test PDF");
+        bytes
+    }
+
     #[test]
-    #[ignore = "fixture not vendored"]
     fn test_bare_name_struct_types() {
         // Some PDF generators (e.g. fpdf2) write /S Code instead of /S /Code.
-        // lopdf silently drops objects with invalid tokens. Our pre-processor
-        // fixes these before loading.
-        let raw = std::fs::read("tests/fixtures/bare_name_struct.pdf").unwrap();
+        // Mutate a synthetic tagged PDF to contain bare structure names while
+        // preserving byte length, so xref offsets remain valid.
+        let mut raw = tagged_pdf_with_structure();
+        let trigger_offset = find_bytes(&raw, b"/StructTreeRoot")
+            .expect("synthetic PDF should contain StructTreeRoot token");
+        let name_offset = trigger_offset + 1;
+        raw[name_offset..name_offset + b"StructTreeRoot".len()].copy_from_slice(b"StructTreeRoot");
+
+        for (valid, bare) in [
+            (b"/S/H1".as_slice(), b"/S H1".as_slice()),
+            (b"/S/Code".as_slice(), b"/S Code".as_slice()),
+        ] {
+            let offset = find_bytes(&raw, valid).expect("synthetic PDF should contain struct role");
+            raw[offset..offset + valid.len()].copy_from_slice(bare);
+        }
+
         let fixed = fix_bare_struct_names(&raw);
-        let doc = Document::load_mem(fixed.as_ref()).unwrap();
-
-        let tree = StructTree::from_doc(&doc);
-        assert!(tree.is_some(), "Should parse bare-name struct tree");
-        let tree = tree.unwrap();
-
-        let flat = tree.flatten();
-        let roles: Vec<&StructRole> = flat.iter().map(|e| &e.role).collect();
-
+        assert!(matches!(fixed, std::borrow::Cow::Owned(_)));
         assert!(
-            roles.iter().any(|r| matches!(r, StructRole::H1)),
-            "Should find H1 from bare name: {:?}",
-            roles
+            fixed.windows(b"/S /H1".len()).any(|w| w == b"/S /H1"),
+            "Should fix bare H1: {:?}",
+            String::from_utf8_lossy(fixed.as_ref())
         );
         assert!(
-            roles.iter().any(|r| matches!(r, StructRole::Code)),
-            "Should find Code from bare name: {:?}",
-            roles
+            fixed.windows(b"/S /Code".len()).any(|w| w == b"/S /Code"),
+            "Should fix bare Code: {:?}",
+            String::from_utf8_lossy(fixed.as_ref())
         );
     }
 
-    // officemd vendor: ignored because the fixture lives in upstream's
-    // tests/fixtures/ which is not part of the vendored tree.
     #[test]
-    #[ignore = "fixture not vendored"]
-    fn test_parse_real_tagged_pdf() {
-        let doc = Document::load("tests/fixtures/2013-app2.pdf").unwrap();
+    fn test_parse_synthetic_tagged_pdf() {
+        let bytes = tagged_pdf_with_structure();
+        let doc = Document::load_mem(&bytes).expect("load synthetic tagged PDF");
         let tree = StructTree::from_doc(&doc);
-        assert!(tree.is_some(), "2013-app2.pdf should have a structure tree");
+        assert!(
+            tree.is_some(),
+            "synthetic tagged PDF should have a structure tree"
+        );
         let tree = tree.unwrap();
 
-        // Should have a non-trivial structure
+        // Should have a non-trivial structure.
         assert!(!tree.children.is_empty());
         assert!(
             tree.mcid_count() > 0,
             "Should have marked content references"
         );
 
-        // Flatten and verify we get heading/paragraph/table elements
+        // Flatten and verify we get heading/paragraph/code elements.
         let flat = tree.flatten();
         let roles: Vec<&StructRole> = flat.iter().map(|e| &e.role).collect();
         assert!(
             roles.iter().any(|r| matches!(r, StructRole::P)),
             "Should contain paragraph elements"
         );
+        assert!(
+            roles.iter().any(|r| matches!(r, StructRole::Code)),
+            "Should contain code elements"
+        );
 
-        // Verify mcid_to_roles produces a populated map
+        // Verify mcid_to_roles produces a populated map.
         let page_ids = doc.get_pages();
         let role_map = tree.mcid_to_roles(&page_ids);
-        assert!(!role_map.is_empty(), "Should have MCID→role mappings");
+        let page1 = role_map.get(&1).expect("page 1 should have MCID roles");
+        assert_eq!(page1.get(&0), Some(&StructRole::H1));
+        assert_eq!(page1.get(&1), Some(&StructRole::P));
+        assert_eq!(page1.get(&2), Some(&StructRole::Code));
     }
 }

@@ -286,29 +286,7 @@ fn effective_merge_width(item: &TextItem) -> f32 {
     }
 }
 
-/// Detect single uppercase characters with impossibly narrow width: typically
-/// watermark or decorative fragments from PDF rendering artifacts (vertical
-/// labels, decorative caps) that survive into the text stream.
-fn is_probably_watermark_fragment(item: &TextItem) -> bool {
-    let trimmed = item.text.trim();
-    if trimmed.chars().count() != 1 {
-        return false;
-    }
-    let width = item.width.abs();
-    let font_size = item.font_size.max(1.0);
-    width <= font_size * 0.35 && trimmed.chars().all(|c| c.is_ascii_uppercase())
-}
-
 pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
-    if items.is_empty() {
-        return items;
-    }
-
-    // Drop watermark fragments before grouping so they don't pollute merged lines.
-    let items: Vec<TextItem> = items
-        .into_iter()
-        .filter(|i| !is_probably_watermark_fragment(i))
-        .collect();
     if items.is_empty() {
         return items;
     }
@@ -575,6 +553,17 @@ mod tests {
         let merged = merge_text_items(items);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].text, "hello world");
+    }
+
+    #[test]
+    fn merge_items_preserves_narrow_single_uppercase_tokens() {
+        // Helvetica-like standalone tokens such as roman numerals or table
+        // headers can be naturally narrow and must not be treated as global
+        // watermark noise before line merging.
+        let items = vec![make_merge_item("I", 100.0, 3.0)];
+        let merged = merge_text_items(items);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].text, "I");
     }
 
     #[test]
