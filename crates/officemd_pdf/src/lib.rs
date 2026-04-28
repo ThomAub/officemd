@@ -609,22 +609,174 @@ mod tests {
         assert!(pdf.diagnostics.has_encoding_issues);
     }
 
+    // ocr_graph_ocred.pdf is an ocrmypdf-produced page: scanned image with an
+    // invisible (Tr=3) GlyphLessFont OCR overlay.  The pure scan stays
+    // classified Scanned and flagged for OCR.  The OCR-overlay variant
+    // classifies as TextBased and the invisible-text fallback surfaces the
+    // searchable layer, so it should *not* be flagged for OCR.
     #[test]
-    fn inspect_pdf_detects_ocr_gap_for_scanned_vs_ocred_fixture_pair() {
+    fn inspect_pdf_surfaces_ocr_overlay_text() {
         let scanned = inspect_pdf(OCR_SCANNED_FIXTURE).expect("inspect scanned fixture");
         let ocred = inspect_pdf(OCR_OCRED_FIXTURE).expect("inspect ocred fixture");
 
-        assert!(scanned.page_count >= 1);
-        assert!(ocred.page_count >= 1);
+        assert_eq!(scanned.classification, PdfClassification::Scanned);
         assert!(
-            !scanned.pages_needing_ocr.is_empty(),
-            "expected scanned fixture to need OCR"
+            scanned.pages_needing_ocr.contains(&1),
+            "expected scanned fixture page 1 to need OCR, got {:?}",
+            scanned.pages_needing_ocr
         );
+
+        assert_eq!(ocred.classification, PdfClassification::TextBased);
         assert!(
             ocred.pages_needing_ocr.is_empty(),
-            "expected OCRed fixture to not need OCR"
+            "expected OCR-overlay fixture to surface its invisible text and not need OCR, got {:?}",
+            ocred.pages_needing_ocr
         );
-        assert_eq!(ocred.classification, PdfClassification::TextBased);
+    }
+
+    // Synthesise a one-page PDF with Helvetica/WinAnsi where one text run is
+    // visible (Tr=0, default) and a second text run on the same page is drawn
+    // invisible (Tr=3).  Used by the visible/invisible separation test below.
+    fn mixed_visibility_pdf() -> Vec<u8> {
+        let mut doc = Document::with_version("1.5");
+
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+            "Encoding" => "WinAnsiEncoding",
+        });
+
+        let content = b"BT\n\
+/F1 12 Tf\n\
+100 700 Td\n\
+(VISIBLE) Tj\n\
+ET\n\
+BT\n\
+/F1 12 Tf\n\
+100 650 Td\n\
+3 Tr\n\
+(HIDDEN) Tj\n\
+0 Tr\n\
+ET\n"
+            .to_vec();
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content));
+
+        let pages_id = doc.new_object_id();
+        let resources = dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        };
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            "Resources" => resources,
+        });
+        let pages = dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        };
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("save mixed-visibility pdf");
+        bytes
+    }
+
+    // Synthetic visible+invisible fixture: proves the parser distinguishes
+    // visibility correctly on a controlled input where we know exactly which
+    // strings are drawn at Tr=0 vs Tr=3.  Complements the ocrmypdf overlay
+    // test, which exercises the same code path on a real-world fixture.
+    #[test]
+    fn extractor_separates_visible_and_invisible_text() {
+        use crate::pdf_inspector::extractor::{
+            extract_positioned_text_from_doc, extract_positioned_text_include_invisible,
+        };
+        use crate::pdf_inspector::tounicode::FontCMaps;
+
+        let bytes = mixed_visibility_pdf();
+        let doc = lopdf::Document::load_mem(&bytes).expect("load mixed-visibility pdf");
+        let cmaps = FontCMaps::from_doc(&doc);
+
+        let (default_items, _, _) =
+            extract_positioned_text_from_doc(&doc, &cmaps, None).expect("default extraction");
+        let default_text: String = default_items
+            .0
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect();
+        assert!(
+            default_text.contains("VISIBLE"),
+            "default extraction missed visible text: {default_text:?}"
+        );
+        assert!(
+            !default_text.contains("HIDDEN"),
+            "default extraction must skip Tr=3 invisible text: {default_text:?}"
+        );
+
+        let (invisible_items, _, _) = extract_positioned_text_include_invisible(&doc, &cmaps, None)
+            .expect("invisible extraction");
+        let combined_text: String = invisible_items
+            .0
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect();
+        assert!(
+            combined_text.contains("VISIBLE"),
+            "include-invisible must still surface visible text: {combined_text:?}"
+        );
+        assert!(
+            combined_text.contains("HIDDEN"),
+            "include-invisible must surface invisible overlay: {combined_text:?}"
+        );
+    }
+
+    // Reliability test for the invisible-text path.  The OCRed fixture's only
+    // text is an invisible (Tr=3) GlyphLessFont overlay produced by ocrmypdf.
+    // Default extraction must yield zero items (policy: skip Tr=3 unless Mixed),
+    // and the include-invisible path must yield real characters — proving the
+    // parser handles invisible text correctly and the empty default output is
+    // a deliberate filtering decision, not a parsing failure.
+    #[test]
+    fn extractor_parses_invisible_ocr_overlay_when_requested() {
+        use crate::pdf_inspector::extractor::{
+            extract_positioned_text_from_doc, extract_positioned_text_include_invisible,
+        };
+        use crate::pdf_inspector::tounicode::FontCMaps;
+
+        let doc = lopdf::Document::load_mem(OCR_OCRED_FIXTURE).expect("load ocred fixture");
+        let cmaps = FontCMaps::from_doc(&doc);
+
+        let (default_items, _, _) =
+            extract_positioned_text_from_doc(&doc, &cmaps, None).expect("default extraction");
+        assert!(
+            default_items.0.is_empty(),
+            "default extraction must skip Tr=3 invisible overlay, got {} items",
+            default_items.0.len()
+        );
+
+        let (invisible_items, _, _) = extract_positioned_text_include_invisible(&doc, &cmaps, None)
+            .expect("invisible extraction");
+        assert!(
+            !invisible_items.0.is_empty(),
+            "include-invisible extraction must surface the OCR overlay text"
+        );
+        let recovered: String = invisible_items
+            .0
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect();
+        let alpha_count = recovered.chars().filter(|c| c.is_alphabetic()).count();
+        assert!(
+            alpha_count >= 20,
+            "expected real OCR characters in invisible overlay, got {alpha_count} alphas in {recovered:?}"
+        );
     }
 
     #[test]

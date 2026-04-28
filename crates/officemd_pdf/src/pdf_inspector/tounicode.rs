@@ -9,6 +9,18 @@ use std::path::{Path, PathBuf};
 
 use crate::pdf_inspector::glyph_names::glyph_to_char;
 
+/// Detect CMap mappings that should be treated as missing so the next
+/// fallback (remapped, embedded font cmap, Differences, Latin-1) can take
+/// over.  U+FFFD is the explicit "unknown" replacement.  U+0000 is a
+/// frequent symptom of broken `bfchar` ranges where the PDF generator
+/// emitted the literal NUL byte for unresolved glyphs (this is what causes
+/// "Part 1 -Fundamentals" to render as "Part 1 -cundamentals" — the leading
+/// glyph maps to U+0000 in the primary CMap and gets dropped, then the
+/// fallback CMap fills in a wrong-but-valid character).
+fn is_cmap_garbage(s: &str) -> bool {
+    s.chars().any(|c| c == '\u{FFFD}' || c == '\u{0000}')
+}
+
 /// A parsed ToUnicode CMap mapping CIDs to Unicode strings
 #[derive(Debug, Default, Clone)]
 pub struct ToUnicodeCMap {
@@ -18,6 +30,9 @@ pub struct ToUnicodeCMap {
     pub ranges: Vec<(u16, u16, u32)>,
     /// Byte width of source codes (1 or 2), determined from codespace and CMap entries
     pub code_byte_length: u8,
+    /// When true, unmapped CIDs are interpreted as Unicode codepoints directly.
+    /// Used as a last resort for Identity-H fonts without ToUnicode/cmap/glyph names.
+    pub cid_passthrough: bool,
 }
 
 pub(crate) fn build_cmap_entry_from_stream(
@@ -41,6 +56,26 @@ pub(crate) fn build_cmap_entry_from_stream(
                 );
                 remapped = Some(primary);
                 primary = fb;
+            }
+        }
+
+        // When a sequential remap was applied and a TrueType fallback has more
+        // entries than the primary ToUnicode CMap, prefer the TrueType cmap.
+        // Subset fonts number GIDs by document encounter order, so the sorted
+        // sequential remap scrambles characters.  The TrueType cmap table maps
+        // the real GID→Unicode and is authoritative.
+        if remapped.is_some() {
+            if let Some(ref fb) = fallback {
+                let fb_entries = fb.char_map.len() + fb.ranges.len();
+                if fb_entries > primary_entries {
+                    debug!(
+                        "ToUnicode CMap obj={}: TrueType fallback ({} entries) > primary ({}); promoting over sequential remap",
+                        obj_num, fb_entries, primary_entries
+                    );
+                    let old_remap = remapped.take().unwrap();
+                    remapped = fallback.take();
+                    fallback = Some(old_remap);
+                }
             }
         }
 
@@ -408,7 +443,7 @@ impl ToUnicodeCMap {
             .iter()
             .map(|&b| {
                 let code = b as u16;
-                let result = self.lookup(code).filter(|s| !s.contains('\u{FFFD}'));
+                let result = self.lookup(code).filter(|s| !is_cmap_garbage(s));
                 (b, result)
             })
             .collect()
@@ -424,7 +459,7 @@ impl ToUnicodeCMap {
             for &b in bytes {
                 let code = b as u16;
                 match self.lookup(code) {
-                    Some(s) if !s.contains('\u{FFFD}') => result.push_str(&s),
+                    Some(s) if !is_cmap_garbage(&s) => result.push_str(&s),
                     _ => {
                         // For single-byte unmapped codes, try as Latin-1
                         // (the byte IS the character code in most legacy encodings)
@@ -441,12 +476,26 @@ impl ToUnicodeCMap {
                 if chunk.len() == 2 {
                     let cid = u16::from_be_bytes([chunk[0], chunk[1]]);
                     match self.lookup(cid) {
-                        Some(s) if !s.contains('\u{FFFD}') => result.push_str(&s),
+                        Some(s) if !is_cmap_garbage(&s) => result.push_str(&s),
                         _ => {
-                            // Do NOT blindly interpret CIDs as Unicode codepoints.
-                            // CIDs are font-internal indices, not Unicode values.
-                            // Unmapped 2-byte CIDs are skipped to avoid CJK garbage.
-                            unmapped_count += 1;
+                            if self.cid_passthrough {
+                                // Last-resort: treat CID as Unicode codepoint.
+                                // Valid for Identity-H fonts where the PDF generator
+                                // used Unicode values as CIDs but stripped the cmap.
+                                if let Some(ch) = char::from_u32(cid as u32) {
+                                    if !ch.is_control() || ch == '\t' || ch == '\n' {
+                                        result.push(ch);
+                                    } else {
+                                        unmapped_count += 1;
+                                    }
+                                } else {
+                                    unmapped_count += 1;
+                                }
+                            } else {
+                                // CIDs are font-internal indices, not Unicode values.
+                                // Unmapped 2-byte CIDs are skipped to avoid CJK garbage.
+                                unmapped_count += 1;
+                            }
                         }
                     }
                 }
@@ -473,6 +522,18 @@ impl ToUnicodeCMap {
         let range_min = self.ranges.iter().map(|&(start, _, _)| start).min();
         match (char_min, range_min) {
             (Some(a), Some(b)) => Some(a.min(b)),
+            (a @ Some(_), None) => a,
+            (None, b @ Some(_)) => b,
+            (None, None) => None,
+        }
+    }
+
+    /// Get the maximum source CID across all mappings (char_map + ranges).
+    fn max_source_cid(&self) -> Option<u16> {
+        let char_max = self.char_map.keys().copied().max();
+        let range_max = self.ranges.iter().map(|&(_, end, _)| end).max();
+        match (char_max, range_max) {
+            (Some(a), Some(b)) => Some(a.max(b)),
             (a @ Some(_), None) => a,
             (None, b @ Some(_)) => b,
             (None, None) => None,
@@ -616,6 +677,81 @@ fn get_w_array_start_cid(cid_font_dict: &lopdf::Dictionary, doc: &Document) -> O
     }
 }
 
+/// Return true if the CIDFont's W (widths) array explicitly covers the given CID.
+///
+/// The W array uses two formats (PDF 32000-1:2008, §9.7.4.3):
+///   1. `c [w1 w2 ... wn]` — widths for CIDs c, c+1, ..., c+n-1
+///   2. `c_first c_last w` — CIDs c_first..c_last all have width w
+fn w_array_covers_cid(cid_font_dict: &lopdf::Dictionary, doc: &Document, target: u16) -> bool {
+    let Ok(w_obj) = cid_font_dict.get(b"W") else {
+        return false;
+    };
+    let arr = match w_obj {
+        Object::Array(arr) => arr,
+        Object::Reference(r) => match doc.get_object(*r) {
+            Ok(Object::Array(arr)) => arr,
+            _ => return false,
+        },
+        _ => return false,
+    };
+
+    let resolve_int = |o: &Object| -> Option<i64> {
+        match o {
+            Object::Integer(n) => Some(*n),
+            Object::Reference(r) => match doc.get_object(*r) {
+                Ok(Object::Integer(n)) => Some(*n),
+                _ => None,
+            },
+            _ => None,
+        }
+    };
+
+    let resolve_arr = |o: &Object| -> Option<Vec<Object>> {
+        match o {
+            Object::Array(a) => Some(a.clone()),
+            Object::Reference(r) => match doc.get_object(*r) {
+                Ok(Object::Array(a)) => Some(a.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    };
+
+    let target = target as i64;
+    let mut i = 0usize;
+    while i < arr.len() {
+        let Some(first) = resolve_int(&arr[i]) else {
+            break;
+        };
+        i += 1;
+        if i >= arr.len() {
+            break;
+        }
+        // Peek at arr[i] to decide format.
+        if let Some(widths) = resolve_arr(&arr[i]) {
+            // Format 1: c [w1 ... wn]
+            let last = first + widths.len() as i64 - 1;
+            if target >= first && target <= last {
+                return true;
+            }
+            i += 1;
+        } else if let Some(last) = resolve_int(&arr[i]) {
+            // Format 2: c_first c_last w
+            i += 1;
+            if i < arr.len() {
+                i += 1; // skip the width value
+            }
+            if target >= first && target <= last {
+                return true;
+            }
+        } else {
+            // Unknown token — abort parsing safely
+            break;
+        }
+    }
+    false
+}
+
 /// Extract CIDToGIDMap as a vector of GIDs (u16) indexed by CID.
 fn get_cid_to_gid_map(cid_font_dict: &lopdf::Dictionary, doc: &Document) -> Option<Vec<u16>> {
     let obj = cid_font_dict.get(b"CIDToGIDMap").ok()?;
@@ -711,6 +847,20 @@ fn try_remap_subset_cmap(
         _ => return (cmap, None),
     };
 
+    // If the W array actually covers the CMap's max source CID, the CMap is
+    // aligned with the font — no sequential renumbering happened. A sparse W
+    // array starting at CID 0 (for .notdef) with additional high-CID entries
+    // matching the CMap is the normal subset layout, not a mismatch.
+    if let Some(max_cid) = cmap.max_source_cid() {
+        if w_array_covers_cid(cid_font_dict, doc, max_cid) {
+            debug!(
+                "Subset remap skipped for obj={}: W array covers CMap max CID {}",
+                obj_num, max_cid
+            );
+            return (cmap, None);
+        }
+    }
+
     debug!(
         "Subset GID mismatch detected for obj={}: W starts at CID {}, CMap min CID {}. Remapping to sequential.",
         obj_num, w_start, min_cid
@@ -780,6 +930,28 @@ fn build_simple_cmap_from_truetype(font_data: &[u8]) -> Option<ToUnicodeCMap> {
                 {
                     for code in 0x20..=0xFF_u32 {
                         if let Some(gid) = subtable.glyph_index(code + 0xF000) {
+                            if let Some(&ch) = gid_to_unicode.get(&gid.0) {
+                                let ch = strip_pua_char(ch);
+                                cmap.char_map.entry(code as u16).or_insert(ch.to_string());
+                            }
+                        }
+                    }
+                    used_encoding_cmap = true;
+                    break;
+                }
+            }
+        }
+        // Fallback: Windows Unicode BMP (3,1) — maps Unicode codepoints to GIDs.
+        // For single-byte fonts, try each byte value as a Unicode codepoint.
+        // Common in OCR-generated PDFs where byte values correspond to Unicode
+        // codepoints but the declared encoding (WinAnsiEncoding) is wrong.
+        if !used_encoding_cmap {
+            for subtable in cmap_table.subtables {
+                if subtable.platform_id == ttf_parser::PlatformId::Windows
+                    && subtable.encoding_id == 1
+                {
+                    for code in 0x20..=0xFF_u32 {
+                        if let Some(gid) = subtable.glyph_index(code) {
                             if let Some(&ch) = gid_to_unicode.get(&gid.0) {
                                 let ch = strip_pua_char(ch);
                                 cmap.char_map.entry(code as u16).or_insert(ch.to_string());
@@ -1574,6 +1746,68 @@ fn merge_cmaps(mut base: ToUnicodeCMap, overlay: ToUnicodeCMap) -> ToUnicodeCMap
     base
 }
 
+/// Check if a CIDFont's /W (widths) array contains CID values that look like
+/// Unicode codepoints rather than low-value GIDs.
+///
+/// Returns true if the median CID is >= 0x41 (letter 'A'), indicating
+/// the PDF generator likely used Unicode codepoints as CIDs.
+pub(crate) fn cid_values_look_like_unicode(cid_font_dict: &lopdf::Dictionary) -> bool {
+    let w_arr = match cid_font_dict.get(b"W").ok() {
+        Some(Object::Array(arr)) => arr,
+        _ => return false,
+    };
+
+    // The /W array format: [cid [w1 w2 ...]] or [cid_start cid_end w]
+    // We extract all CID values (the first element of each group).
+    let mut cids: Vec<u16> = Vec::new();
+    let mut i = 0;
+    while i < w_arr.len() {
+        if let Ok(cid) = w_arr[i].as_i64() {
+            cids.push(cid as u16);
+            // Skip the width data
+            if i + 1 < w_arr.len() {
+                match &w_arr[i + 1] {
+                    Object::Array(widths) => {
+                        // [cid [w1 w2 ...]] — CIDs are cid, cid+1, ..., cid+len-1
+                        for j in 1..widths.len() {
+                            cids.push((cid as u16).wrapping_add(j as u16));
+                        }
+                        i += 2;
+                    }
+                    _ => {
+                        // [cid_start cid_end w] — range of CIDs
+                        if i + 2 < w_arr.len() {
+                            if let Ok(cid_end) = w_arr[i + 1].as_i64() {
+                                for c in (cid as u16)..=(cid_end as u16) {
+                                    cids.push(c);
+                                }
+                            }
+                            i += 3;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                }
+            } else {
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    if cids.is_empty() {
+        return false;
+    }
+
+    cids.sort_unstable();
+    let median = cids[cids.len() / 2];
+    // Unicode text CIDs are typically >= 0x20 (space) with letters at 0x41+.
+    // GID-based subsets typically start at low values (0-based).
+    // Use median >= 0x41 as a heuristic for Unicode CIDs.
+    median >= 0x41
+}
+
 /// Build a ToUnicodeCMap from predefined CID→Unicode mapping based on CIDSystemInfo.
 ///
 /// Supports Adobe-Korea1 (Korean) character collection. Can be extended for
@@ -1638,15 +1872,49 @@ impl FontCMaps {
     /// Iterates every page, collects fonts (including Form XObject fonts),
     /// and parses any `/ToUnicode` streams via lopdf's decompression.
     pub fn from_doc(doc: &Document) -> Self {
+        Self::from_doc_pages(doc, None)
+    }
+
+    /// Build FontCMaps for specific pages only. Pass `None` for all pages.
+    pub fn from_doc_pages(doc: &Document, page_filter: Option<&HashSet<u32>>) -> Self {
+        Self::from_doc_pages_inner(doc, page_filter, false)
+    }
+
+    /// Build FontCMaps in fast mode: skip expensive TrueType font fallback
+    /// parsing. Fonts that can't be decoded from their ToUnicode CMap alone
+    /// will be missing, causing text extraction to produce empty/garbage text
+    /// which triggers `needs_ocr` fallback. This is ideal for hybrid OCR
+    /// pipelines where GPU OCR is always available as a fallback.
+    pub fn from_doc_pages_fast(doc: &Document, page_filter: Option<&HashSet<u32>>) -> Self {
+        Self::from_doc_pages_inner(doc, page_filter, true)
+    }
+
+    fn from_doc_pages_inner(
+        doc: &Document,
+        page_filter: Option<&HashSet<u32>>,
+        skip_truetype_fallback: bool,
+    ) -> Self {
         let mut by_obj_num: HashMap<u32, CMapEntry> = HashMap::new();
 
-        for (_page_num, &page_id) in doc.get_pages().iter() {
+        for (page_num, &page_id) in doc.get_pages().iter() {
+            if let Some(filter) = page_filter {
+                if !filter.contains(page_num) {
+                    continue;
+                }
+            }
             // Page-level fonts (includes inherited parent resources)
             let fonts = doc.get_page_fonts(page_id).unwrap_or_default();
-            Self::collect_cmaps_from_fonts(&fonts, doc, &mut by_obj_num);
+            Self::collect_cmaps_from_fonts_inner(
+                &fonts,
+                doc,
+                &mut by_obj_num,
+                skip_truetype_fallback,
+            );
 
-            // Fonts inside Form XObjects referenced by this page
-            Self::collect_cmaps_from_xobjects(doc, page_id, &mut by_obj_num);
+            if !skip_truetype_fallback {
+                // Fonts inside Form XObjects referenced by this page
+                Self::collect_cmaps_from_xobjects(doc, page_id, &mut by_obj_num);
+            }
         }
 
         FontCMaps { by_obj_num }
@@ -1659,6 +1927,15 @@ impl FontCMaps {
         fonts: &std::collections::BTreeMap<Vec<u8>, &lopdf::Dictionary>,
         doc: &Document,
         by_obj_num: &mut HashMap<u32, CMapEntry>,
+    ) {
+        Self::collect_cmaps_from_fonts_inner(fonts, doc, by_obj_num, false);
+    }
+
+    fn collect_cmaps_from_fonts_inner(
+        fonts: &std::collections::BTreeMap<Vec<u8>, &lopdf::Dictionary>,
+        doc: &Document,
+        by_obj_num: &mut HashMap<u32, CMapEntry>,
+        skip_truetype_fallback: bool,
     ) {
         // First pass: collect ToUnicode CMaps
         for font_dict in fonts.values() {
@@ -1680,7 +1957,7 @@ impl FontCMaps {
             };
             let data = match stream.decompressed_content() {
                 Ok(d) => d,
-                Err(_) => continue,
+                Err(_) => stream.content.clone(),
             };
             if let Some(cmap) = ToUnicodeCMap::parse(&data) {
                 debug!(
@@ -1692,13 +1969,32 @@ impl FontCMaps {
                 );
                 let (mut primary, mut remapped) =
                     try_remap_subset_cmap(cmap, font_dict, doc, obj_num);
-                let mut fallback = build_fallback_tounicode_from_encoding(font_dict, doc)
-                    .or_else(|| build_fallback_cmap_for_type0(font_dict, doc))
-                    .or_else(|| build_fallback_cmap_for_simple(font_dict, doc));
 
-                // If the ToUnicode map is extremely sparse, prefer the fallback
-                // (often a better mapping for Symbol/Wingdings/Arabic CID fonts).
+                // Only build expensive fallbacks when the primary CMap is sparse.
+                // build_fallback_cmap_for_type0 can take seconds on large embedded
+                // TrueType fonts (decompressing + parsing 100K+ byte font files).
+                // Skip entirely when the primary CMap is sufficient.
                 let primary_entries = primary.char_map.len() + primary.ranges.len();
+                let mut fallback = if primary_entries < 10 && !skip_truetype_fallback {
+                    // Try cheap fallback first; only attempt expensive TrueType
+                    // parsing if cheap fallbacks don't yield results.
+                    let cheap = build_fallback_tounicode_from_encoding(font_dict, doc)
+                        .or_else(|| build_fallback_cmap_for_simple(font_dict, doc));
+                    if cheap.is_some() {
+                        cheap
+                    } else {
+                        build_fallback_cmap_for_type0(font_dict, doc)
+                    }
+                } else if primary_entries < 10 {
+                    // Fast mode: only try cheap fallbacks, skip TrueType parsing.
+                    // Regions using this font will get needs_ocr=true.
+                    build_fallback_tounicode_from_encoding(font_dict, doc)
+                        .or_else(|| build_fallback_cmap_for_simple(font_dict, doc))
+                } else {
+                    // Primary is rich enough; only try the cheap encoding fallback
+                    build_fallback_tounicode_from_encoding(font_dict, doc)
+                };
+
                 if primary_entries < 10 {
                     if let Some(fb) = fallback.take() {
                         debug!(
@@ -1719,8 +2015,12 @@ impl FontCMaps {
                 );
             } else {
                 // ToUnicode present but parse failed; try fallbacks to avoid empty decoding.
-                let fallback = build_fallback_cmap_for_type0(font_dict, doc)
-                    .or_else(|| build_fallback_cmap_for_simple(font_dict, doc));
+                let fallback = if skip_truetype_fallback {
+                    build_fallback_cmap_for_simple(font_dict, doc)
+                } else {
+                    build_fallback_cmap_for_type0(font_dict, doc)
+                        .or_else(|| build_fallback_cmap_for_simple(font_dict, doc))
+                };
                 if let Some(fb) = fallback {
                     debug!(
                         "ToUnicode CMap obj={} parse failed; using fallback (entries={})",
@@ -1741,6 +2041,10 @@ impl FontCMaps {
 
         // Second pass: Identity-H/V fonts without ToUnicode
         // Try: (1) embedded TrueType/OpenType cmap, (2) predefined CID→Unicode mapping
+        // Skip entirely in fast mode — these fonts require expensive TrueType parsing.
+        if skip_truetype_fallback {
+            return;
+        }
         for font_dict in fonts.values() {
             if font_dict.get(b"ToUnicode").is_ok() {
                 continue;
@@ -1820,23 +2124,25 @@ impl FontCMaps {
             // Try parsing embedded TrueType/OpenType cmap
             if let Some(ff_ref) = font_file_ref {
                 if let Ok(stream) = doc.get_object(ff_ref).and_then(Object::as_stream) {
-                    if let Ok(data) = stream.decompressed_content() {
-                        if let Some(cmap) = build_cmap_from_truetype(&data) {
-                            debug!(
-                                "TrueType CMap obj={:<6} (embedded font) char_map={}",
-                                lookup_key,
-                                cmap.char_map.len()
-                            );
-                            by_obj_num.insert(
-                                lookup_key,
-                                CMapEntry {
-                                    primary: cmap,
-                                    remapped: None,
-                                    fallback: None,
-                                },
-                            );
-                            resolved = true;
-                        }
+                    let data = match stream.decompressed_content() {
+                        Ok(d) => d,
+                        Err(_) => stream.content.clone(),
+                    };
+                    if let Some(cmap) = build_cmap_from_truetype(&data) {
+                        debug!(
+                            "TrueType CMap obj={:<6} (embedded font) char_map={}",
+                            lookup_key,
+                            cmap.char_map.len()
+                        );
+                        by_obj_num.insert(
+                            lookup_key,
+                            CMapEntry {
+                                primary: cmap,
+                                remapped: None,
+                                fallback: None,
+                            },
+                        );
+                        resolved = true;
                     }
                 }
             }
@@ -1856,6 +2162,38 @@ impl FontCMaps {
                             remapped: None,
                             fallback: None,
                         },
+                    );
+                    resolved = true;
+                }
+            }
+
+            // Last resort: CID-as-Unicode passthrough.
+            // Many PDF generators (Chromium, wkhtmltopdf) use Identity-H encoding where
+            // CID values ARE Unicode codepoints, but strip the cmap table and omit
+            // ToUnicode. We detect this by checking the /W (widths) array: if CID values
+            // fall in typical Unicode letter/digit ranges (0x41+), CIDs are likely Unicode.
+            // If CIDs are low values (< 0x41), they're GIDs in a subset font.
+            if !resolved {
+                if cid_values_look_like_unicode(cid_font_dict) {
+                    debug!(
+                        "Identity-H font obj={}: W array CIDs look like Unicode — using passthrough",
+                        lookup_key
+                    );
+                    let mut cmap = ToUnicodeCMap::new();
+                    cmap.code_byte_length = 2;
+                    cmap.cid_passthrough = true;
+                    by_obj_num.insert(
+                        lookup_key,
+                        CMapEntry {
+                            primary: cmap,
+                            remapped: None,
+                            fallback: None,
+                        },
+                    );
+                } else {
+                    debug!(
+                        "Identity-H font obj={}: no decoding possible (stripped cmap, GID-based CIDs)",
+                        lookup_key
                     );
                 }
             }
@@ -2371,6 +2709,296 @@ endbfchar
         assert!(
             !result.contains('䉹'),
             "Unmapped 2-byte CIDs should not produce CJK"
+        );
+    }
+
+    #[test]
+    fn fallback_promotion_when_larger_than_primary() {
+        // Simulate: primary has 5 char_map entries, remapped exists (sequential),
+        // fallback has 20 entries (TrueType cmap).  The fallback should be
+        // promoted to `remapped` and the old remap demoted to `fallback`.
+        let mut primary = ToUnicodeCMap::new();
+        for i in 0..5u16 {
+            primary
+                .char_map
+                .insert(100 + i, char::from(b'A' + i as u8).to_string());
+        }
+        primary.code_byte_length = 2;
+
+        let mut sequential_remap = ToUnicodeCMap::new();
+        for i in 0..5u16 {
+            sequential_remap
+                .char_map
+                .insert(i, char::from(b'A' + i as u8).to_string());
+        }
+        sequential_remap.code_byte_length = 2;
+
+        let mut truetype_fb = ToUnicodeCMap::new();
+        for i in 0..20u16 {
+            truetype_fb
+                .char_map
+                .insert(i, format!("U+{:04X}", 0x4E00 + i));
+        }
+        truetype_fb.code_byte_length = 2;
+
+        let primary_entries = primary.char_map.len() + primary.ranges.len();
+        let mut remapped: Option<ToUnicodeCMap> = Some(sequential_remap);
+        let mut fallback: Option<ToUnicodeCMap> = Some(truetype_fb);
+
+        // Apply the same promotion logic as build_cmap_entry_from_stream
+        if remapped.is_some() {
+            if let Some(ref fb) = fallback {
+                let fb_entries = fb.char_map.len() + fb.ranges.len();
+                if fb_entries > primary_entries {
+                    let old_remap = remapped.take().unwrap();
+                    remapped = fallback.take();
+                    fallback = Some(old_remap);
+                }
+            }
+        }
+
+        // The TrueType fallback (20 entries) should now be in `remapped`
+        let r = remapped.unwrap();
+        assert_eq!(
+            r.char_map.len(),
+            20,
+            "TrueType cmap should be promoted to remapped"
+        );
+
+        // The old sequential remap (5 entries) should now be in `fallback`
+        let f = fallback.unwrap();
+        assert_eq!(
+            f.char_map.len(),
+            5,
+            "Sequential remap should be demoted to fallback"
+        );
+    }
+
+    #[test]
+    fn no_fallback_promotion_when_smaller() {
+        // When fallback has fewer entries than primary, no swap should occur.
+        let mut primary = ToUnicodeCMap::new();
+        for i in 0..50u16 {
+            primary
+                .char_map
+                .insert(100 + i, format!("U+{:04X}", 0x0041 + i));
+        }
+        primary.code_byte_length = 2;
+
+        let mut sequential_remap = ToUnicodeCMap::new();
+        for i in 0..50u16 {
+            sequential_remap
+                .char_map
+                .insert(i, format!("U+{:04X}", 0x0041 + i));
+        }
+        sequential_remap.code_byte_length = 2;
+
+        let mut small_fb = ToUnicodeCMap::new();
+        for i in 0..10u16 {
+            small_fb.char_map.insert(i, format!("U+{:04X}", 0x4E00 + i));
+        }
+        small_fb.code_byte_length = 2;
+
+        let primary_entries = primary.char_map.len() + primary.ranges.len();
+        let mut remapped: Option<ToUnicodeCMap> = Some(sequential_remap);
+        let mut fallback: Option<ToUnicodeCMap> = Some(small_fb);
+
+        if remapped.is_some() {
+            if let Some(ref fb) = fallback {
+                let fb_entries = fb.char_map.len() + fb.ranges.len();
+                if fb_entries > primary_entries {
+                    let old_remap = remapped.take().unwrap();
+                    remapped = fallback.take();
+                    fallback = Some(old_remap);
+                }
+            }
+        }
+
+        // No swap: remapped should still have 50 entries
+        assert_eq!(remapped.unwrap().char_map.len(), 50);
+        assert_eq!(fallback.unwrap().char_map.len(), 10);
+    }
+
+    #[test]
+    fn test_max_source_cid() {
+        let cmap_content = r#"
+1 begincodespacerange
+<0000><FFFF>
+endcodespacerange
+2 beginbfchar
+<0003> <0020>
+<0031> <004E>
+endbfchar
+1 beginbfrange
+<0208> <0227> <0430>
+endbfrange
+"#;
+        let cmap = ToUnicodeCMap::parse(cmap_content.as_bytes()).unwrap();
+        assert_eq!(cmap.min_source_cid(), Some(0x0003));
+        assert_eq!(cmap.max_source_cid(), Some(0x0227));
+    }
+
+    /// Helper: build a minimal CIDFont dict with a W array and check coverage.
+    fn cid_font_dict_with_w(w_items: Vec<lopdf::Object>) -> lopdf::Dictionary {
+        let mut d = lopdf::Dictionary::new();
+        d.set("W", lopdf::Object::Array(w_items));
+        d
+    }
+
+    #[test]
+    fn test_w_array_covers_cid_format1() {
+        // Format 1: `c [w1 w2 ... wn]` — widths for CIDs c..c+n-1.
+        // Mimics the 16.pdf Tahoma W array: 0[1000] 3[313] 5[401] 11[383 383] 16[363 303 382]
+        let doc = Document::new();
+        let d = cid_font_dict_with_w(vec![
+            lopdf::Object::Integer(0),
+            lopdf::Object::Array(vec![lopdf::Object::Integer(1000)]),
+            lopdf::Object::Integer(3),
+            lopdf::Object::Array(vec![lopdf::Object::Integer(313)]),
+            lopdf::Object::Integer(5),
+            lopdf::Object::Array(vec![lopdf::Object::Integer(401)]),
+            lopdf::Object::Integer(11),
+            lopdf::Object::Array(vec![
+                lopdf::Object::Integer(383),
+                lopdf::Object::Integer(383),
+            ]),
+            lopdf::Object::Integer(16),
+            lopdf::Object::Array(vec![
+                lopdf::Object::Integer(363),
+                lopdf::Object::Integer(303),
+                lopdf::Object::Integer(382),
+            ]),
+            lopdf::Object::Integer(570),
+            lopdf::Object::Array(vec![lopdf::Object::Integer(667); 26]),
+        ]);
+
+        assert!(w_array_covers_cid(&d, &doc, 0));
+        assert!(w_array_covers_cid(&d, &doc, 3));
+        assert!(w_array_covers_cid(&d, &doc, 5));
+        assert!(w_array_covers_cid(&d, &doc, 11));
+        assert!(w_array_covers_cid(&d, &doc, 12));
+        assert!(w_array_covers_cid(&d, &doc, 16));
+        assert!(w_array_covers_cid(&d, &doc, 18));
+        assert!(w_array_covers_cid(&d, &doc, 570));
+        assert!(w_array_covers_cid(&d, &doc, 595));
+        // Gaps are NOT covered
+        assert!(!w_array_covers_cid(&d, &doc, 1));
+        assert!(!w_array_covers_cid(&d, &doc, 4));
+        assert!(!w_array_covers_cid(&d, &doc, 19));
+        assert!(!w_array_covers_cid(&d, &doc, 596));
+    }
+
+    #[test]
+    fn test_w_array_covers_cid_format2() {
+        // Format 2: `c_first c_last w` — CIDs c_first..c_last all have width w.
+        let doc = Document::new();
+        let d = cid_font_dict_with_w(vec![
+            lopdf::Object::Integer(100),
+            lopdf::Object::Integer(120),
+            lopdf::Object::Integer(500),
+        ]);
+
+        assert!(w_array_covers_cid(&d, &doc, 100));
+        assert!(w_array_covers_cid(&d, &doc, 110));
+        assert!(w_array_covers_cid(&d, &doc, 120));
+        assert!(!w_array_covers_cid(&d, &doc, 99));
+        assert!(!w_array_covers_cid(&d, &doc, 121));
+    }
+
+    #[test]
+    fn test_w_array_covers_cid_missing_w() {
+        let doc = Document::new();
+        let d = lopdf::Dictionary::new();
+        assert!(!w_array_covers_cid(&d, &doc, 3));
+    }
+
+    #[test]
+    fn test_try_remap_skipped_when_w_covers_cmap() {
+        // Simulates 16.pdf: CMap's max source CID (0x0279 = 633) is explicitly
+        // in the W array, so no subset-renumbering happened — remap must NOT fire.
+        let cmap_content = r#"
+1 begincodespacerange
+<0000><FFFF>
+endcodespacerange
+2 beginbfchar
+<0003> <0020>
+<0031> <004E>
+endbfchar
+2 beginbfrange
+<023A> <0253> <0410>
+<0255> <0279> <042B>
+endbfrange
+"#;
+        let cmap = ToUnicodeCMap::parse(cmap_content.as_bytes()).unwrap();
+
+        let mut doc = Document::new();
+        // Build a CIDFont dict with Identity CIDToGIDMap and a W array that
+        // covers CID 633 via `597 [widths...]`.
+        let mut cid_font = lopdf::Dictionary::new();
+        cid_font.set("CIDToGIDMap", lopdf::Object::Name(b"Identity".to_vec()));
+        cid_font.set(
+            "W",
+            lopdf::Object::Array(vec![
+                lopdf::Object::Integer(0),
+                lopdf::Object::Array(vec![lopdf::Object::Integer(750)]),
+                lopdf::Object::Integer(597),
+                lopdf::Object::Array(vec![lopdf::Object::Integer(500); 37]), // 597..633
+            ]),
+        );
+        let cid_font_id = doc.add_object(cid_font);
+
+        // Build the Type0 font dict with Identity-H + DescendantFonts ref.
+        let mut font_dict = lopdf::Dictionary::new();
+        font_dict.set("Encoding", lopdf::Object::Name(b"Identity-H".to_vec()));
+        font_dict.set(
+            "DescendantFonts",
+            lopdf::Object::Array(vec![lopdf::Object::Reference(cid_font_id)]),
+        );
+
+        let (primary, remapped) = try_remap_subset_cmap(cmap, &font_dict, &doc, 123);
+        assert!(
+            remapped.is_none(),
+            "Remap must be skipped when W covers CMap max CID (this is 16.pdf)"
+        );
+        assert_eq!(primary.lookup(0x0003), Some(" ".to_string()));
+    }
+
+    #[test]
+    fn test_try_remap_fires_for_true_subset_mismatch() {
+        // True mismatch: CMap has high CIDs (512-544) but W only lists low sequential CIDs.
+        let cmap_content = r#"
+1 begincodespacerange
+<0000><FFFF>
+endcodespacerange
+1 beginbfrange
+<0200> <0220> <0410>
+endbfrange
+"#;
+        let cmap = ToUnicodeCMap::parse(cmap_content.as_bytes()).unwrap();
+
+        let mut doc = Document::new();
+        let mut cid_font = lopdf::Dictionary::new();
+        cid_font.set("CIDToGIDMap", lopdf::Object::Name(b"Identity".to_vec()));
+        cid_font.set(
+            "W",
+            lopdf::Object::Array(vec![
+                lopdf::Object::Integer(0),
+                lopdf::Object::Array(vec![lopdf::Object::Integer(500); 34]), // 0..33
+            ]),
+        );
+        let cid_font_id = doc.add_object(cid_font);
+
+        let mut font_dict = lopdf::Dictionary::new();
+        font_dict.set("Encoding", lopdf::Object::Name(b"Identity-H".to_vec()));
+        font_dict.set(
+            "DescendantFonts",
+            lopdf::Object::Array(vec![lopdf::Object::Reference(cid_font_id)]),
+        );
+
+        let (_primary, remapped) = try_remap_subset_cmap(cmap, &font_dict, &doc, 456);
+        assert!(
+            remapped.is_some(),
+            "Remap must fire when CMap's CIDs are outside W array coverage"
         );
     }
 }

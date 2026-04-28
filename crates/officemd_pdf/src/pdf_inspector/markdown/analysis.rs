@@ -79,7 +79,7 @@ pub(crate) fn compute_page_margins(lines: &[TextLine]) -> HashMap<u32, PageMargi
             }
             let (best_key, best_count) = buckets
                 .iter()
-                .max_by_key(|&(_, &count)| count)
+                .max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0)))
                 .map(|(&k, &c)| (k, c))
                 .unwrap_or((0, 0));
             let mode_x = best_key as f32 * 5.0;
@@ -146,10 +146,10 @@ mod tests {
                     font: "F1".into(),
                     font_size: 12.0,
                     page,
-                    is_rotated: false,
                     is_bold: false,
                     is_italic: false,
                     item_type: ItemType::Text,
+                    mcid: None,
                 },
                 TextItem {
                     text: "tail".into(),
@@ -160,10 +160,10 @@ mod tests {
                     font: "F1".into(),
                     font_size: 12.0,
                     page,
-                    is_rotated: false,
                     is_bold: false,
                     is_italic: false,
                     item_type: ItemType::Text,
+                    mcid: None,
                 },
                 TextItem {
                     text: "end".into(),
@@ -174,14 +174,15 @@ mod tests {
                     font: "F1".into(),
                     font_size: 12.0,
                     page,
-                    is_rotated: false,
                     is_bold: false,
                     is_italic: false,
                     item_type: ItemType::Text,
+                    mcid: None,
                 },
             ],
             y,
             page,
+            adaptive_threshold: 0.10,
         }
     }
 
@@ -252,6 +253,24 @@ pub(crate) fn detect_line_alignment(line: &TextLine, margins: &PageMargins) -> L
 /// Font statistics for a document
 pub(crate) struct FontStats {
     pub(crate) most_common_size: f32,
+    /// Font size frequency distribution (size_key → line count).
+    /// Used for rarity-based heading detection.
+    pub(crate) size_counts: HashMap<i32, usize>,
+    /// Total number of lines counted.
+    pub(crate) total_lines: usize,
+}
+
+/// Compute how rare a font size is in the document (0.0 = most common, 1.0 = unique).
+/// Mirrors opendataloader's font rarity boosting approach: heading fonts appear on
+/// far fewer lines than body text, so their percentile rank is high.
+pub(crate) fn font_size_rarity(font_size: f32, stats: &FontStats) -> f32 {
+    if stats.total_lines == 0 {
+        return 0.0;
+    }
+    let key = (font_size * 10.0) as i32;
+    let count = stats.size_counts.get(&key).copied().unwrap_or(0);
+    // Rarity = 1 - (frequency ratio). A size used on 1/100 lines has rarity ~0.99.
+    1.0 - (count as f32 / stats.total_lines as f32)
 }
 
 /// Calculate font stats directly from items (before grouping into lines)
@@ -265,6 +284,8 @@ pub(crate) fn calculate_font_stats_from_items(items: &[TextItem]) -> FontStats {
         }
     }
 
+    let total_lines = size_counts.values().sum();
+
     // Break ties by preferring the smaller font size for deterministic output
     let most_common_size = size_counts
         .iter()
@@ -274,7 +295,11 @@ pub(crate) fn calculate_font_stats_from_items(items: &[TextItem]) -> FontStats {
         .map(|(size, _)| *size as f32 / 10.0)
         .unwrap_or(12.0);
 
-    FontStats { most_common_size }
+    FontStats {
+        most_common_size,
+        size_counts,
+        total_lines,
+    }
 }
 
 /// Calculate font stats from grouped lines
@@ -292,6 +317,8 @@ pub(crate) fn calculate_font_stats(lines: &[TextLine]) -> FontStats {
         }
     }
 
+    let total_lines = size_counts.values().sum();
+
     // Break ties by preferring the smaller font size for deterministic output
     let most_common_size = size_counts
         .iter()
@@ -301,7 +328,23 @@ pub(crate) fn calculate_font_stats(lines: &[TextLine]) -> FontStats {
         .map(|(size, _)| *size as f32 / 10.0)
         .unwrap_or(12.0);
 
-    FontStats { most_common_size }
+    FontStats {
+        most_common_size,
+        size_counts,
+        total_lines,
+    }
+}
+
+/// Determine the heading level for a bold-only line that didn't meet the font-size
+/// threshold.  These are common in academic papers where section headings are bold
+/// at the same size as body text.
+///
+/// Returns a level below the lowest font-size tier (or H2 when no tiers exist).
+pub(crate) fn bold_heading_level(heading_tiers: &[f32]) -> usize {
+    let level = heading_tiers.len() + 1;
+    // Clamp to 1..=6 — if no font-size tiers, bold headings become H2
+    // (H1 is reserved for titles which are typically larger)
+    level.clamp(2, 6)
 }
 
 /// Detect TOC-style lines that contain dot leaders (e.g., "Section Name .... 42").
@@ -365,7 +408,7 @@ pub(crate) fn compute_paragraph_threshold(lines: &[TextLine], base_size: f32) ->
         return fallback;
     }
 
-    gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    gaps.sort_by(|a, b| a.total_cmp(b));
 
     let median = gaps[gaps.len() / 2];
 
@@ -465,7 +508,7 @@ pub(crate) fn compute_heading_tiers(lines: &[TextLine], base_size: f32) -> Vec<f
     }
 
     // Sort descending
-    heading_sizes.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    heading_sizes.sort_by(|a, b| b.total_cmp(a));
 
     // Cluster sizes within 0.5pt into same tier (use first value as representative)
     let mut tiers: Vec<f32> = Vec::new();

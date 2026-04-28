@@ -431,15 +431,23 @@ pub(crate) fn parse_cid_w_array(
 /// Compute the width of a string in text space units,
 /// given raw bytes and font width info.
 /// Returns width in text space units (font_units * units_scale * font_size).
+///
+/// `char_spacing` (Tc) is added per character and `word_spacing` (Tw) is added
+/// per space character (byte 0x20), both in unscaled text-space units.
+/// Per the PDF spec: tx = (w0 × Tfs + Tc + Tw_if_space) per glyph.
 pub(crate) fn compute_string_width_ts(
     bytes: &[u8],
     font_info: &FontWidthInfo,
     font_size: f32,
+    char_spacing: f32,
+    word_spacing: f32,
 ) -> f32 {
     let mut total: f32 = 0.0;
-    if font_info.is_cid {
+    let mut num_spaces: usize = 0;
+    let num_chars = if font_info.is_cid {
         // 2-byte (big-endian) character codes
         let mut j = 0;
+        let mut count = 0usize;
         while j + 1 < bytes.len() {
             let cid = u16::from_be_bytes([bytes[j], bytes[j + 1]]);
             let w = font_info
@@ -448,8 +456,14 @@ pub(crate) fn compute_string_width_ts(
                 .copied()
                 .unwrap_or(font_info.default_width);
             total += w as f32;
+            // CID 32 = space in most CID fonts
+            if cid == 32 {
+                num_spaces += 1;
+            }
+            count += 1;
             j += 2;
         }
+        count
     } else {
         // 1-byte character codes
         for &b in bytes {
@@ -460,10 +474,17 @@ pub(crate) fn compute_string_width_ts(
                 .copied()
                 .unwrap_or(font_info.default_width);
             total += w as f32;
+            if b == 0x20 {
+                num_spaces += 1;
+            }
         }
-    }
+        bytes.len()
+    };
     // Convert from font units to text space using the font's scale factor
+    // Then add Tc per character and Tw per space character
     total * font_info.units_scale * font_size
+        + num_chars as f32 * char_spacing
+        + num_spaces as f32 * word_spacing
 }
 
 /// Extract raw bytes from a PDF operand (String object)
@@ -475,29 +496,37 @@ pub(crate) fn get_operand_bytes(obj: &Object) -> Option<&[u8]> {
     }
 }
 
-/// Build encoding maps for all fonts on a page
+/// Build encoding maps for all fonts on a page.
+/// Returns `(encodings, has_gid_fonts)` where `has_gid_fonts` is true when
+/// any font uses raw glyph ID names (gidNNNNN) that can't be decoded.
 pub(crate) fn build_font_encodings(
     doc: &Document,
     fonts: &std::collections::BTreeMap<Vec<u8>, &lopdf::Dictionary>,
-) -> PageFontEncodings {
+) -> (PageFontEncodings, bool) {
     let mut encodings = PageFontEncodings::new();
+    let mut has_gid_fonts = false;
 
     for (font_name, font_dict) in fonts {
         let resource_name = String::from_utf8_lossy(font_name).to_string();
 
-        if let Some(encoding_map) = parse_font_encoding(doc, font_dict) {
-            encodings.insert(resource_name, encoding_map);
+        if let Some(result) = parse_font_encoding(doc, font_dict) {
+            if result.gid_glyph_count > 0 {
+                has_gid_fonts = true;
+            }
+            if !result.map.is_empty() {
+                encodings.insert(resource_name, result.map);
+            }
         }
     }
 
-    encodings
+    (encodings, has_gid_fonts)
 }
 
 /// Parse font encoding from a font dictionary
 pub(crate) fn parse_font_encoding(
     doc: &Document,
     font_dict: &lopdf::Dictionary,
-) -> Option<FontEncodingMap> {
+) -> Option<EncodingResult> {
     let encoding_obj = font_dict.get(b"Encoding").ok()?;
 
     // Encoding can be a name or a dictionary
@@ -521,11 +550,21 @@ pub(crate) fn parse_font_encoding(
     }
 }
 
+/// Result of parsing an encoding dictionary's Differences array.
+pub(crate) struct EncodingResult {
+    pub map: FontEncodingMap,
+    /// Number of glyph names matching the `gidNNNNN` pattern (raw glyph IDs).
+    /// These indicate a font with unresolvable encoding — the glyph IDs
+    /// reference the original font's glyph table, but without the original
+    /// font's cmap there is no way to map them to Unicode.
+    pub gid_glyph_count: u32,
+}
+
 /// Parse an encoding dictionary with Differences array
 pub(crate) fn parse_encoding_dictionary(
     doc: &Document,
     enc_dict: &lopdf::Dictionary,
-) -> Option<FontEncodingMap> {
+) -> Option<EncodingResult> {
     let differences = enc_dict.get(b"Differences").ok()?;
 
     let diff_array = match differences {
@@ -543,6 +582,7 @@ pub(crate) fn parse_encoding_dictionary(
     let mut encoding_map = FontEncodingMap::new();
     let mut current_code: u8 = 0;
     let mut ligature_count = 0u32;
+    let mut gid_glyph_count = 0u32;
 
     for item in diff_array {
         match item {
@@ -563,6 +603,14 @@ pub(crate) fn parse_encoding_dictionary(
                         current_code, glyph_name
                     );
                     ligature_count += 1;
+                }
+                // Detect raw glyph ID names (e.g. "gid00053") that can't be
+                // mapped to Unicode without the original font's cmap table.
+                if glyph_name.starts_with("gid")
+                    && glyph_name.len() >= 4
+                    && glyph_name[3..].chars().all(|c| c.is_ascii_digit())
+                {
+                    gid_glyph_count += 1;
                 }
                 if let Some(ch) = glyph_to_char(&glyph_name) {
                     encoding_map.insert(current_code, ch);
@@ -586,11 +634,17 @@ pub(crate) fn parse_encoding_dictionary(
         );
     }
 
-    if encoding_map.is_empty() {
-        None
-    } else {
-        Some(encoding_map)
+    if gid_glyph_count > 0 {
+        debug!(
+            "  Differences: {} gid-encoded glyphs (unresolvable without original font)",
+            gid_glyph_count
+        );
     }
+
+    Some(EncodingResult {
+        map: encoding_map,
+        gid_glyph_count,
+    })
 }
 
 /// Get the CMap lookup key for an Identity-H/V CID font without ToUnicode.
@@ -682,9 +736,13 @@ pub(crate) fn extract_text_from_operand(
                             .iter()
                             .filter_map(|&b| {
                                 let code = b as u16;
+                                // Treat U+FFFD and U+0000 as missing so the
+                                // next fallback (Differences/Latin-1) wins.
+                                let bad =
+                                    |s: &str| s.chars().any(|c| c == '\u{FFFD}' || c == '\u{0000}');
                                 // 1. Primary CMap
                                 if let Some(s) = entry.primary.lookup(code) {
-                                    if !s.contains('\u{FFFD}') {
+                                    if !bad(&s) && !is_suspect_upper_to_lower(b, &s) {
                                         return Some(s);
                                     }
                                 }
@@ -692,7 +750,7 @@ pub(crate) fn extract_text_from_operand(
                                 if let Some(fb) =
                                     entry.fallback.as_ref().and_then(|c| c.lookup(code))
                                 {
-                                    if !fb.contains('\u{FFFD}') {
+                                    if !bad(&fb) && !is_suspect_upper_to_lower(b, &fb) {
                                         return Some(fb);
                                     }
                                 }
@@ -721,7 +779,10 @@ pub(crate) fn extract_text_from_operand(
                         let lookups = entry.primary.lookup_bytes(bytes);
                         let decoded: String = lookups
                             .iter()
-                            .filter_map(|&(_b, ref cmap_result)| cmap_result.clone())
+                            .filter_map(|(b, cmap_result)| match cmap_result {
+                                Some(s) if !is_suspect_upper_to_lower(*b, s) => Some(s.clone()),
+                                _ => None,
+                            })
                             .collect();
                         if !decoded.is_empty() {
                             return Some(decoded);
@@ -785,7 +846,9 @@ pub(crate) fn extract_text_from_operand(
                     None
                 };
 
+            let mut has_cmap = false;
             if let Some(entry) = inline_cmaps.get(current_font) {
+                has_cmap = true;
                 if let Some(decoded) = decode_with_entry(entry) {
                     return Some(decoded);
                 }
@@ -794,11 +857,17 @@ pub(crate) fn extract_text_from_operand(
             // Look up CMap by ToUnicode object reference
             if let Some(&obj_num) = font_tounicode_refs.get(current_font) {
                 if let Some(entry) = font_cmaps.get_by_obj(obj_num) {
+                    has_cmap = true;
                     if let Some(decoded) = decode_with_entry(entry) {
                         return Some(decoded);
                     }
                 }
             }
+
+            // CID fonts with a CMap that couldn't decode: the CID is genuinely
+            // unmapped. Don't fall through to text-interpretation fallbacks
+            // (Latin-1, UTF-16, etc.) which would misinterpret CID bytes as
+            // character codes (e.g. CID 0x01A9 → Latin-1 "©").
 
             // Try our custom encoding map from Differences arrays.
             // The Differences array overrides specific codes in a base encoding (typically
@@ -890,8 +959,16 @@ pub(crate) fn extract_text_from_operand(
                         if let Some(symbol_text) = decode_symbol_fallback(bytes, base_font_name) {
                             return Some(symbol_text);
                         }
+                        // For CID fonts (have ToUnicode CMap), the CID is
+                        // genuinely unmapped — return None to avoid Latin-1
+                        // fallback misinterpreting CID bytes as characters.
+                        if has_cmap || font_tounicode_refs.contains_key(current_font) {
+                            return None;
+                        }
+                        // Non-CID fonts: fall through to other methods
+                    } else {
+                        return Some(text);
                     }
-                    return Some(text);
                 }
             }
 
@@ -951,6 +1028,30 @@ fn decode_symbol_fallback(bytes: &[u8], base_font_name: Option<&str>) -> Option<
     if out.is_empty() { None } else { Some(out) }
 }
 
+/// Reject CMap entries that look like a mis-subsetted lookup table.
+///
+/// Subsetting tools sometimes reuse the lowercase glyph slot for a different
+/// uppercase glyph and forget to rewrite the ToUnicode CMap, producing entries
+/// like 0x46 ('F') -> 'c'.  When the source byte is an uppercase ASCII letter
+/// and the CMap maps it to a lowercase ASCII letter that is NOT the canonical
+/// uppercase->lowercase pair (offset != 32), the mapping is almost certainly
+/// wrong and we should fall through to Differences / Latin-1, which preserves
+/// the byte's original case.  Legitimate "all-caps font rendered as lowercase"
+/// mappings (where the offset IS 32) are left alone.
+fn is_suspect_upper_to_lower(byte: u8, mapped: &str) -> bool {
+    if !byte.is_ascii_uppercase() {
+        return false;
+    }
+    let mut chars = mapped.chars();
+    let (Some(first), None) = (chars.next(), chars.next()) else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    (first as u8) != byte + 32
+}
+
 fn choose_best_cmap_decode(primary: String, remapped: String) -> String {
     if primary.is_empty() {
         return remapped;
@@ -997,6 +1098,13 @@ fn score_text(text: &str) -> i32 {
                 digits += 1;
             } else if ch.is_control() || ch == '\u{FFFD}' {
                 other += 3;
+            } else if ('\u{4E00}'..='\u{9FFF}').contains(&ch)
+                || ('\u{3040}'..='\u{309F}').contains(&ch)
+                || ('\u{30A0}'..='\u{30FF}').contains(&ch)
+                || ('\u{3400}'..='\u{4DBF}').contains(&ch)
+                || ('\u{F900}'..='\u{FAFF}').contains(&ch)
+            {
+                letters += 1; // CJK ideographs / kana count as valid text
             } else {
                 other += 1;
             }
@@ -1011,4 +1119,165 @@ fn score_text(text: &str) -> i32 {
         score -= 15;
     }
     score
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_font_info(widths: &[(u16, u16)], default_width: u16, is_cid: bool) -> FontWidthInfo {
+        FontWidthInfo {
+            widths: widths.iter().copied().collect(),
+            default_width,
+            space_width: widths
+                .iter()
+                .find(|(k, _)| *k == 32)
+                .map(|(_, v)| *v)
+                .unwrap_or(default_width),
+            is_cid,
+            units_scale: 0.001,
+            wmode: 0,
+        }
+    }
+
+    #[test]
+    fn compute_string_width_ts_no_tc_tw() {
+        // Without Tc/Tw (both 0), width = glyph widths only
+        let fi = make_font_info(&[(72, 500), (101, 400), (108, 300)], 600, false);
+        let bytes = b"Hello"; // H=500, e=400, l=300, l=300, o=600(default)
+        let w = compute_string_width_ts(bytes, &fi, 10.0, 0.0, 0.0);
+        // (500+400+300+300+600) * 0.001 * 10 = 21.0
+        assert!((w - 21.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn compute_string_width_ts_with_positive_tc() {
+        // Positive Tc adds char_spacing per character
+        let fi = make_font_info(&[], 500, false);
+        let bytes = b"ab"; // 2 chars, each 500 default
+        let w = compute_string_width_ts(bytes, &fi, 10.0, 0.5, 0.0);
+        // glyph: (500+500)*0.001*10 = 10.0, Tc: 2*0.5 = 1.0, total = 11.0
+        assert!((w - 11.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn compute_string_width_ts_with_negative_tc() {
+        // Negative Tc (tight tracking) reduces width
+        let fi = make_font_info(&[], 500, false);
+        let bytes = b"ab";
+        let w = compute_string_width_ts(bytes, &fi, 10.0, -0.3, 0.0);
+        // glyph: 10.0, Tc: 2*(-0.3) = -0.6, total = 9.4
+        assert!((w - 9.4).abs() < 0.01);
+    }
+
+    #[test]
+    fn compute_string_width_ts_with_tw() {
+        // Tw applies only to space characters (byte 0x20)
+        let fi = make_font_info(&[(32, 250)], 500, false);
+        let bytes = b"a b"; // 'a'=500, ' '=250, 'b'=500
+        let w = compute_string_width_ts(bytes, &fi, 10.0, 0.0, 0.8);
+        // glyph: (500+250+500)*0.001*10 = 12.5, Tw: 1*0.8 = 0.8, total = 13.3
+        assert!((w - 13.3).abs() < 0.01);
+    }
+
+    #[test]
+    fn compute_string_width_ts_with_tc_and_tw() {
+        // Both Tc and Tw
+        let fi = make_font_info(&[(32, 250)], 500, false);
+        let bytes = b"a b"; // 3 chars, 1 space
+        let w = compute_string_width_ts(bytes, &fi, 10.0, 0.1, 0.5);
+        // glyph: 12.5, Tc: 3*0.1 = 0.3, Tw: 1*0.5 = 0.5, total = 13.3
+        assert!((w - 13.3).abs() < 0.01);
+    }
+
+    #[test]
+    fn compute_string_width_ts_cid_font() {
+        // CID font: 2-byte codes, space is CID 32
+        let fi = make_font_info(&[(65, 500), (32, 250)], 600, true);
+        // "A " in CID: [0,65, 0,32]
+        let bytes = &[0u8, 65, 0, 32];
+        let w = compute_string_width_ts(bytes, &fi, 12.0, 0.2, 0.3);
+        // glyph: (500+250)*0.001*12 = 9.0, Tc: 2*0.2 = 0.4, Tw: 1*0.3 = 0.3
+        assert!((w - 9.7).abs() < 0.01);
+    }
+
+    #[test]
+    fn compute_string_width_ts_large_tc() {
+        // Large Tc (character-spreading) is applied in full
+        let fi = make_font_info(&[], 500, false);
+        let bytes = b"abc"; // 3 chars
+        let w = compute_string_width_ts(bytes, &fi, 10.0, 5.0, 0.0);
+        // glyph: (500*3)*0.001*10 = 15.0, Tc: 3*5.0 = 15.0, total = 30.0
+        assert!((w - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn score_text_cjk() {
+        // Correct Japanese text should score well
+        let japanese = "2026年9月期 1Q 業績報告";
+        // Garbled output (random CJK from wrong remap)
+        let garbled = "\u{FFFD}\u{FFFD}\u{FFFD}";
+
+        let s_jp = score_text(japanese);
+        let s_garbled = score_text(garbled);
+        assert!(
+            s_jp > s_garbled,
+            "Japanese text ({s_jp}) should score higher than garbled ({s_garbled})"
+        );
+    }
+
+    #[test]
+    fn score_text_cjk_vs_ascii_garbage() {
+        // Real CJK text
+        let cjk = "株式会社の業績についてご報告いたします";
+        // Ascii garbage of similar length
+        let garbage = "}{|~`^@#$%&*()!<>[];:',./";
+
+        let s_cjk = score_text(cjk);
+        let s_garbage = score_text(garbage);
+        assert!(
+            s_cjk > s_garbage,
+            "CJK text ({s_cjk}) should score higher than garbage ({s_garbage})"
+        );
+    }
+
+    #[test]
+    fn score_text_english_still_works() {
+        let good = "the quick brown fox and the lazy dog";
+        let bad = "###!!!@@@$$$";
+        assert!(score_text(good) > score_text(bad));
+    }
+
+    #[test]
+    fn suspect_upper_to_lower_flags_subset_miscoding() {
+        // 'F' (0x46) -> 'c' is the OpenXML cundamentals case.
+        assert!(is_suspect_upper_to_lower(b'F', "c"));
+        assert!(is_suspect_upper_to_lower(b'O', "l"));
+        assert!(is_suspect_upper_to_lower(b'M', "j"));
+    }
+
+    #[test]
+    fn suspect_upper_to_lower_allows_canonical_lowercase() {
+        // All-caps font emitting lowercase: 'F' -> 'f' is fine.
+        assert!(!is_suspect_upper_to_lower(b'F', "f"));
+        assert!(!is_suspect_upper_to_lower(b'A', "a"));
+        assert!(!is_suspect_upper_to_lower(b'Z', "z"));
+    }
+
+    #[test]
+    fn suspect_upper_to_lower_ignores_non_uppercase_bytes() {
+        // Lowercase or non-letter bytes must never be flagged.
+        assert!(!is_suspect_upper_to_lower(b'f', "c"));
+        assert!(!is_suspect_upper_to_lower(b'3', "1"));
+        assert!(!is_suspect_upper_to_lower(0xE9, "a"));
+    }
+
+    #[test]
+    fn suspect_upper_to_lower_ignores_multichar_or_uppercase_targets() {
+        // Multi-char mappings (ligatures, accented chars) and uppercase
+        // targets are not flagged.
+        assert!(!is_suspect_upper_to_lower(b'F', "fi"));
+        assert!(!is_suspect_upper_to_lower(b'F', "F"));
+        assert!(!is_suspect_upper_to_lower(b'F', "É"));
+    }
 }

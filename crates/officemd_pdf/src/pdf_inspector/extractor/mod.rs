@@ -2,17 +2,16 @@
 //!
 //! This module extracts text with position information for structure detection.
 
-mod content_stream;
+pub(crate) mod content_stream;
 mod fonts;
-mod interpreter;
 mod layout;
 mod links;
 mod xobjects;
 
 use crate::pdf_inspector::PdfError;
-use crate::pdf_inspector::text_utils::{expand_ligatures, is_rtl_text};
+use crate::pdf_inspector::text_utils::is_rtl_text;
 use crate::pdf_inspector::tounicode::FontCMaps;
-use crate::pdf_inspector::types::{PdfRect, TextItem};
+use crate::pdf_inspector::types::{PageExtraction, TextItem};
 use log::debug;
 use lopdf::{Document, Object, ObjectId};
 use std::collections::{HashMap, HashSet};
@@ -24,8 +23,11 @@ use links::{extract_form_fields, extract_page_links};
 // Re-export public types so existing `crate::pdf_inspector::extractor::X` paths keep working.
 pub use crate::pdf_inspector::text_utils::{is_bold_font, is_italic_font};
 pub use crate::pdf_inspector::types::{ItemType, TextLine};
+pub(crate) use layout::ColumnRegion;
 pub(crate) use layout::detect_columns;
 pub use layout::group_into_lines;
+pub(crate) use layout::group_into_lines_with_thresholds;
+pub(crate) use layout::is_newspaper_layout;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -34,26 +36,14 @@ pub use layout::group_into_lines;
 /// Extract text from PDF file as plain string
 pub fn extract_text<P: AsRef<Path>>(path: P) -> Result<String, PdfError> {
     crate::pdf_inspector::validate_pdf_file(&path)?;
-    let doc = match Document::load(&path) {
-        Ok(d) => d,
-        Err(ref e) if crate::pdf_inspector::is_encrypted_lopdf_error(e) => {
-            Document::load_with_password(&path, "")?
-        }
-        Err(e) => return Err(e.into()),
-    };
+    let (doc, _) = crate::pdf_inspector::load_document_from_path(&path)?;
     extract_text_from_doc(&doc)
 }
 
 /// Extract text from PDF memory buffer
 pub fn extract_text_mem(buffer: &[u8]) -> Result<String, PdfError> {
     crate::pdf_inspector::validate_pdf_bytes(buffer)?;
-    let doc = match Document::load_mem(buffer) {
-        Ok(d) => d,
-        Err(ref e) if crate::pdf_inspector::is_encrypted_lopdf_error(e) => {
-            Document::load_mem_with_password(buffer, "")?
-        }
-        Err(e) => return Err(e.into()),
-    };
+    let (doc, _) = crate::pdf_inspector::load_document_from_mem(buffer)?;
     extract_text_from_doc(&doc)
 }
 
@@ -79,7 +69,7 @@ pub fn extract_text_with_positions_pages<P: AsRef<Path>>(
     path: P,
     page_filter: Option<&HashSet<u32>>,
 ) -> Result<Vec<TextItem>, PdfError> {
-    let (items, _rects) = extract_text_with_positions_and_rects(path, page_filter)?;
+    let (items, _rects, _lines) = extract_text_with_positions_and_rects(path, page_filter)?;
     Ok(items)
 }
 
@@ -87,17 +77,13 @@ pub fn extract_text_with_positions_pages<P: AsRef<Path>>(
 pub(crate) fn extract_text_with_positions_and_rects<P: AsRef<Path>>(
     path: P,
     page_filter: Option<&HashSet<u32>>,
-) -> Result<(Vec<TextItem>, Vec<PdfRect>), PdfError> {
+) -> Result<PageExtraction, PdfError> {
     crate::pdf_inspector::validate_pdf_file(&path)?;
-    let doc = match Document::load(&path) {
-        Ok(d) => d,
-        Err(ref e) if crate::pdf_inspector::is_encrypted_lopdf_error(e) => {
-            Document::load_with_password(&path, "")?
-        }
-        Err(e) => return Err(e.into()),
-    };
+    let (doc, _) = crate::pdf_inspector::load_document_from_path(&path)?;
     let font_cmaps = FontCMaps::from_doc(&doc);
-    extract_positioned_text_from_doc(&doc, &font_cmaps, page_filter)
+    let (extraction, _thresholds, _gid_pages) =
+        extract_positioned_text_from_doc(&doc, &font_cmaps, page_filter)?;
+    Ok(extraction)
 }
 
 /// Extract text with positions from memory buffer
@@ -110,7 +96,7 @@ pub fn extract_text_with_positions_mem_pages(
     buffer: &[u8],
     page_filter: Option<&HashSet<u32>>,
 ) -> Result<Vec<TextItem>, PdfError> {
-    let (items, _rects) = extract_text_with_positions_mem_and_rects(buffer, page_filter)?;
+    let (items, _rects, _lines) = extract_text_with_positions_mem_and_rects(buffer, page_filter)?;
     Ok(items)
 }
 
@@ -118,32 +104,55 @@ pub fn extract_text_with_positions_mem_pages(
 pub(crate) fn extract_text_with_positions_mem_and_rects(
     buffer: &[u8],
     page_filter: Option<&HashSet<u32>>,
-) -> Result<(Vec<TextItem>, Vec<PdfRect>), PdfError> {
+) -> Result<PageExtraction, PdfError> {
     crate::pdf_inspector::validate_pdf_bytes(buffer)?;
-    let doc = match Document::load_mem(buffer) {
-        Ok(d) => d,
-        Err(ref e) if crate::pdf_inspector::is_encrypted_lopdf_error(e) => {
-            Document::load_mem_with_password(buffer, "")?
-        }
-        Err(e) => return Err(e.into()),
-    };
+    let (doc, _) = crate::pdf_inspector::load_document_from_mem(buffer)?;
     let font_cmaps = FontCMaps::from_doc(&doc);
-    extract_positioned_text_from_doc(&doc, &font_cmaps, page_filter)
+    let (extraction, _thresholds, _gid_pages) =
+        extract_positioned_text_from_doc(&doc, &font_cmaps, page_filter)?;
+    Ok(extraction)
 }
 
 // ---------------------------------------------------------------------------
 // Orchestration
 // ---------------------------------------------------------------------------
 
-/// Extract positioned text and rectangles from a pre-loaded document.
+/// Per-page adaptive join thresholds from Canva-style letter-spacing detection.
+pub(crate) type PageThresholds = HashMap<u32, f32>;
+
+/// Extract positioned text, rectangles, and line segments from a pre-loaded document.
+///
+/// Also returns per-page adaptive join thresholds for Canva-style pages.
 pub(crate) fn extract_positioned_text_from_doc(
     doc: &Document,
     font_cmaps: &FontCMaps,
     page_filter: Option<&HashSet<u32>>,
-) -> Result<(Vec<TextItem>, Vec<PdfRect>), PdfError> {
+) -> Result<(PageExtraction, PageThresholds, HashSet<u32>), PdfError> {
+    extract_positioned_text_impl(doc, font_cmaps, page_filter, false)
+}
+
+/// Extract with option to include invisible (Tr=3) text.
+/// Used for Mixed/template PDFs where the OCR text layer is invisible.
+pub(crate) fn extract_positioned_text_include_invisible(
+    doc: &Document,
+    font_cmaps: &FontCMaps,
+    page_filter: Option<&HashSet<u32>>,
+) -> Result<(PageExtraction, PageThresholds, HashSet<u32>), PdfError> {
+    extract_positioned_text_impl(doc, font_cmaps, page_filter, true)
+}
+
+fn extract_positioned_text_impl(
+    doc: &Document,
+    font_cmaps: &FontCMaps,
+    page_filter: Option<&HashSet<u32>>,
+    include_invisible: bool,
+) -> Result<(PageExtraction, PageThresholds, HashSet<u32>), PdfError> {
     let pages = doc.get_pages();
     let mut all_items = Vec::new();
     let mut all_rects = Vec::new();
+    let mut all_lines = Vec::new();
+    let mut page_thresholds: PageThresholds = HashMap::new();
+    let mut gid_encoded_pages: HashSet<u32> = HashSet::new();
 
     // Build page ObjectId → page number map for form field extraction
     let page_id_to_num: HashMap<ObjectId, u32> =
@@ -155,12 +164,26 @@ pub(crate) fn extract_positioned_text_from_doc(
                 continue;
             }
         }
-        let (items, rects) = extract_page_text_items(doc, page_id, *page_num, font_cmaps)?;
+        let ((mut items, rects, lines), has_gid_fonts, _coords_rotated) =
+            extract_page_text_items(doc, page_id, *page_num, font_cmaps, include_invisible)?;
+        if has_gid_fonts {
+            gid_encoded_pages.insert(*page_num);
+        }
+        let threshold = crate::pdf_inspector::text_utils::fix_letterspaced_items(&mut items);
+        if threshold > 0.10 {
+            page_thresholds.insert(*page_num, threshold);
+        }
         debug!(
-            "page {}: {} text items, {} rects",
+            "page {}: {} text items, {} rects, {} lines{}",
             page_num,
             items.len(),
-            rects.len()
+            rects.len(),
+            lines.len(),
+            if has_gid_fonts {
+                " [gid-encoded fonts]"
+            } else {
+                ""
+            }
         );
         if log::log_enabled!(log::Level::Trace) {
             for item in &items {
@@ -182,6 +205,7 @@ pub(crate) fn extract_positioned_text_from_doc(
         }
         all_items.extend(items);
         all_rects.extend(rects);
+        all_lines.extend(lines);
 
         // Extract hyperlinks from page annotations
         let links = extract_page_links(doc, page_id, *page_num);
@@ -192,7 +216,11 @@ pub(crate) fn extract_positioned_text_from_doc(
     let form_items = extract_form_fields(doc, &page_id_to_num);
     all_items.extend(form_items);
 
-    Ok((all_items, all_rects))
+    Ok((
+        (all_items, all_rects, all_lines),
+        page_thresholds,
+        gid_encoded_pages,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +248,44 @@ pub(crate) fn multiply_matrices(m1: &[f32; 6], m2: &[f32; 6]) -> [f32; 6] {
 /// Groups items by (page, Y-position) with a 5pt tolerance, sorts within each
 /// group by X, then merges consecutive items that share a similar font size
 /// and are close horizontally.
+/// Cap item width for merge-gap computation to guard against Tw inflation.
+///
+/// When PDF word-spacing (Tw) is large (used for text justification), the
+/// advance width of strings containing spaces extends far past the visible
+/// glyph extent.  This inflated width collapses inter-column gaps, making
+/// `merge_text_items` incorrectly merge items from different table columns.
+///
+/// Only applies to non-CJK items whose text contains spaces (where Tw
+/// contributes) and whose average width-per-character is abnormally high.
+fn effective_merge_width(item: &TextItem) -> f32 {
+    use crate::pdf_inspector::text_utils::is_cjk_char;
+
+    if item.width <= 0.0 || item.font_size <= 0.0 {
+        return item.width;
+    }
+    // Tw only inflates strings that contain space characters.
+    if !item.text.contains(' ') {
+        return item.width;
+    }
+    // CJK characters are naturally ~1.0× font_size wide; skip the cap.
+    if item.text.chars().any(is_cjk_char) {
+        return item.width;
+    }
+    let char_count = item.text.chars().count();
+    if char_count == 0 {
+        return item.width;
+    }
+    let avg = item.width / char_count as f32;
+    // Normal proportional text: ~0.5× font_size per char.
+    // Monospace: ~0.6×.  Threshold at 0.85× catches Tw inflation.
+    if avg > item.font_size * 0.85 {
+        let capped = char_count as f32 * item.font_size * 0.6;
+        capped.min(item.width)
+    } else {
+        item.width
+    }
+}
+
 pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
     if items.is_empty() {
         return items;
@@ -244,17 +310,14 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
     for (_, _, group) in &mut line_groups {
         let rtl = is_rtl_text(group.iter().map(|i| &i.text));
         if rtl {
-            group.sort_by(|a, b| b.x.partial_cmp(&a.x).unwrap_or(std::cmp::Ordering::Equal));
+            group.sort_by(|a, b| b.x.total_cmp(&a.x));
         } else {
-            group.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+            group.sort_by(|a, b| a.x.total_cmp(&b.x));
         }
     }
 
     // Sort groups by page then Y descending (top of page first)
-    line_groups.sort_by(|a, b| {
-        a.0.cmp(&b.0)
-            .then_with(|| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal))
-    });
+    line_groups.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.total_cmp(&a.1)));
 
     let mut merged = Vec::new();
 
@@ -262,21 +325,13 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
         let mut i = 0;
         while i < group.len() {
             let first = group[i];
-            if first.is_rotated {
-                merged.push(first.clone());
-                i += 1;
-                continue;
-            }
             let mut text = first.text.clone();
-            let mut end_x = first.x + first.width;
+            let mut end_x = first.x + effective_merge_width(first);
             let x_gap_max = first.font_size * 0.75;
 
             let mut j = i + 1;
             while j < group.len() {
                 let next = group[j];
-                if next.is_rotated {
-                    break;
-                }
                 // Must be similar font size (within 20%)
                 if (next.font_size - first.font_size).abs() > first.font_size * 0.20 {
                     break;
@@ -288,17 +343,39 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
                 if gap < -first.font_size * 0.5 {
                     break;
                 }
-                // Insert space at word boundaries
-                if gap > first.font_size * 0.13 {
+                // Insert space at word boundaries. Base threshold raised to
+                // 0.13 to tolerate Tc/Tw character-spacing on French financial
+                // PDFs that shift advance widths relative to Td positioning.
+                //
+                // Uppercase-uppercase boundaries get a wider threshold (~1.4x)
+                // because all-caps headings carry intentional kerning that the
+                // base threshold misreads as a word break (regression seen on
+                // headings such as `INTERNATIONALIZATION` splitting into
+                // `INTERNATIONALIZATIO N`).
+                let threshold = {
+                    let next_first = next.text.trim_start().chars().next();
+                    let prev_last = text.chars().rev().find(|c| !c.is_whitespace());
+                    // Never insert space before joining punctuation
+                    if next_first.is_some_and(|c| matches!(c, '.' | ',' | ';' | ')' | ']' | '}')) {
+                        first.font_size * 0.25
+                    } else if prev_last.is_some_and(|c| c.is_ascii_uppercase())
+                        && next_first.is_some_and(|c| c.is_ascii_uppercase())
+                    {
+                        first.font_size * 0.18
+                    } else {
+                        first.font_size * 0.13
+                    }
+                };
+                if gap > threshold {
                     text.push(' ');
                 }
                 text.push_str(&next.text);
-                end_x = next.x + next.width;
+                end_x = next.x + effective_merge_width(next);
                 j += 1;
             }
 
             merged.push(TextItem {
-                text: expand_ligatures(&text),
+                text,
                 x: first.x,
                 y: first.y,
                 width: end_x - first.x,
@@ -306,10 +383,10 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
                 font: first.font.clone(),
                 font_size: first.font_size,
                 page: first.page,
-                is_rotated: false,
                 is_bold: first.is_bold,
                 is_italic: first.is_italic,
                 item_type: first.item_type.clone(),
+                mcid: first.mcid,
             });
 
             i = j;
@@ -319,128 +396,90 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
     merged
 }
 
-fn same_item_type(a: &ItemType, b: &ItemType) -> bool {
-    matches!(
-        (a, b),
-        (ItemType::Text, ItemType::Text)
-            | (ItemType::Image, ItemType::Image)
-            | (ItemType::FormField, ItemType::FormField)
-            | (ItemType::Link(_), ItemType::Link(_))
-    )
-}
-
-fn is_overlapping_duplicate_text_item(existing: &TextItem, candidate: &TextItem) -> bool {
-    if existing.page != candidate.page
-        || existing.is_rotated != candidate.is_rotated
-        || existing.font != candidate.font
-        || !same_item_type(&existing.item_type, &candidate.item_type)
-        || existing.text.trim() != candidate.text.trim()
-    {
-        return false;
-    }
-
-    let x_tol = existing.font_size.max(candidate.font_size) * 0.18 + 1.0;
-    let y_tol = existing.font_size.max(candidate.font_size) * 0.15 + 1.0;
-    let width_tol = existing.width.max(candidate.width) * 0.25 + 1.0;
-    let height_tol = existing.height.max(candidate.height) * 0.25 + 1.0;
-
-    (existing.x - candidate.x).abs() <= x_tol
-        && (existing.y - candidate.y).abs() <= y_tol
-        && (existing.width - candidate.width).abs() <= width_tol
-        && (existing.height - candidate.height).abs() <= height_tol
-}
-
-fn prefer_duplicate_replacement(existing: &TextItem, candidate: &TextItem) -> bool {
-    let existing_has_width = existing.width > 0.0;
-    let candidate_has_width = candidate.width > 0.0;
-    if candidate_has_width != existing_has_width {
-        return candidate_has_width;
-    }
-
-    if (candidate.width - existing.width).abs() > 0.5 {
-        return candidate.width > existing.width;
-    }
-
-    candidate.height > existing.height
-}
-
-pub(crate) fn deduplicate_overlapping_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
+/// Merge subscript/superscript items into their adjacent parent items.
+///
+/// Subscripts (e.g. "2" in H₂O) are rendered as separate text items with a
+/// much smaller font size and a slight Y offset. This pass finds such items
+/// and absorbs them into the preceding normal-sized item so that downstream
+/// table detection and line grouping see complete text (e.g. "H2O" not "H"+"2"+"O").
+pub(crate) fn merge_subscript_items(items: Vec<TextItem>) -> Vec<TextItem> {
     if items.len() < 2 {
         return items;
     }
 
-    let mut kept: Vec<TextItem> = Vec::with_capacity(items.len());
-    'outer: for item in items {
-        for existing in kept.iter_mut().rev() {
-            if existing.page != item.page {
-                break;
-            }
-            if (existing.y - item.y).abs() > existing.font_size.max(item.font_size) * 0.6 + 2.0 {
-                continue;
-            }
-            if is_overlapping_duplicate_text_item(existing, &item) {
-                if prefer_duplicate_replacement(existing, &item) {
-                    *existing = item;
-                }
-                continue 'outer;
-            }
+    // Group items by (page, approximate Y) with generous tolerance to capture
+    // both the parent line and the subscript/superscript offset.
+    let y_tolerance = 5.0;
+    let mut line_groups: Vec<(u32, f32, Vec<TextItem>)> = Vec::new();
+
+    for item in items {
+        let found = line_groups
+            .iter_mut()
+            .find(|(pg, y, _)| *pg == item.page && (item.y - *y).abs() < y_tolerance);
+        if let Some((_, _, group)) = found {
+            group.push(item);
+        } else {
+            let page = item.page;
+            let y = item.y;
+            line_groups.push((page, y, vec![item]));
         }
-        kept.push(item);
     }
 
-    kept
-}
+    let mut result = Vec::new();
 
-/// Check whether the combined text matrix represents rotated text (> 15 degrees).
-pub(crate) fn is_rotated_text_transform(matrix: &[f32; 6]) -> bool {
-    let angle = matrix[1]
-        .atan2(matrix[0])
-        .to_degrees()
-        .abs()
-        .rem_euclid(180.0);
-    let deviation = angle.min((180.0 - angle).abs());
-    deviation > 15.0
-}
+    for (_, _, mut group) in line_groups {
+        // Sort by X position
+        group.sort_by(|a, b| a.x.total_cmp(&b.x));
 
-/// Parse a 6-element matrix from operator operands (used by `cm`).
-pub(crate) fn parse_matrix_from_operands(operands: &[Object]) -> Option<[f32; 6]> {
-    if operands.len() < 6 {
-        return None;
+        // Find the dominant (most common) font size in this group
+        let max_fs = group.iter().map(|i| i.font_size).fold(0.0_f32, f32::max);
+
+        if max_fs < 1.0 {
+            result.extend(group);
+            continue;
+        }
+
+        let sub_threshold = max_fs * 0.75;
+
+        // Walk through items and merge subscripts into their preceding parent
+        let mut merged: Vec<TextItem> = Vec::new();
+        for item in group {
+            if item.font_size < sub_threshold
+                && item.font_size > 0.0
+                && item.text.len() <= 4
+                && item.text.chars().all(|c| c.is_ascii_digit())
+            {
+                // This is a candidate numeric subscript/superscript (e.g. "2" in H₂O).
+                // Only merge purely numeric text to avoid false positives with small
+                // bullets, ordinal indicators, or letter-based labels.
+                if let Some(parent) = merged.last_mut() {
+                    // Only merge into a parent that is normal-sized, not another subscript,
+                    // and whose text ends with a letter. This prevents merging into numbers
+                    // (e.g. "33" + "1" in "33 1/3%") or punctuation, while preserving
+                    // chemical formulas (NH + "3") and footnote refs (word + "2").
+                    let ends_with_letter = parent
+                        .text
+                        .chars()
+                        .last()
+                        .is_some_and(|c| c.is_alphabetic());
+                    if parent.font_size >= sub_threshold && ends_with_letter {
+                        let parent_right = parent.x + parent.width;
+                        let gap = item.x - parent_right;
+                        // Subscripts must be tightly adjacent (within ~1pt)
+                        if gap < parent.font_size * 0.2 && gap > -parent.font_size * 0.3 {
+                            parent.text.push_str(&item.text);
+                            parent.width = (item.x + item.width) - parent.x;
+                            continue;
+                        }
+                    }
+                }
+            }
+            merged.push(item);
+        }
+        result.extend(merged);
     }
-    Some([
-        get_number(&operands[0]).unwrap_or(1.0),
-        get_number(&operands[1]).unwrap_or(0.0),
-        get_number(&operands[2]).unwrap_or(0.0),
-        get_number(&operands[3]).unwrap_or(1.0),
-        get_number(&operands[4]).unwrap_or(0.0),
-        get_number(&operands[5]).unwrap_or(0.0),
-    ])
-}
 
-/// Parse a rectangle from `re` operator operands and transform to device space.
-pub(crate) fn parse_rect_operator(
-    operands: &[Object],
-    ctm: &[f32; 6],
-    page: u32,
-) -> Option<crate::pdf_inspector::types::PdfRect> {
-    if operands.len() < 4 {
-        return None;
-    }
-    let rx = get_number(&operands[0]).unwrap_or(0.0);
-    let ry = get_number(&operands[1]).unwrap_or(0.0);
-    let rw = get_number(&operands[2]).unwrap_or(0.0);
-    let rh = get_number(&operands[3]).unwrap_or(0.0);
-    let x_dev = rx * ctm[0] + ry * ctm[2] + ctm[4];
-    let y_dev = rx * ctm[1] + ry * ctm[3] + ctm[5];
-    let w_dev = rw * ctm[0];
-    let h_dev = rh * ctm[3];
-    Some(crate::pdf_inspector::types::PdfRect {
-        x: x_dev,
-        y: y_dev,
-        width: w_dev,
-        height: h_dev,
-        page,
-    })
+    result
 }
 
 /// Helper to get f32 from Object
@@ -459,7 +498,73 @@ mod tests {
         is_cjk_char, is_rtl_char, is_rtl_text, sort_line_items,
     };
     use crate::pdf_inspector::types::{ItemType, TextLine};
-    use layout::{detect_columns, is_newspaper_layout};
+    use layout::{ColumnRegion, detect_columns, is_newspaper_layout};
+
+    fn make_merge_item(text: &str, x: f32, width: f32) -> TextItem {
+        TextItem {
+            text: text.into(),
+            x,
+            y: 700.0,
+            width,
+            height: 12.0,
+            font: "F1".into(),
+            font_size: 12.0,
+            page: 1,
+            is_bold: false,
+            is_italic: false,
+            item_type: ItemType::Text,
+            mcid: None,
+        }
+    }
+
+    #[test]
+    fn merge_items_no_space_before_period() {
+        // Simulate Tc/Tw-adjusted width: "date" width is smaller than the gap
+        // to "." due to negative Tc, but period should still join without space.
+        let items = vec![
+            make_merge_item("date", 227.25, 89.25), // end = 316.50
+            make_merge_item(".", 318.00, 3.0),      // gap = 1.50 (0.125 × fs)
+        ];
+        let merged = merge_text_items(items);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].text, "date.");
+    }
+
+    #[test]
+    fn merge_items_lowercase_join_with_tc() {
+        // Lowercase→lowercase junction: "deve" + "lopers" with Tc-affected gap
+        // Gap of 0.12 × font_size should merge without space
+        let items = vec![
+            make_merge_item("deve", 100.0, 30.0),    // end = 130.0
+            make_merge_item("lopers", 131.44, 40.0), // gap = 1.44 (0.12 × 12)
+        ];
+        let merged = merge_text_items(items);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].text, "developers");
+    }
+
+    #[test]
+    fn merge_items_space_at_word_boundary() {
+        // Word boundary gap (> 0.13 × font_size) should insert space
+        let items = vec![
+            make_merge_item("hello", 100.0, 30.0),
+            make_merge_item("world", 132.0, 30.0), // gap = 2.0 (0.167 × 12)
+        ];
+        let merged = merge_text_items(items);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].text, "hello world");
+    }
+
+    #[test]
+    fn merge_items_preserves_narrow_single_uppercase_tokens() {
+        // Helvetica-like standalone tokens such as roman numerals or table
+        // headers can be naturally narrow and must not be treated as global
+        // watermark noise before line merging.
+        let items = vec![make_merge_item("I", 100.0, 3.0)];
+        let merged = merge_text_items(items);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].text, "I");
+    }
 
     #[test]
     fn test_group_into_lines() {
@@ -473,10 +578,10 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
             TextItem {
                 text: "World".into(),
@@ -487,10 +592,10 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
             TextItem {
                 text: "Next line".into(),
@@ -501,10 +606,10 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
         ];
 
@@ -512,44 +617,6 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].text(), "Hello World");
         assert_eq!(lines[1].text(), "Next line");
-    }
-
-    #[test]
-    fn test_deduplicate_overlapping_text_items() {
-        let items = vec![
-            TextItem {
-                text: "Exercice".into(),
-                x: 100.0,
-                y: 700.0,
-                width: 50.0,
-                height: 12.0,
-                font: "F1".into(),
-                font_size: 12.0,
-                page: 1,
-                is_rotated: false,
-                is_bold: false,
-                is_italic: false,
-                item_type: ItemType::Text,
-            },
-            TextItem {
-                text: "Exercice".into(),
-                x: 100.4,
-                y: 700.2,
-                width: 50.5,
-                height: 12.1,
-                font: "F1".into(),
-                font_size: 12.0,
-                page: 1,
-                is_rotated: false,
-                is_bold: false,
-                is_italic: false,
-                item_type: ItemType::Text,
-            },
-        ];
-
-        let deduped = deduplicate_overlapping_text_items(items);
-        assert_eq!(deduped.len(), 1);
-        assert_eq!(deduped[0].text, "Exercice");
     }
 
     #[test]
@@ -593,10 +660,10 @@ mod tests {
                 font: "C2_0".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
             TextItem {
                 text: "Prague".into(),
@@ -607,10 +674,10 @@ mod tests {
                 font: "C2_0".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
             TextItem {
                 text: "Rules".into(),
@@ -621,10 +688,10 @@ mod tests {
                 font: "C2_0".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
         ];
 
@@ -646,10 +713,10 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
             TextItem {
                 text: "A".into(),
@@ -660,10 +727,10 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
             TextItem {
                 text: "V".into(),
@@ -674,10 +741,10 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
         ];
 
@@ -701,10 +768,10 @@ mod tests {
                 font: "F4".into(),
                 font_size: 13.3,
                 page: 1,
-                is_rotated: false,
                 is_bold: true,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             }
         }
 
@@ -735,10 +802,10 @@ mod tests {
                 font: "F5".into(),
                 font_size: 13.3,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             }
         }
 
@@ -770,10 +837,10 @@ mod tests {
                 font: "C2_0".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
             TextItem {
                 text: "履行義務".into(),
@@ -784,10 +851,10 @@ mod tests {
                 font: "C2_0".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
             TextItem {
                 text: "を識別す".into(),
@@ -798,10 +865,10 @@ mod tests {
                 font: "C2_0".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
         ];
 
@@ -820,10 +887,10 @@ mod tests {
             font: "F1".into(),
             font_size: 12.0,
             page: 1,
-            is_rotated: false,
             is_bold: false,
             is_italic: false,
             item_type: ItemType::Text,
+            mcid: None,
         }
     }
 
@@ -836,7 +903,7 @@ mod tests {
             items.push(make_item("Left text here", 72.0, y, 200.0));
             items.push(make_item("Right text here", 350.0, y, 200.0));
         }
-        let cols = detect_columns(&items, 1);
+        let cols = detect_columns(&items, 1, false);
         assert_eq!(cols.len(), 2, "Expected 2 columns, got {:?}", cols);
         assert!(cols[0].x_min < cols[1].x_min);
     }
@@ -851,7 +918,7 @@ mod tests {
             items.push(make_item("Col two", 220.0, y, 140.0));
             items.push(make_item("Col three", 390.0, y, 140.0));
         }
-        let cols = detect_columns(&items, 1);
+        let cols = detect_columns(&items, 1, false);
         assert_eq!(cols.len(), 3, "Expected 3 columns, got {:?}", cols);
     }
 
@@ -869,7 +936,7 @@ mod tests {
             let y = 700.0 - (i as f32) * 14.0;
             items.push(make_item("wide", 72.0, y, 320.0));
         }
-        let cols = detect_columns(&items, 1);
+        let cols = detect_columns(&items, 1, false);
         assert!(
             cols.len() >= 2,
             "Width bleed should not prevent column detection, got {:?}",
@@ -890,7 +957,7 @@ mod tests {
                 468.0,
             ));
         }
-        let cols = detect_columns(&items, 1);
+        let cols = detect_columns(&items, 1, false);
         assert!(
             cols.len() <= 1,
             "Full-width text should not be split into columns, got {:?}",
@@ -932,10 +999,10 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
             TextItem {
                 text: "\u{05D1}".into(), // bet at x=200 (rightmost)
@@ -946,10 +1013,10 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
         ];
         sort_line_items(&mut items);
@@ -970,10 +1037,10 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
             TextItem {
                 text: "World".into(),
@@ -984,10 +1051,10 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page: 1,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             },
         ];
         sort_line_items(&mut items);
@@ -1009,127 +1076,12 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_items_french_letter_spacing() {
-        // French financial PDFs use wider letter-spacing (1-1.5pt gaps at 12pt).
-        // These intra-word gaps should NOT produce spaces.
-        fn item(ch: &str, x: f32, width: f32) -> TextItem {
-            TextItem {
-                text: ch.into(),
-                x,
-                y: 500.0,
-                width,
-                height: 12.0,
-                font: "F1".into(),
-                font_size: 12.0,
-                page: 1,
-                is_rotated: false,
-                is_bold: false,
-                is_italic: false,
-                item_type: ItemType::Text,
-            }
-        }
-
-        // "BILAN" with ~1.0-1.5pt gaps between chars (ratio 0.083-0.125 at 12pt)
-        let items = vec![
-            item("B", 100.0, 7.0),
-            item("I", 108.0, 3.5), // gap = 108.0 - 107.0 = 1.0
-            item("L", 112.5, 6.0), // gap = 112.5 - 111.5 = 1.0
-            item("A", 119.5, 7.0), // gap = 119.5 - 118.5 = 1.0
-            item("N", 128.0, 7.0), // gap = 128.0 - 126.5 = 1.5
-        ];
-
-        let merged = merge_text_items(items);
-        assert_eq!(merged.len(), 1);
-        assert_eq!(
-            merged[0].text, "BILAN",
-            "French letter-spaced chars should merge without spaces"
-        );
-    }
-
-    #[test]
-    fn test_merge_items_preserves_word_boundary() {
-        // Word boundaries (~2pt gap at 13.3pt, ratio 0.15) must still get spaces.
-        fn item(ch: &str, x: f32, width: f32) -> TextItem {
-            TextItem {
-                text: ch.into(),
-                x,
-                y: 500.0,
-                width,
-                height: 13.3,
-                font: "F1".into(),
-                font_size: 13.3,
-                page: 1,
-                is_rotated: false,
-                is_bold: false,
-                is_italic: false,
-                item_type: ItemType::Text,
-            }
-        }
-
-        // "AB CD" with 0pt intra-word gaps and 2pt inter-word gap
-        let items = vec![
-            item("A", 100.0, 7.0),
-            item("B", 107.0, 7.0), // gap = 0
-            item("C", 116.0, 7.0), // gap = 116.0 - 114.0 = 2.0 (ratio 0.15)
-            item("D", 123.0, 7.0), // gap = 0
-        ];
-
-        let merged = merge_text_items(items);
-        assert_eq!(merged.len(), 1);
-        assert_eq!(
-            merged[0].text, "AB CD",
-            "Word boundary should produce a space"
-        );
-    }
-
-    #[test]
-    fn test_merge_items_touching_words() {
-        // Touching items (gap = 0) should merge without spaces.
-        let items = vec![
-            TextItem {
-                text: "Hello".into(),
-                x: 100.0,
-                y: 500.0,
-                width: 30.0,
-                height: 12.0,
-                font: "F1".into(),
-                font_size: 12.0,
-                page: 1,
-                is_rotated: false,
-                is_bold: false,
-                is_italic: false,
-                item_type: ItemType::Text,
-            },
-            TextItem {
-                text: "World".into(),
-                x: 130.0,
-                y: 500.0,
-                width: 30.0,
-                height: 12.0,
-                font: "F1".into(),
-                font_size: 12.0,
-                page: 1,
-                is_rotated: false,
-                is_bold: false,
-                is_italic: false,
-                item_type: ItemType::Text,
-            },
-        ];
-
-        let merged = merge_text_items(items);
-        assert_eq!(merged.len(), 1);
-        assert_eq!(
-            merged[0].text, "HelloWorld",
-            "Touching items merge without space"
-        );
-    }
-
-    #[test]
     fn test_newspaper_layout_detection() {
         // Two dense columns (>15 lines each) with matching Y positions → newspaper
         let make_line = |y: f32, x: f32, page: u32| TextLine {
             y,
             page,
+            adaptive_threshold: 0.10,
             items: vec![TextItem {
                 text: "text".into(),
                 x,
@@ -1139,10 +1091,10 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             }],
         };
 
@@ -1153,7 +1105,17 @@ mod tests {
             .map(|i| make_line(700.0 - i as f32 * 14.0, 350.0, 1))
             .collect();
 
-        assert!(is_newspaper_layout(&[col1, col2]));
+        let cols = vec![
+            ColumnRegion {
+                x_min: 0.0,
+                x_max: 300.0,
+            },
+            ColumnRegion {
+                x_min: 300.0,
+                x_max: 600.0,
+            },
+        ];
+        assert!(is_newspaper_layout(&[col1, col2], &cols));
     }
 
     #[test]
@@ -1163,6 +1125,7 @@ mod tests {
         let make_line = |y: f32, x: f32, page: u32| TextLine {
             y,
             page,
+            adaptive_threshold: 0.10,
             items: vec![TextItem {
                 text: "text".into(),
                 x,
@@ -1172,10 +1135,10 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             }],
         };
 
@@ -1187,7 +1150,17 @@ mod tests {
             .map(|i| make_line(685.0 - i as f32 * 14.0, 350.0, 1))
             .collect();
 
-        assert!(is_newspaper_layout(&[col1, col2]));
+        let cols = vec![
+            ColumnRegion {
+                x_min: 0.0,
+                x_max: 300.0,
+            },
+            ColumnRegion {
+                x_min: 300.0,
+                x_max: 600.0,
+            },
+        ];
+        assert!(is_newspaper_layout(&[col1, col2], &cols));
     }
 
     #[test]
@@ -1196,6 +1169,7 @@ mod tests {
         let make_line = |y: f32, x: f32, page: u32| TextLine {
             y,
             page,
+            adaptive_threshold: 0.10,
             items: vec![TextItem {
                 text: "text".into(),
                 x,
@@ -1205,10 +1179,10 @@ mod tests {
                 font: "F1".into(),
                 font_size: 12.0,
                 page,
-                is_rotated: false,
                 is_bold: false,
                 is_italic: false,
                 item_type: ItemType::Text,
+                mcid: None,
             }],
         };
 
@@ -1219,6 +1193,133 @@ mod tests {
             .map(|i| make_line(700.0 - i as f32 * 14.0, 350.0, 1))
             .collect();
 
-        assert!(!is_newspaper_layout(&[col1, col2]));
+        let cols = vec![
+            ColumnRegion {
+                x_min: 0.0,
+                x_max: 300.0,
+            },
+            ColumnRegion {
+                x_min: 300.0,
+                x_max: 600.0,
+            },
+        ];
+        assert!(!is_newspaper_layout(&[col1, col2], &cols));
+    }
+
+    fn make_item_fs(text: &str, x: f32, y: f32, width: f32, font_size: f32) -> TextItem {
+        TextItem {
+            text: text.into(),
+            x,
+            y,
+            width,
+            height: font_size,
+            font: "F1".into(),
+            font_size,
+            page: 1,
+            is_bold: false,
+            is_italic: false,
+            item_type: ItemType::Text,
+            mcid: None,
+        }
+    }
+
+    #[test]
+    fn test_merge_subscript_items_chemical_formula() {
+        // NH₃: "NH" at fs=8 followed by subscript "3" at fs=4.7
+        let items = vec![
+            make_item_fs("NH", 78.0, 499.0, 12.0, 8.0),
+            make_item_fs("3", 90.0, 496.0, 2.3, 4.7),
+            make_item_fs("Cl", 100.0, 499.0, 7.0, 8.0),
+        ];
+        let merged = merge_subscript_items(items);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].text, "NH3");
+        assert_eq!(merged[1].text, "Cl");
+    }
+
+    #[test]
+    fn test_merge_subscript_items_h2o() {
+        // H₂O: "H" then subscript "2" then "O"
+        let items = vec![
+            make_item_fs("H", 250.0, 499.0, 5.0, 8.0),
+            make_item_fs("2", 255.0, 496.0, 2.3, 4.7),
+            make_item_fs("O", 257.5, 499.0, 6.0, 8.0),
+        ];
+        let merged = merge_subscript_items(items);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].text, "H2");
+        assert_eq!(merged[1].text, "O");
+    }
+
+    #[test]
+    fn test_merge_subscript_items_no_merge_far_gap() {
+        // Subscript-sized item that's far from the parent should NOT merge
+        let items = vec![
+            make_item_fs("Text", 78.0, 499.0, 20.0, 8.0),
+            make_item_fs("▶", 120.0, 498.0, 3.0, 3.7),
+        ];
+        let merged = merge_subscript_items(items);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].text, "Text");
+        assert_eq!(merged[1].text, "▶");
+    }
+
+    #[test]
+    fn test_merge_subscript_items_no_merge_long_text() {
+        // Long subscript-sized text should NOT merge (not a true subscript)
+        let items = vec![
+            make_item_fs("Title", 78.0, 499.0, 30.0, 8.0),
+            make_item_fs("footnote", 108.0, 496.0, 20.0, 4.7),
+        ];
+        let merged = merge_subscript_items(items);
+        assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn test_merge_subscript_items_no_merge_same_font_size() {
+        // Same font size items should NOT be treated as subscripts
+        let items = vec![
+            make_item_fs("NH", 78.0, 499.0, 12.0, 8.0),
+            make_item_fs("3", 90.0, 496.0, 2.3, 8.0),
+        ];
+        let merged = merge_subscript_items(items);
+        assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn test_merge_subscript_items_no_merge_non_numeric() {
+        // Non-numeric subscript text (e.g. "sol", "º", "vf") should NOT merge
+        let items = vec![
+            make_item_fs("∆", 200.0, 639.0, 5.5, 8.0),
+            make_item_fs("sol", 205.8, 636.9, 5.7, 4.7),
+        ];
+        let merged = merge_subscript_items(items);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].text, "∆");
+        assert_eq!(merged[1].text, "sol");
+    }
+
+    #[test]
+    fn test_merge_subscript_items_no_merge_parent_ends_with_digit() {
+        // "33" + "1" in "33 1/3%" — parent ends with digit, should NOT merge
+        let items = vec![
+            make_item_fs("33", 78.0, 499.0, 10.0, 8.0),
+            make_item_fs("1", 88.0, 496.0, 2.3, 4.7),
+        ];
+        let merged = merge_subscript_items(items);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].text, "33");
+        assert_eq!(merged[1].text, "1");
+    }
+
+    #[test]
+    fn test_merge_subscript_items_no_merge_parent_ends_with_space() {
+        // "Health " + "1" — parent ends with space (table credit), should NOT merge
+        let items = vec![
+            make_item_fs("Health ", 78.0, 499.0, 30.0, 8.0),
+            make_item_fs("1", 108.0, 496.0, 2.3, 4.7),
+        ];
+        let merged = merge_subscript_items(items);
+        assert_eq!(merged.len(), 2);
     }
 }

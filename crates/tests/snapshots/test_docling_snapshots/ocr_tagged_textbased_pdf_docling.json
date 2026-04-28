@@ -47,13 +47,13 @@
       "children": [],
       "content_layer": "body",
       "label": "text",
-      "orig": "**Table of Contents**\n\nHeading ... 1\nPage 2 Heading ... 2\n\n# Heading\n\nDocument text.\n\n*Table 1: Table caption*\n\nColumn 1 Column 2 Cell 1 Cell 2 Cell 3 Cell 4",
+      "orig": "## Table of Contents\n\nHeading ... 1\nPage 2 Heading ... 2\n\n# Heading\n\nDocument text.\n\n*Table 1: Table caption*\n\n|Column 1|Column 2|\n|---|---|\n|Cell 1|Cell 2|\n|Cell 3|Cell 4|",
       "parent": {
         "$ref": "#/body"
       },
       "prov": [],
       "self_ref": "#/texts/0",
-      "text": "**Table of Contents**\n\nHeading ... 1\nPage 2 Heading ... 2\n\n# Heading\n\nDocument text.\n\n*Table 1: Table caption*\n\nColumn 1 Column 2 Cell 1 Cell 2 Cell 3 Cell 4"
+      "text": "## Table of Contents\n\nHeading ... 1\nPage 2 Heading ... 2\n\n# Heading\n\nDocument text.\n\n*Table 1: Table caption*\n\n|Column 1|Column 2|\n|---|---|\n|Cell 1|Cell 2|\n|Cell 3|Cell 4|"
     },
     {
       "children": [],
