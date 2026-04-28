@@ -79,7 +79,7 @@ pub(crate) fn compute_page_margins(lines: &[TextLine]) -> HashMap<u32, PageMargi
             }
             let (best_key, best_count) = buckets
                 .iter()
-                .max_by_key(|&(_, &count)| count)
+                .max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0)))
                 .map(|(&k, &c)| (k, c))
                 .unwrap_or((0, 0));
             let mode_x = best_key as f32 * 5.0;

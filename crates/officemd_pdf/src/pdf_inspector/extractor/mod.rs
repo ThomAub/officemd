@@ -286,7 +286,29 @@ fn effective_merge_width(item: &TextItem) -> f32 {
     }
 }
 
+/// Detect single uppercase characters with impossibly narrow width: typically
+/// watermark or decorative fragments from PDF rendering artifacts (vertical
+/// labels, decorative caps) that survive into the text stream.
+fn is_probably_watermark_fragment(item: &TextItem) -> bool {
+    let trimmed = item.text.trim();
+    if trimmed.chars().count() != 1 {
+        return false;
+    }
+    let width = item.width.abs();
+    let font_size = item.font_size.max(1.0);
+    width <= font_size * 0.35 && trimmed.chars().all(|c| c.is_ascii_uppercase())
+}
+
 pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
+    if items.is_empty() {
+        return items;
+    }
+
+    // Drop watermark fragments before grouping so they don't pollute merged lines.
+    let items: Vec<TextItem> = items
+        .into_iter()
+        .filter(|i| !is_probably_watermark_fragment(i))
+        .collect();
     if items.is_empty() {
         return items;
     }
@@ -327,7 +349,7 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
             let first = group[i];
             let mut text = first.text.clone();
             let mut end_x = first.x + effective_merge_width(first);
-            let x_gap_max = first.font_size * 0.5;
+            let x_gap_max = first.font_size * 0.75;
 
             let mut j = i + 1;
             while j < group.len() {
@@ -343,23 +365,16 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
                 if gap < -first.font_size * 0.5 {
                     break;
                 }
-                // Insert space at word boundaries.
-                // Base threshold 0.08; raised to 0.13 for lowercase→lowercase
-                // junctions to accommodate Tc/Tw character-spacing adjustments
-                // that shift advance widths relative to Td positioning.
+                // Insert space at word boundaries. Base threshold raised to
+                // 0.13 to tolerate Tc/Tw character-spacing on French financial
+                // PDFs that shift advance widths relative to Td positioning.
                 let threshold = {
-                    let prev_last = text.trim_end().chars().last();
                     let next_first = next.text.trim_start().chars().next();
                     // Never insert space before joining punctuation
                     if next_first.is_some_and(|c| matches!(c, '.' | ',' | ';' | ')' | ']' | '}')) {
                         first.font_size * 0.25
-                    } else if prev_last.is_some_and(|c| c.is_lowercase())
-                        && next_first.is_some_and(|c| c.is_lowercase())
-                    {
-                        // Lowercase→lowercase: likely mid-word, use wider threshold
-                        first.font_size * 0.13
                     } else {
-                        first.font_size * 0.08
+                        first.font_size * 0.13
                     }
                 };
                 if gap > threshold {

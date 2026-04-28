@@ -56,16 +56,13 @@ The Specification contains both normative material (material that defines OpenXM
 
 ## Page: 3
 
-Part 4 –jarkup-Defines every element and attribute, the hierarchy of parent/child relationships for elements, Language oence and additional semantics as appropriate. This Part is intended for use as a reference whenever RTRS pages complete detail about an element or attribute is required. -Defines the facility for storing custom XML data. -Declares the XML schemas for the markup languages as XSD (2), in an annex that is issued on ly
+Part 4 –jarkup- Defines every element and attribute, the hierarchy of parent/child relationships for elements, Language oence and additional semantics as appropriate. This Part is intended for use as a reference whenever RTRS pages complete detail about an element or attribute is required.
 
-<center>in electronic form. The annex also expresses them non- normatively using RELAX NG</center>
+- Defines the facility for storing custom XML data.
+- Declares the XML schemas for the markup languages as XSD (2), in an annex that is issued on ly in electronic form. The annex also expresses them non- normatively using RELAX NG (ISO/IEC 19757- 2) (3).
+Part 5 –jarkup- Describes facilities for extension of OpenXML documents. Compatibility and- Spec ifies elements and attributes by which applications with different extensions can bxtensibility interoperate. 34 Pages
 
-(ISO/IEC 19757- 2) (3).
-
-Part 5 –jarkup-Describes facilities for extension of OpenXML documents. Compatibility and-Spec ifies elements and attributes by which applications with different extensions can bxtensibility interoperate. 34 Pages
-
-<center>-Expresses extensibility rules using NVDL (ISO/IEC 19757- 4) (4).</center>
-
+- Expresses extensibility rules using NVDL (ISO/IEC 19757- 4) (4).
 In order to ease reading and navigation through these documents, t he electronic versions have many internal active links. In particular, Part 4 has links to parent and child elements throughout.
 
 # 4 PROPERTIES OF THE STANDARD
@@ -216,11 +213,11 @@ OpenXML enables organizations to integrate productivity applications with inform
 
 ### Applications include:
 
-- *Search: An end user could search a collection of spreadsheets for companies with profit margins exceeding 20%.*
-- *Metadata tagging: A firm could tag presentations that have been approved from a regulatory perspective.*
-- *Document assembly: A proposal group could streamline proposal generation by automating the preparation of the* underlying data.
-- *Data reuse: A sales executive could generate a report of all sales contracts in a given date range, listing customers, deal* sizes, and any modified terms and conditions.
-- *Line-of-business applications: Professionals in a specialized vertical could prepare deliverables in a familiar authoring* environment, yet have their work products flow automatically into business systems.
+- Search: An end user could search a collection of spreadsheets for companies with profit margins exceeding 20%.
+- Metadata tagging: A firm could tag presentations that have been approved from a regulatory perspective.
+- Document assembly: A proposal group could streamline proposal generation by automating the preparation of the underlying data.
+- Data reuse: A sales executive could generate a report of all sales contracts in a given date range, listing customers, deal sizes, and any modified terms and conditions.
+- Line-of-business applications: Professionals in a specialized vertical could prepare deliverables in a familiar authoring environment, yet have their work products flow automatically into business systems.
 Accomplishing these goals requires defining the structure and the type of data that a class of documents can contain, and allowing the information to be revealed wherever it occurs naturally within the flow of each document. Consider the simple example of a résumé. One would define a data structure that includes fields called name, phone number, address, career goals, and qualifications. One would then arrange for those fields to appear wherever human authors happen to put them in a document. In a different business setting, such as a finance group or a medical center, the structure and the data fields would be different.
 
 OpenXML allows this process to occur in a standardized fashion.
@@ -237,17 +234,17 @@ OpenXML is designed to encourage developers to create new applications that were
 
 First, we discuss extensibility mechanisms that work together to allow interoperability between applications with differing feature sets. Consider an up-level application (one that contains a new feature not documented in OpenXML) and a down-level application (one that does not understand that feature). The three primary goals of extensibility are:
 
-- *Visual fidelity: the ability for the down-level application to display what the up-level application would display. This* inherently requires that a file store multiple representations of the same data.
-- *Editability: the ability to edit one or more of the representations.*
-- *Privacy: the ability to ensure that old versions of one representation do not remain after editing another representation,* unexpectedly leaving information that a user believes is deleted or modified. An application can achieve this by eliminating or synchronizing representations.
+- Visual fidelity: the ability for the down-level application to display what the up-level application would display. This inherently requires that a file store multiple representations of the same data.
+- Editability: the ability to edit one or more of the representations.
+- Privacy: the ability to ensure that old versions of one representation do not remain after editing another representation, unexpectedly leaving information that a user believes is deleted or modified. An application can achieve this by eliminating or synchronizing representations.
 A developer wishing to extend the OpenXML feature set has two main options:
 
 - Alternate content blocks: An alternate content block (§3:2.18.4 and §5:9.2) stores multiple representations of the same content, each within its own choice block. A down-level application reads one choice block that it is capable of reading. Upon editing, it writes as many choice blocks as it is capable of writing.
 - Extension lists: An extension list (§3:2.6) stores arbitrary custom XML without a visual representation.
 Developers have room to innovate outside of those extensibility mechanisms.
 
-- *Alternative interaction paradigms. OpenXML specifies more than document syntax but less than application behavior. As* described in the Conformance statement, it focuses on semantics (§1:2.2, §1.2.3). Consequently, a conformant application is free to communicate with an end user through a variety of means, or not communicate with an end user at all –as long as it respects the specified semantics.
-- *Novel computing environments. The Conformance statement admits applications that have low capacity, so that they can* run on small devices, and applications that implement only a subset of OpenXML (§1:2.6). The Additional Characteristics mechanism permits a producing application to communicate its capacity limits (§3:8.1).
+- Alternative interaction paradigms. OpenXML specifies more than document syntax but less than application behavior. As described in the Conformance statement, it focuses on semantics (§1:2.2, §1.2.3). Consequently, a conformant application is free to communicate with an end user through a variety of means, or not communicate with an end user at all –as long as it respects the specified semantics.
+- Novel computing environments. The Conformance statement admits applications that have low capacity, so that they can run on small devices, and applications that implement only a subset of OpenXML (§1:2.6). The Additional Characteristics mechanism permits a producing application to communicate its capacity limits (§3:8.1).
 As indicated in the previous subsection, some of the most substantial opportunities for innovation do not involve rendering documents for direct user interaction. Instead, they involve machine-to-machine processing using XML message formats, e.g., via XML Web Services (9). Although such applications have no user-visible behavior other than their operations on data contained within OpenXML documents, they are subject to document conformance (§1:2.4) and application conformance (§1:2.5), which are purely syntactic, and interoperability guidelines (§1:2.6), which incorporate semantics.
 
 While it is impossible to enumerate all possible use cases for customized XML processing, one may anticipate XML-centric services that process OpenXML documents for automatic extraction and insertion of custom data, custom security services such as XML Digital Signature (10) or XML Encryption (11), or even arbitrary XSLT transformations (12) that convert to and from other XML formats. OpenXML places no prohibitions or limitations on such processing.
@@ -374,7 +371,7 @@ The Specification provides minimal documents and additional detail for Wordproce
 
 # 6 SUMMARY
 
-OpenXML is the product of substantial effort by representatives from many industry and public institutions with diverse backgrounds and organizational interests. It covers the full set of features used in the existing document corpus, as well as the internationalization needs inherent in all of the major language groups worldwide. As a result of the standardization work by Ecma TC45 (1) and contributions via public comment, OpenXML has enabled a high level of interoperability and platform independence; and its documentation has become both complete (through extensive reference material) and accessible (through non-normative descriptions). It also includes enough information for assistive technology products to properly process documents. OpenXML implementations can be very small and provide focused functionality, or they can encompass the full feature set. Extensibility mechanisms built into the format guarantee room for innovation.
+OpenXML is the product of substantial effort by representatives from many industry and public institutions with diverse backgrounds and organizational interests. t covers the full set of features used in the existing document corpus, as well as the internationalization needs inherent in all of the major language groups worldwide. As a result of the standardization work by Ecma TC45 (1) and contributions via public comment, OpenXML has enabled a high level of interoperability and platform independence; and its documentation has become both complete (through extensive reference material) and accessible (through non-normative descriptions). It also includes enough information for assistive technology products to properly process documents. OpenXML implementations can be very small and provide focused functionality, or they can encompass the full feature set. Extensibility mechanisms built into the format guarantee room for innovation.
 
 Standardizing the format specification and maintaining it over time ensure that multiple parties can safely rely on it, confident that further evolution will enjoy the checks and balances afforded by an open standards process. The compelling need exists for an open document-format standard that is capable of preserving the billions of documents that have been created in the pre- existing binary formats, and the billions that continue to be created each year. Technological advances in hardware, networking, and a standards-based software infrastructure make it possible. The explosive diversification in market demand –including significant existing investments in mission critical business systems –makes it essential.
 
