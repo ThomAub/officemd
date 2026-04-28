@@ -9,6 +9,18 @@ use std::path::{Path, PathBuf};
 
 use crate::pdf_inspector::glyph_names::glyph_to_char;
 
+/// Detect CMap mappings that should be treated as missing so the next
+/// fallback (remapped, embedded font cmap, Differences, Latin-1) can take
+/// over.  U+FFFD is the explicit "unknown" replacement.  U+0000 is a
+/// frequent symptom of broken `bfchar` ranges where the PDF generator
+/// emitted the literal NUL byte for unresolved glyphs (this is what causes
+/// "Part 1 -Fundamentals" to render as "Part 1 -cundamentals" — the leading
+/// glyph maps to U+0000 in the primary CMap and gets dropped, then the
+/// fallback CMap fills in a wrong-but-valid character).
+fn is_cmap_garbage(s: &str) -> bool {
+    s.chars().any(|c| c == '\u{FFFD}' || c == '\u{0000}')
+}
+
 /// A parsed ToUnicode CMap mapping CIDs to Unicode strings
 #[derive(Debug, Default, Clone)]
 pub struct ToUnicodeCMap {
@@ -431,7 +443,7 @@ impl ToUnicodeCMap {
             .iter()
             .map(|&b| {
                 let code = b as u16;
-                let result = self.lookup(code).filter(|s| !s.contains('\u{FFFD}'));
+                let result = self.lookup(code).filter(|s| !is_cmap_garbage(s));
                 (b, result)
             })
             .collect()
@@ -447,7 +459,7 @@ impl ToUnicodeCMap {
             for &b in bytes {
                 let code = b as u16;
                 match self.lookup(code) {
-                    Some(s) if !s.contains('\u{FFFD}') => result.push_str(&s),
+                    Some(s) if !is_cmap_garbage(&s) => result.push_str(&s),
                     _ => {
                         // For single-byte unmapped codes, try as Latin-1
                         // (the byte IS the character code in most legacy encodings)
@@ -464,7 +476,7 @@ impl ToUnicodeCMap {
                 if chunk.len() == 2 {
                     let cid = u16::from_be_bytes([chunk[0], chunk[1]]);
                     match self.lookup(cid) {
-                        Some(s) if !s.contains('\u{FFFD}') => result.push_str(&s),
+                        Some(s) if !is_cmap_garbage(&s) => result.push_str(&s),
                         _ => {
                             if self.cid_passthrough {
                                 // Last-resort: treat CID as Unicode codepoint.

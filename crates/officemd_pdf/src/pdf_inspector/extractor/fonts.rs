@@ -736,9 +736,13 @@ pub(crate) fn extract_text_from_operand(
                             .iter()
                             .filter_map(|&b| {
                                 let code = b as u16;
+                                // Treat U+FFFD and U+0000 as missing so the
+                                // next fallback (Differences/Latin-1) wins.
+                                let bad =
+                                    |s: &str| s.chars().any(|c| c == '\u{FFFD}' || c == '\u{0000}');
                                 // 1. Primary CMap
                                 if let Some(s) = entry.primary.lookup(code) {
-                                    if !s.contains('\u{FFFD}') {
+                                    if !bad(&s) {
                                         return Some(s);
                                     }
                                 }
@@ -746,7 +750,7 @@ pub(crate) fn extract_text_from_operand(
                                 if let Some(fb) =
                                     entry.fallback.as_ref().and_then(|c| c.lookup(code))
                                 {
-                                    if !fb.contains('\u{FFFD}') {
+                                    if !bad(&fb) {
                                         return Some(fb);
                                     }
                                 }
