@@ -635,6 +635,48 @@ mod tests {
         );
     }
 
+    // Reliability test for the invisible-text path.  The OCRed fixture's only
+    // text is an invisible (Tr=3) GlyphLessFont overlay produced by ocrmypdf.
+    // Default extraction must yield zero items (policy: skip Tr=3 unless Mixed),
+    // and the include-invisible path must yield real characters — proving the
+    // parser handles invisible text correctly and the empty default output is
+    // a deliberate filtering decision, not a parsing failure.
+    #[test]
+    fn extractor_parses_invisible_ocr_overlay_when_requested() {
+        use crate::pdf_inspector::extractor::{
+            extract_positioned_text_from_doc, extract_positioned_text_include_invisible,
+        };
+        use crate::pdf_inspector::tounicode::FontCMaps;
+
+        let doc = lopdf::Document::load_mem(OCR_OCRED_FIXTURE).expect("load ocred fixture");
+        let cmaps = FontCMaps::from_doc(&doc);
+
+        let (default_items, _, _) =
+            extract_positioned_text_from_doc(&doc, &cmaps, None).expect("default extraction");
+        assert!(
+            default_items.0.is_empty(),
+            "default extraction must skip Tr=3 invisible overlay, got {} items",
+            default_items.0.len()
+        );
+
+        let (invisible_items, _, _) = extract_positioned_text_include_invisible(&doc, &cmaps, None)
+            .expect("invisible extraction");
+        assert!(
+            !invisible_items.0.is_empty(),
+            "include-invisible extraction must surface the OCR overlay text"
+        );
+        let recovered: String = invisible_items
+            .0
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect();
+        let alpha_count = recovered.chars().filter(|c| c.is_alphabetic()).count();
+        assert!(
+            alpha_count >= 20,
+            "expected real OCR characters in invisible overlay, got {alpha_count} alphas in {recovered:?}"
+        );
+    }
+
     #[test]
     fn textbased_fixture_has_markdown_and_no_ocr_pages() {
         let diagnostics = inspect_pdf(OCR_TEXTBASED_FIXTURE).expect("inspect textbased fixture");
