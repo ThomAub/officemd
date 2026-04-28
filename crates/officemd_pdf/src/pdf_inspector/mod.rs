@@ -1919,10 +1919,21 @@ fn process_document(
         // For Mixed/template PDFs: if normal extraction produces garbage text
         // (mostly non-alphanumeric), retry with invisible (Tr=3) text included.
         // This unlocks OCR text layers behind scanned images.
-        if pdf_type == PdfType::Mixed {
+        //
+        // For TextBased PDFs: ocrmypdf-produced files classify as TextBased
+        // (they contain a real font dictionary + ToUnicode CMap) but every
+        // glyph is rendered with Tr=3 on top of a raster image.  If visible
+        // extraction returns nothing, retry with invisible text included so
+        // the searchable OCR layer surfaces as markdown.
+        if matches!(pdf_type, PdfType::Mixed | PdfType::TextBased) {
             if let Ok((items, _, _)) = result.as_ref().map(|(e, _, _)| e) {
                 let sample: String = items.iter().take(200).map(|i| i.text.as_str()).collect();
-                if is_garbage_text(&sample) || sample.trim().is_empty() {
+                let trimmed_empty = sample.trim().is_empty();
+                // Garbage-text retry only applies to Mixed: TextBased garbage
+                // means broken fonts, which the gid/encoding paths already
+                // handle below.
+                let garbage = pdf_type == PdfType::Mixed && is_garbage_text(&sample);
+                if trimmed_empty || garbage {
                     extractor::extract_positioned_text_include_invisible(
                         &doc,
                         &font_cmaps,
@@ -1931,13 +1942,16 @@ fn process_document(
                 } else {
                     result
                 }
-            } else {
-                // Normal extraction failed — try invisible as fallback
+            } else if pdf_type == PdfType::Mixed {
+                // Mixed: failure is non-fatal, try invisible as fallback
                 extractor::extract_positioned_text_include_invisible(
                     &doc,
                     &font_cmaps,
                     options.page_filter.as_ref(),
                 )
+            } else {
+                // TextBased: propagate original error
+                result
             }
         } else {
             result

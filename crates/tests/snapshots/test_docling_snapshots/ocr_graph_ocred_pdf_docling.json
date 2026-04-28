@@ -1,6 +1,10 @@
 {
   "body": {
-    "children": [],
+    "children": [
+      {
+        "$ref": "#/texts/0"
+      }
+    ],
     "content_layer": "body",
     "label": "unspecified",
     "name": "_root_",
@@ -16,10 +20,31 @@
   "groups": [],
   "key_value_items": [],
   "name": "document",
-  "pages": {},
+  "pages": {
+    "1": {
+      "page_no": 1,
+      "size": {
+        "height": 0.0,
+        "width": 0.0
+      }
+    }
+  },
   "pictures": [],
   "schema_name": "DoclingDocument",
   "tables": [],
-  "texts": [],
+  "texts": [
+    {
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "orig": "# sw | \\ +\n\n400 +\n\n300 —esupport BH No vote{note 1] 200 4 t= Oppose SeNet{note 2] Percentage [note 3]",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "prov": [],
+      "self_ref": "#/texts/0",
+      "text": "# sw | \\ +\n\n400 +\n\n300 —esupport BH No vote{note 1] 200 4 t= Oppose SeNet{note 2] Percentage [note 3]"
+    }
+  ],
   "version": "1.9.0"
 }

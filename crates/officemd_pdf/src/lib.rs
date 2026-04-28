@@ -610,13 +610,12 @@ mod tests {
     }
 
     // ocr_graph_ocred.pdf is an ocrmypdf-produced page: scanned image with an
-    // invisible (Tr=3) GlyphLessFont OCR overlay.  Upstream's default extractor
-    // skips invisible text, the page renders empty markdown, and the sparse-
-    // extraction heuristic correctly flags it as needing OCR.  Both the pure
-    // scan and the OCR-overlay variants therefore land in `pages_needing_ocr`;
-    // only the *classification* distinguishes them (Scanned vs TextBased).
+    // invisible (Tr=3) GlyphLessFont OCR overlay.  The pure scan stays
+    // classified Scanned and flagged for OCR.  The OCR-overlay variant
+    // classifies as TextBased and the invisible-text fallback surfaces the
+    // searchable layer, so it should *not* be flagged for OCR.
     #[test]
-    fn inspect_pdf_flags_ocr_overlay_and_scanned_fixture_pair() {
+    fn inspect_pdf_surfaces_ocr_overlay_text() {
         let scanned = inspect_pdf(OCR_SCANNED_FIXTURE).expect("inspect scanned fixture");
         let ocred = inspect_pdf(OCR_OCRED_FIXTURE).expect("inspect ocred fixture");
 
@@ -629,8 +628,8 @@ mod tests {
 
         assert_eq!(ocred.classification, PdfClassification::TextBased);
         assert!(
-            ocred.pages_needing_ocr.contains(&1),
-            "expected OCR-overlay fixture page 1 to need OCR (invisible text only), got {:?}",
+            ocred.pages_needing_ocr.is_empty(),
+            "expected OCR-overlay fixture to surface its invisible text and not need OCR, got {:?}",
             ocred.pages_needing_ocr
         );
     }

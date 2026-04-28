@@ -10,11 +10,14 @@ expression: canonical_json(&json)
       "confidence": 1.0,
       "has_encoding_issues": false,
       "page_count": 1,
-      "pages_needing_ocr": [
-        1
-      ]
+      "pages_needing_ocr": []
     },
-    "pages": []
+    "pages": [
+      {
+        "markdown": "# sw | \\ +\n\n400 +\n\n300 —esupport BH No vote{note 1] 200 4 t= Oppose SeNet{note 2] Percentage [note 3]",
+        "number": 1
+      }
+    ]
   },
   "properties": {
     "app": {},
@@ -23,7 +26,7 @@ expression: canonical_json(&json)
       "confidence": "1.0000",
       "has_encoding_issues": "false",
       "page_count": "1",
-      "pages_needing_ocr": "1",
+      "pages_needing_ocr": "",
       "title": "Example graph"
     },
     "custom": {}

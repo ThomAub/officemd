@@ -2,7 +2,7 @@
 
 ## Page: 1
 
-**Table of Contents**
+## Table of Contents
 
 Heading ... 1
 Page 2 Heading ... 2
@@ -13,7 +13,10 @@ Document text.
 
 *Table 1: Table caption*
 
-Column 1 Column 2 Cell 1 Cell 2 Cell 3 Cell 4
+|Column 1|Column 2|
+|---|---|
+|Cell 1|Cell 2|
+|Cell 3|Cell 4|
 
 ## Page: 2
 
