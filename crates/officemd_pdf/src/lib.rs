@@ -609,27 +609,30 @@ mod tests {
         assert!(pdf.diagnostics.has_encoding_issues);
     }
 
-    // Re-vendor 2026-04-28: upstream's stricter encoding heuristics now flag
-    // the OCRed fixture as needing OCR.  Re-enable once the deferred 3008ad1
-    // (French extraction) / ac27b36 (boxed tables) ports land or a tighter
-    // heuristic recalibration follows.
+    // ocr_graph_ocred.pdf is an ocrmypdf-produced page: scanned image with an
+    // invisible (Tr=3) GlyphLessFont OCR overlay.  Upstream's default extractor
+    // skips invisible text, the page renders empty markdown, and the sparse-
+    // extraction heuristic correctly flags it as needing OCR.  Both the pure
+    // scan and the OCR-overlay variants therefore land in `pages_needing_ocr`;
+    // only the *classification* distinguishes them (Scanned vs TextBased).
     #[test]
-    #[ignore = "regression pending re-vendor follow-up (3008ad1/ac27b36)"]
-    fn inspect_pdf_detects_ocr_gap_for_scanned_vs_ocred_fixture_pair() {
+    fn inspect_pdf_flags_ocr_overlay_and_scanned_fixture_pair() {
         let scanned = inspect_pdf(OCR_SCANNED_FIXTURE).expect("inspect scanned fixture");
         let ocred = inspect_pdf(OCR_OCRED_FIXTURE).expect("inspect ocred fixture");
 
-        assert!(scanned.page_count >= 1);
-        assert!(ocred.page_count >= 1);
+        assert_eq!(scanned.classification, PdfClassification::Scanned);
         assert!(
-            !scanned.pages_needing_ocr.is_empty(),
-            "expected scanned fixture to need OCR"
+            scanned.pages_needing_ocr.contains(&1),
+            "expected scanned fixture page 1 to need OCR, got {:?}",
+            scanned.pages_needing_ocr
         );
-        assert!(
-            ocred.pages_needing_ocr.is_empty(),
-            "expected OCRed fixture to not need OCR"
-        );
+
         assert_eq!(ocred.classification, PdfClassification::TextBased);
+        assert!(
+            ocred.pages_needing_ocr.contains(&1),
+            "expected OCR-overlay fixture page 1 to need OCR (invisible text only), got {:?}",
+            ocred.pages_needing_ocr
+        );
     }
 
     #[test]
