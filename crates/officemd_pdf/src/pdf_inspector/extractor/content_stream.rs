@@ -452,6 +452,26 @@ pub(crate) fn extract_page_text_items(
                         };
                         let column_gap_threshold = space_threshold * 4.0;
 
+                        // All-caps headings carry intentional letter-spacing
+                        // (kerning) larger than the per-font space_threshold,
+                        // which causes a single word to splinter:
+                        // `INTERNATIONALIZATION` rendered as `INTERNATIONALIZATIO N`.
+                        // When current_text ends in a run of uppercase ASCII
+                        // letters, raise the negative-displacement bar so
+                        // kerning gaps are not promoted to word boundaries.
+                        let caps_space_threshold = space_threshold * 1.6;
+                        let in_uppercase_run = |text: &str| -> bool {
+                            let mut iter = text.chars().rev();
+                            let last = iter.next();
+                            let prev = iter.next();
+                            match (last, prev) {
+                                (Some(a), Some(b)) => {
+                                    a.is_ascii_uppercase() && b.is_ascii_uppercase()
+                                }
+                                _ => false,
+                            }
+                        };
+
                         // Track sub-items for column-gap splitting:
                         // (text, start_width_ts, end_width_ts)
                         let mut sub_items: Vec<(String, f32, f32)> = Vec::new();
@@ -477,8 +497,14 @@ pub(crate) fn extract_page_text_items(
                                         sub_start_width_ts = total_width_ts;
                                     } else {
                                         total_width_ts += displacement;
+                                        let effective_threshold = if in_uppercase_run(&current_text)
+                                        {
+                                            caps_space_threshold
+                                        } else {
+                                            space_threshold
+                                        };
                                         if !is_invisible
-                                            && n_val < -space_threshold
+                                            && n_val < -effective_threshold
                                             && !current_text.is_empty()
                                             && !current_text.ends_with(' ')
                                         {
@@ -503,8 +529,14 @@ pub(crate) fn extract_page_text_items(
                                         sub_start_width_ts = total_width_ts;
                                     } else {
                                         total_width_ts += displacement;
+                                        let effective_threshold = if in_uppercase_run(&current_text)
+                                        {
+                                            caps_space_threshold
+                                        } else {
+                                            space_threshold
+                                        };
                                         if !is_invisible
-                                            && n_val < -space_threshold
+                                            && n_val < -effective_threshold
                                             && !current_text.is_empty()
                                             && !current_text.ends_with(' ')
                                         {
