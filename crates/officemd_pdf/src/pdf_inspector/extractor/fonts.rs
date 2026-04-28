@@ -742,7 +742,7 @@ pub(crate) fn extract_text_from_operand(
                                     |s: &str| s.chars().any(|c| c == '\u{FFFD}' || c == '\u{0000}');
                                 // 1. Primary CMap
                                 if let Some(s) = entry.primary.lookup(code) {
-                                    if !bad(&s) {
+                                    if !bad(&s) && !is_suspect_upper_to_lower(b, &s) {
                                         return Some(s);
                                     }
                                 }
@@ -750,7 +750,7 @@ pub(crate) fn extract_text_from_operand(
                                 if let Some(fb) =
                                     entry.fallback.as_ref().and_then(|c| c.lookup(code))
                                 {
-                                    if !bad(&fb) {
+                                    if !bad(&fb) && !is_suspect_upper_to_lower(b, &fb) {
                                         return Some(fb);
                                     }
                                 }
@@ -779,7 +779,10 @@ pub(crate) fn extract_text_from_operand(
                         let lookups = entry.primary.lookup_bytes(bytes);
                         let decoded: String = lookups
                             .iter()
-                            .filter_map(|&(_b, ref cmap_result)| cmap_result.clone())
+                            .filter_map(|(b, cmap_result)| match cmap_result {
+                                Some(s) if !is_suspect_upper_to_lower(*b, s) => Some(s.clone()),
+                                _ => None,
+                            })
                             .collect();
                         if !decoded.is_empty() {
                             return Some(decoded);
@@ -1025,6 +1028,30 @@ fn decode_symbol_fallback(bytes: &[u8], base_font_name: Option<&str>) -> Option<
     if out.is_empty() { None } else { Some(out) }
 }
 
+/// Reject CMap entries that look like a mis-subsetted lookup table.
+///
+/// Subsetting tools sometimes reuse the lowercase glyph slot for a different
+/// uppercase glyph and forget to rewrite the ToUnicode CMap, producing entries
+/// like 0x46 ('F') -> 'c'.  When the source byte is an uppercase ASCII letter
+/// and the CMap maps it to a lowercase ASCII letter that is NOT the canonical
+/// uppercase->lowercase pair (offset != 32), the mapping is almost certainly
+/// wrong and we should fall through to Differences / Latin-1, which preserves
+/// the byte's original case.  Legitimate "all-caps font rendered as lowercase"
+/// mappings (where the offset IS 32) are left alone.
+fn is_suspect_upper_to_lower(byte: u8, mapped: &str) -> bool {
+    if !byte.is_ascii_uppercase() {
+        return false;
+    }
+    let mut chars = mapped.chars();
+    let (Some(first), None) = (chars.next(), chars.next()) else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    (first as u8) != byte + 32
+}
+
 fn choose_best_cmap_decode(primary: String, remapped: String) -> String {
     if primary.is_empty() {
         return remapped;
@@ -1219,5 +1246,38 @@ mod tests {
         let good = "the quick brown fox and the lazy dog";
         let bad = "###!!!@@@$$$";
         assert!(score_text(good) > score_text(bad));
+    }
+
+    #[test]
+    fn suspect_upper_to_lower_flags_subset_miscoding() {
+        // 'F' (0x46) -> 'c' is the OpenXML cundamentals case.
+        assert!(is_suspect_upper_to_lower(b'F', "c"));
+        assert!(is_suspect_upper_to_lower(b'O', "l"));
+        assert!(is_suspect_upper_to_lower(b'M', "j"));
+    }
+
+    #[test]
+    fn suspect_upper_to_lower_allows_canonical_lowercase() {
+        // All-caps font emitting lowercase: 'F' -> 'f' is fine.
+        assert!(!is_suspect_upper_to_lower(b'F', "f"));
+        assert!(!is_suspect_upper_to_lower(b'A', "a"));
+        assert!(!is_suspect_upper_to_lower(b'Z', "z"));
+    }
+
+    #[test]
+    fn suspect_upper_to_lower_ignores_non_uppercase_bytes() {
+        // Lowercase or non-letter bytes must never be flagged.
+        assert!(!is_suspect_upper_to_lower(b'f', "c"));
+        assert!(!is_suspect_upper_to_lower(b'3', "1"));
+        assert!(!is_suspect_upper_to_lower(0xE9, "a"));
+    }
+
+    #[test]
+    fn suspect_upper_to_lower_ignores_multichar_or_uppercase_targets() {
+        // Multi-char mappings (ligatures, accented chars) and uppercase
+        // targets are not flagged.
+        assert!(!is_suspect_upper_to_lower(b'F', "fi"));
+        assert!(!is_suspect_upper_to_lower(b'F', "F"));
+        assert!(!is_suspect_upper_to_lower(b'F', "É"));
     }
 }

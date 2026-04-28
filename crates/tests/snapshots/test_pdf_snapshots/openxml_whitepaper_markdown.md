@@ -45,18 +45,18 @@ OpenXML defines formats for word-processing, presentation, and spreadsheet docum
 
 The Specification contains both normative material (material that defines OpenXML) and informative material (material that aids the reader’s understanding but is not prescriptive). It is structured in Parts to meet the needs of varying audiences.
 
-|Part 1 –cundamentals 1SR pages|- Defines vocabulary, notational conventions, and abbreviations. - Summarizes the three primary markup languages and the supporting markup languages. - Establishes conditions for conformance and provides inter operability guidelines. - Describes the constraints within the Open Packaging Conventions that apply to each document type.|
+|Part 1 –Fundamentals 1SR pages|- Defines vocabulary, notational conventions, and abbreviations. - Summarizes the three primary markup languages and the supporting markup languages. - Establishes conditions for conformance and provides inter operability guidelines. - Describes the constraints within the Open Packaging Conventions that apply to each document type.|
 |---|---|
-|Part 2 –lpen Packaging Conventions 1OR pages|- Defines the Open Packaging Conventions (OPC) . Every OpenXML file comprises a collection of byte streams called parts, combined into a container called a package. The packaging format is defined by the OPC. - Describes a recommended physical implementation of the OPC that uses the Zip file format. - Declares the XML schemas for the OPC as XML Sch ema Definitions (XSD) (2) , in an annex that is issued only in electronic form. The annex also includes non-normative representations of the schemas using RELAX NG (ISO/IEC 19757 - 2) (3) .|
+|Part 2 –Open Packaging Conventions 1OR pages|- Defines the Open Packaging Conventions (OPC) . Every OpenXML file comprises a collection of byte streams called parts, combined into a container called a package. The packaging format is defined by the OPC. - Describes a recommended physical implementation of the OPC that uses the Zip file format. - Declares the XML schemas for the OPC as XML Sch ema Definitions (XSD) (2) , in an annex that is issued only in electronic form. The annex also includes non-normative representations of the schemas using RELAX NG (ISO/IEC 19757 - 2) (3) .|
 |Part 3 –Primer 4SS pages|- Introduces the features of each markup language, providing context and illustrating elements through examples and diagrams. This Part is informative (non-normative). - Describes the facility for storing custom XML data within a pac kage to support integration with business data.|
 
 ## Page: 3
 
-Part 4 –jarkup- Defines every element and attribute, the hierarchy of parent/child relationships for elements, Language oence and additional semantics as appropriate. This Part is intended for use as a reference whenever RTRS pages complete detail about an element or attribute is required.
+Part 4 –Markup- Defines every element and attribute, the hierarchy of parent/child relationships for elements, Language Reference and additional semantics as appropriate. This Part is intended for use as a reference whenever RTRS pages complete detail about an element or attribute is required.
 
 - Defines the facility for storing custom XML data.
 - Declares the XML schemas for the markup languages as XSD (2), in an annex that is issued on ly in electronic form. The annex also expresses them non- normatively using RELAX NG (ISO/IEC 19757- 2) (3).
-Part 5 –jarkup- Describes facilities for extension of OpenXML documents. Compatibility and- Spec ifies elements and attributes by which applications with different extensions can bxtensibility interoperate. 34 Pages
+Part 5 –Markup- Describes facilities for extension of OpenXML documents. Compatibility and- Spec ifies elements and attributes by which applications with different extensions can Extensibility interoperate. 34 Pages
 
 - Expresses extensibility rules using NVDL (ISO/IEC 19757- 4) (4).
 In order to ease reading and navigation through these documents, t he electronic versions have many internal active links. In particular, Part 4 has links to parent and child elements throughout.
