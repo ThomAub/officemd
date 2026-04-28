@@ -7,24 +7,26 @@
 //!
 //! # Quick start
 //!
-//! ```ignore
-//! // Full processing (detect + extract + markdown) with defaults
-//! let result = pdf_inspector::process_pdf("document.pdf").unwrap();
-//! println!("type: {:?}, pages: {}", result.pdf_type, result.page_count);
-//! if let Some(md) = &result.markdown {
-//!     println!("{md}");
+//! ```no_run
+//! let bytes = std::fs::read("document.pdf")?;
+//!
+//! // Fast metadata/classification inspection.
+//! let diagnostics = officemd_pdf::inspect_pdf(&bytes)?;
+//! println!(
+//!     "classification: {:?}, pages: {}",
+//!     diagnostics.classification,
+//!     diagnostics.page_count
+//! );
+//!
+//! // Full extraction into the shared officemd IR.
+//! let document = officemd_pdf::extract_ir(&bytes)?;
+//! if let Some(pdf) = &document.pdf {
+//!     for page in &pdf.pages {
+//!         println!("page {}: {}", page.number, page.markdown);
+//!     }
 //! }
 //!
-//! // Fast metadata-only detection (no text extraction)
-//! let info = pdf_inspector::detect_pdf("document.pdf").unwrap();
-//! println!("type: {:?}, pages: {}", info.pdf_type, info.page_count);
-//!
-//! // Custom options via builder
-//! use pdf_inspector::{PdfOptions, ProcessMode};
-//! let result = pdf_inspector::process_pdf_with_options(
-//!     "document.pdf",
-//!     PdfOptions::new().mode(ProcessMode::Analyze),
-//! ).unwrap();
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
 // officemd vendor: upstream `python.rs` (PyO3 bindings) is intentionally
@@ -128,12 +130,11 @@ pub struct PdfProcessResult {
 ///
 /// Use the builder methods to customise behaviour:
 ///
-/// ```ignore
-/// use pdf_inspector::{PdfOptions, ProcessMode};
-///
-/// let opts = PdfOptions::new()
-///     .mode(ProcessMode::Analyze)
-///     .pages([1, 3, 5]);
+/// ```no_run
+/// let bytes = std::fs::read("document.pdf")?;
+/// let document = officemd_pdf::extract_ir(&bytes)?;
+/// println!("kind: {:?}", document.kind);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug, Clone)]
 pub struct PdfOptions {
@@ -1868,6 +1869,14 @@ fn process_document(
     options: PdfOptions,
     start: ProcessTimer,
 ) -> Result<PdfProcessResult, PdfError> {
+    let processed_pages: Vec<u32> = match options.page_filter.as_ref() {
+        Some(page_filter) => (1..=page_count)
+            .filter(|page| page_filter.contains(page))
+            .collect(),
+        None => (1..=page_count).collect(),
+    };
+    let processed_page_count = processed_pages.len() as u32;
+
     // Step 1 — Detection (cheap: scans content streams for text operators)
     let detection = detector::detect_from_document(&doc, page_count, &options.detection)?;
     let pdf_type = detection.pdf_type;
@@ -2108,19 +2117,19 @@ fn process_document(
     // that need OCR.  Flag all pages for OCR in this case.
     // Only check when markdown was actually generated (not in Analyze mode).
     if pdf_type == PdfType::TextBased
-        && page_count > 0
+        && processed_page_count > 0
         && pages_needing_ocr.is_empty()
         && markdown.is_some()
     {
         let md_len = markdown.as_ref().map_or(0, |m| m.len());
-        let chars_per_page = md_len as f32 / page_count as f32;
+        let chars_per_page = md_len as f32 / processed_page_count as f32;
         if chars_per_page < 50.0 && md_len < 500 {
             log::debug!(
-                "sparse extraction: {:.0} chars/page — recommending OCR for all {} pages",
+                "sparse extraction: {:.0} chars/page — recommending OCR for {} processed pages",
                 chars_per_page,
-                page_count
+                processed_page_count
             );
-            pages_needing_ocr = (1..=page_count).collect();
+            pages_needing_ocr = processed_pages.clone();
         }
     }
 
