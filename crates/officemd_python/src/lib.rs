@@ -115,6 +115,7 @@ impl PythonRenderSettings {
                 document_properties: self.include.document_properties,
                 headers_footers: self.include.headers_footers,
                 formulas: self.include.formulas,
+                frontmatter: true,
             },
             table: officemd_markdown::RenderTableOptions {
                 first_row_as_header: self.table.first_row_as_header,

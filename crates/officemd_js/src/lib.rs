@@ -368,6 +368,7 @@ pub fn markdown_from_bytes(
             document_properties: include_document_properties.unwrap_or(false),
             headers_footers: include_headers_footers.unwrap_or(true),
             formulas: include_formulas.unwrap_or(true),
+            frontmatter: true,
         },
         table: officemd_markdown::RenderTableOptions {
             first_row_as_header: use_first_row_as_header.unwrap_or(true),
@@ -407,6 +408,7 @@ pub fn markdown_from_bytes_batch(
             document_properties: include_document_properties.unwrap_or(false),
             headers_footers: include_headers_footers.unwrap_or(true),
             formulas: include_formulas.unwrap_or(true),
+            frontmatter: true,
         },
         table: officemd_markdown::RenderTableOptions {
             first_row_as_header: use_first_row_as_header.unwrap_or(true),

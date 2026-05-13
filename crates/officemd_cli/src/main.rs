@@ -511,6 +511,7 @@ fn render_output(doc: &OoxmlDocument, common: &CommonOptions) -> Result<String, 
                     document_properties: common.include.document_properties,
                     headers_footers: !common.include.no_headers_footers,
                     formulas: !common.include.no_formulas,
+                    frontmatter: true,
                 },
                 table: officemd_markdown::RenderTableOptions {
                     first_row_as_header: !common.table.no_first_row_header,
@@ -776,6 +777,7 @@ fn extract_markdown_from_file(path: &Path, common: &CommonOptions) -> Result<Str
             document_properties: common.include.document_properties,
             headers_footers: !common.include.no_headers_footers,
             formulas: !common.include.no_formulas,
+            frontmatter: true,
         },
         table: officemd_markdown::RenderTableOptions {
             first_row_as_header: !common.table.no_first_row_header,

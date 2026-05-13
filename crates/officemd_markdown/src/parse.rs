@@ -137,6 +137,7 @@ fn parse_frontmatter(input: &str) -> Option<FrontmatterOptions> {
                 document_properties: properties,
                 headers_footers,
                 formulas,
+                frontmatter: true,
             },
             table: RenderTableOptions {
                 first_row_as_header,
