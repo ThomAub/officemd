@@ -33,6 +33,7 @@ export declare function markdownFromBytes(
   useFirstRowAsHeader?: boolean | undefined | null,
   includeHeadersFooters?: boolean | undefined | null,
   includeFormulas?: boolean | undefined | null,
+  includeFrontmatter?: boolean | undefined | null,
   markdownStyle?: string | undefined | null,
   forceExtract?: boolean | undefined | null,
 ): string;
@@ -51,6 +52,7 @@ export declare function markdownFromBytesBatch(
   useFirstRowAsHeader?: boolean | undefined | null,
   includeHeadersFooters?: boolean | undefined | null,
   includeFormulas?: boolean | undefined | null,
+  includeFrontmatter?: boolean | undefined | null,
   markdownStyle?: string | undefined | null,
 ): Array<string>;
 /**

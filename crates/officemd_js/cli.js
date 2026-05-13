@@ -216,6 +216,7 @@ function parseOptions(args) {
     useFirstRowAsHeader: true,
     includeHeadersFooters: true,
     includeFormulas: true,
+    includeFrontmatter: true,
     markdownStyle: "compact",
     force: false,
   };
@@ -249,6 +250,9 @@ function parseOptions(args) {
         break;
       case "--no-formulas":
         flags.includeFormulas = false;
+        break;
+      case "--no-frontmatter":
+        flags.includeFrontmatter = false;
         break;
       case "--markdown-style":
         i++;
@@ -565,6 +569,7 @@ function extractMarkdown(filePath, opts, selection = {}) {
     opts.useFirstRowAsHeader,
     opts.includeHeadersFooters,
     opts.includeFormulas,
+    opts.includeFrontmatter,
     opts.markdownStyle,
     opts.force || false,
   );
@@ -607,6 +612,7 @@ Options:
   --include-headers-footers        Include headers and footers (default)
   --no-headers-footers             Do not include headers and footers
   --no-formulas                    Do not include XLSX formula footnotes
+  --no-frontmatter                 Omit the leading <!-- officemd: ... --> comment
   --markdown-style <compact|human> Markdown profile (default: compact)
   --pages <selector>                Select PDF pages/PPTX slides or XLSX/CSV sheet indices (e.g. 1,3-5)
   --sheets <selector>               Select XLSX/CSV sheets by name/index (e.g. Summary,1-2)
