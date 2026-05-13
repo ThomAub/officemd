@@ -110,6 +110,10 @@ struct MarkdownIncludeCliOptions {
     /// Omit XLSX formula footnotes from markdown output.
     #[arg(long, default_value_t = false)]
     no_formulas: bool,
+
+    /// Omit the leading `<!-- officemd: ... -->` frontmatter comment.
+    #[arg(long, default_value_t = false)]
+    no_frontmatter: bool,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -511,6 +515,7 @@ fn render_output(doc: &OoxmlDocument, common: &CommonOptions) -> Result<String, 
                     document_properties: common.include.document_properties,
                     headers_footers: !common.include.no_headers_footers,
                     formulas: !common.include.no_formulas,
+                    frontmatter: !common.include.no_frontmatter,
                 },
                 table: officemd_markdown::RenderTableOptions {
                     first_row_as_header: !common.table.no_first_row_header,
@@ -776,6 +781,7 @@ fn extract_markdown_from_file(path: &Path, common: &CommonOptions) -> Result<Str
             document_properties: common.include.document_properties,
             headers_footers: !common.include.no_headers_footers,
             formulas: !common.include.no_formulas,
+            frontmatter: !common.include.no_frontmatter,
         },
         table: officemd_markdown::RenderTableOptions {
             first_row_as_header: !common.table.no_first_row_header,
@@ -1162,6 +1168,7 @@ mod tests {
                 document_properties: false,
                 no_headers_footers: false,
                 no_formulas: false,
+                no_frontmatter: false,
             },
             table: MarkdownTableCliOptions {
                 no_first_row_header: false,

@@ -359,6 +359,7 @@ pub fn markdown_from_bytes(
     use_first_row_as_header: Option<bool>,
     include_headers_footers: Option<bool>,
     include_formulas: Option<bool>,
+    include_frontmatter: Option<bool>,
     markdown_style: Option<String>,
     force_extract: Option<bool>,
 ) -> Result<String> {
@@ -368,6 +369,7 @@ pub fn markdown_from_bytes(
             document_properties: include_document_properties.unwrap_or(false),
             headers_footers: include_headers_footers.unwrap_or(true),
             formulas: include_formulas.unwrap_or(true),
+            frontmatter: include_frontmatter.unwrap_or(true),
         },
         table: officemd_markdown::RenderTableOptions {
             first_row_as_header: use_first_row_as_header.unwrap_or(true),
@@ -399,6 +401,7 @@ pub fn markdown_from_bytes_batch(
     use_first_row_as_header: Option<bool>,
     include_headers_footers: Option<bool>,
     include_formulas: Option<bool>,
+    include_frontmatter: Option<bool>,
     markdown_style: Option<String>,
 ) -> Result<Vec<String>> {
     let markdown_profile = with_optional_string(markdown_style, parse_markdown_style)?;
@@ -407,6 +410,7 @@ pub fn markdown_from_bytes_batch(
             document_properties: include_document_properties.unwrap_or(false),
             headers_footers: include_headers_footers.unwrap_or(true),
             formulas: include_formulas.unwrap_or(true),
+            frontmatter: include_frontmatter.unwrap_or(true),
         },
         table: officemd_markdown::RenderTableOptions {
             first_row_as_header: use_first_row_as_header.unwrap_or(true),

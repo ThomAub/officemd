@@ -43,6 +43,7 @@ struct PythonRenderIncludeSettings {
     document_properties: bool,
     headers_footers: bool,
     formulas: bool,
+    frontmatter: bool,
 }
 
 impl Default for PythonRenderIncludeSettings {
@@ -51,6 +52,7 @@ impl Default for PythonRenderIncludeSettings {
             document_properties: false,
             headers_footers: true,
             formulas: true,
+            frontmatter: true,
         }
     }
 }
@@ -100,6 +102,8 @@ impl PythonRenderSettings {
         )?;
         settings.include.formulas =
             bool_kwarg(kwargs, "include_formulas", settings.include.formulas)?;
+        settings.include.frontmatter =
+            bool_kwarg(kwargs, "include_frontmatter", settings.include.frontmatter)?;
         settings.force_extract = bool_kwarg(kwargs, "force_extract", settings.force_extract)?;
         settings.markdown_style = string_kwarg(kwargs, "markdown_style")?;
 
@@ -115,6 +119,7 @@ impl PythonRenderSettings {
                 document_properties: self.include.document_properties,
                 headers_footers: self.include.headers_footers,
                 formulas: self.include.formulas,
+                frontmatter: self.include.frontmatter,
             },
             table: officemd_markdown::RenderTableOptions {
                 first_row_as_header: self.table.first_row_as_header,

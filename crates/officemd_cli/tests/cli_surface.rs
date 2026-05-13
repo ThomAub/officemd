@@ -89,6 +89,8 @@ fn markdown_help_snapshot() {
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
+          --no-frontmatter
+              Omit the leading `<!-- officemd: ... -->` frontmatter comment
           --no-first-row-header
               Use synthetic Col1/Col2 headers instead of first data row
           --markdown-style <MARKDOWN_STYLE>
@@ -144,6 +146,8 @@ fn render_help_snapshot() {
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
+          --no-frontmatter
+              Omit the leading `<!-- officemd: ... -->` frontmatter comment
           --no-first-row-header
               Use synthetic Col1/Col2 headers instead of first data row
           --markdown-style <MARKDOWN_STYLE>
@@ -200,6 +204,8 @@ fn diff_help_snapshot() {
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
+          --no-frontmatter
+              Omit the leading `<!-- officemd: ... -->` frontmatter comment
           --no-first-row-header
               Use synthetic Col1/Col2 headers instead of first data row
           --markdown-style <MARKDOWN_STYLE>
@@ -257,6 +263,8 @@ fn convert_help_snapshot() {
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
+          --no-frontmatter
+              Omit the leading `<!-- officemd: ... -->` frontmatter comment
           --no-first-row-header
               Use synthetic Col1/Col2 headers instead of first data row
           --markdown-style <MARKDOWN_STYLE>
@@ -312,6 +320,8 @@ fn stream_help_snapshot() {
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
+          --no-frontmatter
+              Omit the leading `<!-- officemd: ... -->` frontmatter comment
           --no-first-row-header
               Use synthetic Col1/Col2 headers instead of first data row
           --markdown-style <MARKDOWN_STYLE>
@@ -367,6 +377,8 @@ fn inspect_help_snapshot() {
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
+          --no-frontmatter
+              Omit the leading `<!-- officemd: ... -->` frontmatter comment
           --no-first-row-header
               Use synthetic Col1/Col2 headers instead of first data row
           --markdown-style <MARKDOWN_STYLE>

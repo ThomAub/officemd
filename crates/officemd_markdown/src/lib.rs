@@ -40,6 +40,11 @@ pub struct RenderIncludeOptions {
     pub headers_footers: bool,
     /// Include XLSX formula footnotes in the output.
     pub formulas: bool,
+    /// Emit the leading `<!-- officemd: ... -->` frontmatter comment.
+    /// Defaults to `true` to preserve existing output; set to `false` when
+    /// the marker is unwanted (e.g. content hashing or downstream pipelines
+    /// that consume the markdown verbatim).
+    pub frontmatter: bool,
 }
 
 /// Table-specific markdown rendering switches.
@@ -65,6 +70,7 @@ impl Default for RenderIncludeOptions {
             document_properties: false,
             headers_footers: true,
             formulas: true,
+            frontmatter: true,
         }
     }
 }
@@ -86,7 +92,11 @@ pub fn render_document(doc: &OoxmlDocument) -> String {
 /// Render a full OOXML document to Markdown with explicit options.
 #[must_use]
 pub fn render_document_with_options(doc: &OoxmlDocument, options: RenderOptions) -> String {
-    let mut out = render_frontmatter(doc, options);
+    let mut out = if options.include.frontmatter {
+        render_frontmatter(doc, options)
+    } else {
+        String::new()
+    };
     match doc.kind {
         DocumentKind::Xlsx => out.push_str(&render_xlsx(doc, options)),
         DocumentKind::Docx => out.push_str(&render_docx(doc, options)),
@@ -1138,5 +1148,51 @@ mod tests {
         let md = render_document(&doc);
         assert!(md.starts_with("<!-- officemd:"));
         assert!(!md.contains("## Page:"));
+    }
+
+    #[test]
+    fn frontmatter_emitted_by_default() {
+        let doc = OoxmlDocument {
+            kind: DocumentKind::Pdf,
+            pdf: Some(officemd_core::ir::PdfDocument {
+                pages: vec![officemd_core::ir::PdfPage {
+                    number: 1,
+                    markdown: "Hello".to_string(),
+                }],
+                diagnostics: officemd_core::ir::PdfDiagnostics::default(),
+            }),
+            ..Default::default()
+        };
+
+        let md = render_document_with_options(&doc, RenderOptions::default());
+        assert!(md.starts_with("<!-- officemd:"));
+        assert!(md.contains("Hello"));
+    }
+
+    #[test]
+    fn frontmatter_suppressed_when_disabled() {
+        let doc = OoxmlDocument {
+            kind: DocumentKind::Pdf,
+            pdf: Some(officemd_core::ir::PdfDocument {
+                pages: vec![officemd_core::ir::PdfPage {
+                    number: 1,
+                    markdown: "Hello".to_string(),
+                }],
+                diagnostics: officemd_core::ir::PdfDiagnostics::default(),
+            }),
+            ..Default::default()
+        };
+
+        let opts = RenderOptions {
+            include: RenderIncludeOptions {
+                frontmatter: false,
+                ..RenderIncludeOptions::default()
+            },
+            ..RenderOptions::default()
+        };
+        let md = render_document_with_options(&doc, opts);
+        assert!(!md.starts_with("<!-- officemd:"));
+        assert!(!md.contains("<!-- officemd:"));
+        assert!(md.contains("Hello"));
     }
 }
