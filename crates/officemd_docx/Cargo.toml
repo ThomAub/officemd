@@ -1,6 +1,6 @@
 [package]
 name = "officemd_docx"
-version = "0.1.6"
+version = "0.1.7"
 edition.workspace = true
 description = "DOCX extraction for OfficeMD"
 license = "MIT"
@@ -14,8 +14,8 @@ categories = ["parser-implementations", "text-processing"]
 exclude = ["tests/*.py"]
 
 [dependencies]
-officemd_core = { version = "0.1.6", path = "../officemd_core", default-features = false }
-officemd_markdown = { version = "0.1.6", path = "../officemd_markdown" }
+officemd_core = { version = "0.1.7", path = "../officemd_core", default-features = false }
+officemd_markdown = { version = "0.1.7", path = "../officemd_markdown" }
 quick-xml = "0.37"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 thiserror = "2.0"
