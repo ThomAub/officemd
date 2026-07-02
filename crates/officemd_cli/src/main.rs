@@ -785,6 +785,14 @@ fn default_output_path(input: &Path, output_format: OutputFormatArg) -> PathBuf 
     out
 }
 
+fn validate_xlsx_markdown_fast_path(common: &CommonOptions) -> Result<(), String> {
+    if common.slides.is_some() {
+        return Err("--slides can only be used with PPTX files".to_string());
+    }
+
+    Ok(())
+}
+
 fn extract_markdown_from_file(path: &Path, common: &CommonOptions) -> Result<String, String> {
     let bytes =
         std::fs::read(path).map_err(|e| format!("failed to read '{}': {e}", path.display()))?;
@@ -808,6 +816,8 @@ fn extract_markdown_from_file(path: &Path, common: &CommonOptions) -> Result<Str
         markdown_profile,
     };
     let md = if resolved == DocumentFormat::Xlsx {
+        validate_xlsx_markdown_fast_path(common)?;
+
         let mut extract_options = XlsxExtractOptions::default();
         extract_options.text.style_aware_values = common.xlsx.style_aware;
         extract_options.text.streaming_rows = common.xlsx.streaming;
@@ -1308,6 +1318,25 @@ mod tests {
         let markdown = render_output(&doc, &common).expect("render markdown");
         assert!(markdown.contains("## Sheet: Summary"));
         assert!(markdown.contains("## Sheet: Data"));
+    }
+
+    #[test]
+    fn xlsx_markdown_fast_path_rejects_slides_option() {
+        let content = build_test_xlsx_for_inspect();
+        let mut path = std::env::temp_dir();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        path.push(format!("officemd-test-{unique}.xlsx"));
+        std::fs::write(&path, content).expect("write xlsx fixture");
+
+        let mut common = markdown_common_options();
+        common.slides = Some("1".to_string());
+        let err = extract_markdown_from_file(&path, &common).expect_err("slides should fail");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(err, "--slides can only be used with PPTX files");
     }
 
     #[test]
