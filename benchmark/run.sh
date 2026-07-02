@@ -7,6 +7,7 @@
 #   npm i -g markit-ai                (optional, for markit comparison)
 #   npm i -g @llamaindex/liteparse    (optional, for PDF comparison)
 #   bash benchmark/setup-corpus.sh
+#   uv run benchmark/setup-gdp-pdf-corpus.py  (optional GDP.pdf sample)
 #
 # Usage from repo root:
 #   bash benchmark/run.sh
@@ -77,9 +78,20 @@ mkdir -p "$RESULTS"
 
 # Collect benchmark files from corpus + examples/data
 FILES=()
-for FILE in "$CORPUS"/*; do
-    [ -f "$FILE" ] && FILES+=("$FILE")
-done
+add_corpus_file() {
+    local file="$1"
+    local basename
+    basename="$(basename "$file")"
+    case "$basename" in
+        *.csv|*.CSV|*.docx|*.DOCX|*.pdf|*.PDF|*.pptx|*.PPTX|*.xlsx|*.XLSX)
+            FILES+=("$file")
+            ;;
+    esac
+}
+
+while IFS= read -r FILE; do
+    [ -f "$FILE" ] && add_corpus_file "$FILE"
+done < <(find "$CORPUS" -type f | sort)
 if [ -d "$DATA_DIR" ]; then
     for FILE in "$DATA_DIR"/*; do
         [ -f "$FILE" ] || continue
@@ -91,12 +103,24 @@ if [ -d "$DATA_DIR" ]; then
     done
 fi
 
+file_id() {
+    local file="$1"
+    local rel="${file#$CORPUS/}"
+    if [ "$rel" = "$file" ]; then
+        rel="$(basename "$file")"
+    fi
+    rel="${rel//\//__}"
+    rel="${rel// /_}"
+    printf "%s" "$rel"
+}
+
 echo ""
 echo "=== Running benchmarks (${#FILES[@]} files) ==="
 
 for FILE in "${FILES[@]}"; do
     BASENAME="$(basename "$FILE")"
     EXT="${BASENAME##*.}"
+    FILE_ID="$(file_id "$FILE")"
 
     echo ""
     echo "--- $BASENAME ---"
@@ -127,8 +151,8 @@ for FILE in "${FILES[@]}"; do
     hyperfine \
         --warmup 3 \
         --min-runs 5 \
-        --export-json "$RESULTS/${BASENAME}.json" \
-        --export-markdown "$RESULTS/${BASENAME}.md" \
+        --export-json "$RESULTS/${FILE_ID}.json" \
+        --export-markdown "$RESULTS/${FILE_ID}.md" \
         "${CMDS[@]}"
 done
 
