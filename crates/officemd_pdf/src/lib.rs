@@ -168,7 +168,32 @@ pub fn extract_ir_force(
     content: &[u8],
     force_extract: bool,
 ) -> Result<OoxmlDocument, OoxmlPdfError> {
-    let options = default_pdf_options(force_extract);
+    extract_ir_with_options(content, default_pdf_options(force_extract))
+}
+
+/// Extract PDF content as the shared officemd IR, optionally forcing
+/// extraction and limiting processing to specific 1-indexed pages.
+///
+/// # Errors
+///
+/// Returns `OoxmlPdfError::Pdf` when the content is not a valid PDF or
+/// extraction fails.
+pub fn extract_ir_force_pages(
+    content: &[u8],
+    force_extract: bool,
+    pages: Option<&[u32]>,
+) -> Result<OoxmlDocument, OoxmlPdfError> {
+    let mut options = default_pdf_options(force_extract);
+    if let Some(pages) = pages {
+        options = options.pages(pages.iter().copied());
+    }
+    extract_ir_with_options(content, options)
+}
+
+fn extract_ir_with_options(
+    content: &[u8],
+    options: PdfOptions,
+) -> Result<OoxmlDocument, OoxmlPdfError> {
     let result = process_pdf_mem_with_options(content, options)?;
 
     let diagnostics = map_diagnostics(&result);

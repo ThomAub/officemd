@@ -88,6 +88,7 @@ The Rust CLI has additional subcommands:
 officemd stream report.docx                    # stream to stdout (supports stdin via -)
 officemd convert report.docx --output out.md   # write to file
 officemd inspect report.pdf --output-format json --pretty
+officemd plan report.xlsx                      # JSON parse map with follow-up commands
 ```
 
 ### Common options
