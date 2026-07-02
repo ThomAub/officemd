@@ -17,6 +17,7 @@ pub use convert::to_markdown_from_lines;
 use std::collections::{HashMap, HashSet};
 
 use crate::pdf_inspector::extractor::group_into_lines_with_thresholds;
+use crate::pdf_inspector::tables::Table;
 use crate::pdf_inspector::types::{PdfLine, PdfRect, TextItem};
 
 use analysis::calculate_font_stats_from_items;
@@ -379,6 +380,13 @@ pub(crate) fn filter_lines_to_band(
         .collect()
 }
 
+fn should_skip_rect_table(table: &Table) -> bool {
+    table
+        .cells
+        .first()
+        .is_some_and(|row| row.iter().all(|cell| cell.trim().is_empty()))
+}
+
 /// Options for markdown conversion
 #[derive(Debug, Clone)]
 pub struct MarkdownOptions {
@@ -735,6 +743,9 @@ pub(crate) fn to_markdown_from_items_with_rects_and_lines(
             let (rect_tables, hint_regions) =
                 detect_tables_from_rects(band_items, band_rects, page);
             for table in &rect_tables {
+                if should_skip_rect_table(table) {
+                    continue;
+                }
                 if !rect_claimed.is_empty()
                     && table
                         .item_indices
@@ -1285,5 +1296,30 @@ mod tests {
             split.is_empty(),
             "label+number table should not be split side-by-side"
         );
+    }
+
+    #[test]
+    fn skips_rect_table_with_empty_top_row() {
+        let table = Table::new(
+            vec![10.0, 100.0],
+            vec![700.0, 680.0],
+            vec![
+                vec!["".to_string(), "  ".to_string()],
+                vec!["Name".to_string(), "Value".to_string()],
+            ],
+            vec![0, 1],
+        );
+        assert!(should_skip_rect_table(&table));
+
+        let table = Table::new(
+            vec![10.0, 100.0],
+            vec![700.0, 680.0],
+            vec![
+                vec!["Group".to_string(), "".to_string()],
+                vec!["Name".to_string(), "Value".to_string()],
+            ],
+            vec![0, 1],
+        );
+        assert!(!should_skip_rect_table(&table));
     }
 }

@@ -3,6 +3,7 @@
 #
 # Usage from repo root:
 #   bash benchmark/compare.sh
+#   uv run benchmark/setup-gdp-pdf-corpus.py  # optional GDP.pdf sample
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -79,9 +80,20 @@ run_converter() {
 
 # Collect benchmark files from corpus + examples/data
 FILES=()
-for FILE in "$CORPUS"/*; do
-    [ -f "$FILE" ] && FILES+=("$FILE")
-done
+add_corpus_file() {
+    local file="$1"
+    local basename
+    basename="$(basename "$file")"
+    case "$basename" in
+        *.csv|*.CSV|*.docx|*.DOCX|*.pdf|*.PDF|*.pptx|*.PPTX|*.xlsx|*.XLSX)
+            FILES+=("$file")
+            ;;
+    esac
+}
+
+while IFS= read -r FILE; do
+    [ -f "$FILE" ] && add_corpus_file "$FILE"
+done < <(find "$CORPUS" -type f | sort)
 if [ -d "$DATA_DIR" ]; then
     for FILE in "$DATA_DIR"/*; do
         [ -f "$FILE" ] || continue

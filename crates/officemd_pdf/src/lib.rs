@@ -11,9 +11,10 @@ use officemd_core::ir::{
     DocumentKind, DocumentProperties, OoxmlDocument, PdfClassification, PdfDiagnostics,
     PdfDocument, PdfPage,
 };
-use officemd_markdown::{RenderOptions, render_document_with_options};
+use officemd_markdown::RenderOptions;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fmt::Write as _;
 
 #[derive(Debug, thiserror::Error)]
 pub enum OoxmlPdfError {
@@ -168,7 +169,32 @@ pub fn extract_ir_force(
     content: &[u8],
     force_extract: bool,
 ) -> Result<OoxmlDocument, OoxmlPdfError> {
-    let options = default_pdf_options(force_extract);
+    extract_ir_with_options(content, default_pdf_options(force_extract))
+}
+
+/// Extract PDF content as the shared officemd IR, optionally forcing
+/// extraction and limiting processing to specific 1-indexed pages.
+///
+/// # Errors
+///
+/// Returns `OoxmlPdfError::Pdf` when the content is not a valid PDF or
+/// extraction fails.
+pub fn extract_ir_force_pages(
+    content: &[u8],
+    force_extract: bool,
+    pages: Option<&[u32]>,
+) -> Result<OoxmlDocument, OoxmlPdfError> {
+    let mut options = default_pdf_options(force_extract);
+    if let Some(pages) = pages {
+        options = options.pages(pages.iter().copied());
+    }
+    extract_ir_with_options(content, options)
+}
+
+fn extract_ir_with_options(
+    content: &[u8],
+    options: PdfOptions,
+) -> Result<OoxmlDocument, OoxmlPdfError> {
     let result = process_pdf_mem_with_options(content, options)?;
 
     let diagnostics = map_diagnostics(&result);
@@ -239,8 +265,8 @@ pub fn markdown_from_bytes_force(
     render: RenderOptions,
     force_extract: bool,
 ) -> Result<String, OoxmlPdfError> {
-    let doc = extract_ir_force(content, force_extract)?;
-    Ok(render_document_with_options(&doc, render))
+    let result = process_pdf_mem_with_options(content, default_pdf_options(force_extract))?;
+    Ok(render_pdf_process_result(&result, render))
 }
 
 fn strip_bom_and_whitespace(bytes: &[u8]) -> &[u8] {
@@ -373,6 +399,97 @@ fn build_document_properties(
         app: HashMap::new(),
         custom: HashMap::new(),
     }
+}
+
+fn render_pdf_process_result(result: &PdfProcessResult, options: RenderOptions) -> String {
+    let diagnostics = map_diagnostics(result);
+    let mut out = render_pdf_frontmatter(options);
+
+    if options.include.document_properties {
+        let properties = build_document_properties(result, &diagnostics);
+        render_pdf_properties(&properties, options, &mut out);
+    }
+
+    let pages = result
+        .markdown
+        .as_deref()
+        .map(split_markdown_into_pages)
+        .map(|pages| fill_missing_pages(pages, diagnostics.page_count))
+        .unwrap_or_default();
+
+    for page in pages {
+        let _ = write!(out, "## Page: {}\n\n", page.number);
+        if !page.markdown.is_empty() {
+            out.push_str(&page.markdown);
+            if !page.markdown.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+    }
+
+    out
+}
+
+fn render_pdf_frontmatter(options: RenderOptions) -> String {
+    if !options.include.frontmatter {
+        return String::new();
+    }
+
+    let profile = match options.markdown_profile {
+        officemd_markdown::MarkdownProfile::LlmCompact => "compact",
+        officemd_markdown::MarkdownProfile::Human => "human",
+    };
+    format!(
+        "<!-- officemd: kind=pdf profile={profile} first_row_as_header={} formulas={} headers_footers={} properties={} -->\n\n",
+        options.table.first_row_as_header,
+        options.include.formulas,
+        options.include.headers_footers,
+        options.include.document_properties,
+    )
+}
+
+fn render_pdf_properties(
+    properties: &DocumentProperties,
+    options: RenderOptions,
+    out: &mut String,
+) {
+    if properties.core.is_empty() && properties.app.is_empty() && properties.custom.is_empty() {
+        return;
+    }
+
+    let mut entries = properties
+        .core
+        .iter()
+        .chain(properties.app.iter())
+        .chain(properties.custom.iter())
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect::<Vec<_>>();
+    entries.sort_unstable_by(|(ka, va), (kb, vb)| ka.cmp(kb).then_with(|| va.cmp(vb)));
+
+    if matches!(
+        options.markdown_profile,
+        officemd_markdown::MarkdownProfile::Human
+    ) {
+        out.push_str("### Document Properties\n");
+        for (k, v) in entries {
+            let _ = writeln!(out, "- {}: {}", k, escape_pipes(v));
+        }
+        out.push_str("\n---\n\n");
+    } else {
+        out.push_str("properties: ");
+        for (idx, (k, v)) in entries.iter().enumerate() {
+            if idx > 0 {
+                out.push_str("; ");
+            }
+            let _ = write!(out, "{k}={}", escape_pipes(v));
+        }
+        out.push_str("\n\n");
+    }
+}
+
+fn escape_pipes(value: &str) -> String {
+    value.replace('|', "\\|")
 }
 
 fn split_markdown_into_pages(markdown: &str) -> Vec<PdfPage> {
@@ -790,6 +907,34 @@ ET\n"
                 .expect("extract markdown");
         assert!(!markdown.trim().is_empty());
         assert!(markdown.contains("## Page: 1"));
+    }
+
+    #[test]
+    fn pdf_direct_markdown_matches_ir_renderer() {
+        let options = RenderOptions::default();
+        let doc = extract_ir_force(TEXT_FIXTURE, false).expect("extract pdf ir");
+        let expected = officemd_markdown::render_document_with_options(&doc, options);
+        let actual =
+            markdown_from_bytes_force(TEXT_FIXTURE, options, false).expect("direct markdown");
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn pdf_direct_markdown_matches_ir_renderer_with_properties() {
+        let options = RenderOptions {
+            include: officemd_markdown::RenderIncludeOptions {
+                document_properties: true,
+                frontmatter: false,
+                ..Default::default()
+            },
+            markdown_profile: officemd_markdown::MarkdownProfile::Human,
+            ..Default::default()
+        };
+        let doc = extract_ir_force(TEXT_FIXTURE, false).expect("extract pdf ir");
+        let expected = officemd_markdown::render_document_with_options(&doc, options);
+        let actual =
+            markdown_from_bytes_force(TEXT_FIXTURE, options, false).expect("direct markdown");
+        assert_eq!(actual, expected);
     }
 
     #[test]
