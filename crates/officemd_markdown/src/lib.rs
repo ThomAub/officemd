@@ -98,10 +98,10 @@ pub fn render_document_with_options(doc: &OoxmlDocument, options: RenderOptions)
         String::new()
     };
     match doc.kind {
-        DocumentKind::Xlsx => out.push_str(&render_xlsx(doc, options)),
-        DocumentKind::Docx => out.push_str(&render_docx(doc, options)),
-        DocumentKind::Pptx => out.push_str(&render_pptx(doc, options)),
-        DocumentKind::Pdf => out.push_str(&render_pdf(doc, options)),
+        DocumentKind::Xlsx => render_xlsx(doc, options, &mut out),
+        DocumentKind::Docx => render_docx(doc, options, &mut out),
+        DocumentKind::Pptx => render_pptx(doc, options, &mut out),
+        DocumentKind::Pdf => render_pdf(doc, options, &mut out),
     }
     out
 }
@@ -121,18 +121,16 @@ fn render_frontmatter(doc: &OoxmlDocument, options: RenderOptions) -> String {
     )
 }
 
-fn render_xlsx(doc: &OoxmlDocument, options: RenderOptions) -> String {
-    let mut out = String::new();
-
+fn render_xlsx(doc: &OoxmlDocument, options: RenderOptions, out: &mut String) {
     if options.include.document_properties {
-        render_properties(doc, &mut out, options);
+        render_properties(doc, out, options);
     }
 
     for sheet in &doc.sheets {
         let _ = write!(out, "## Sheet: {}\n\n", sheet.name);
 
         for table in &sheet.tables {
-            out.push_str(&render_table(table, options));
+            render_table_into(table, options, out);
             out.push('\n');
         }
 
@@ -160,14 +158,11 @@ fn render_xlsx(doc: &OoxmlDocument, options: RenderOptions) -> String {
             out.push('\n');
         }
     }
-    out
 }
 
-fn render_docx(doc: &OoxmlDocument, options: RenderOptions) -> String {
-    let mut out = String::new();
-
+fn render_docx(doc: &OoxmlDocument, options: RenderOptions, out: &mut String) {
     if options.include.document_properties {
-        render_properties(doc, &mut out, options);
+        render_properties(doc, out, options);
     }
 
     let mut wrote_section = false;
@@ -189,11 +184,11 @@ fn render_docx(doc: &OoxmlDocument, options: RenderOptions) -> String {
         for block in &section.blocks {
             match block {
                 Block::Paragraph(p) => {
-                    out.push_str(&render_paragraph(p, false));
+                    render_paragraph_into(p, false, out);
                     out.push('\n');
                 }
                 Block::Table(table) => {
-                    out.push_str(&render_table(table, options));
+                    render_table_into(table, options, out);
                     out.push('\n');
                 }
                 Block::Separator => out.push_str("---\n\n"),
@@ -203,19 +198,16 @@ fn render_docx(doc: &OoxmlDocument, options: RenderOptions) -> String {
         if !section.comments.is_empty() {
             out.push_str("### Comments\n");
             for note in &section.comments {
-                render_comment(note, &mut out, false);
+                render_comment(note, out, false);
             }
             out.push('\n');
         }
     }
-    out
 }
 
-fn render_pptx(doc: &OoxmlDocument, options: RenderOptions) -> String {
-    let mut out = String::new();
-
+fn render_pptx(doc: &OoxmlDocument, options: RenderOptions, out: &mut String) {
     if options.include.document_properties {
-        render_properties(doc, &mut out, options);
+        render_properties(doc, out, options);
     }
 
     for slide in &doc.slides {
@@ -246,11 +238,11 @@ fn render_pptx(doc: &OoxmlDocument, options: RenderOptions) -> String {
                         skipped_title_duplicate = true;
                         continue;
                     }
-                    out.push_str(&render_paragraph(p, false));
+                    render_paragraph_into(p, false, out);
                     out.push('\n');
                 }
                 Block::Table(table) => {
-                    out.push_str(&render_table(table, options));
+                    render_table_into(table, options, out);
                     out.push('\n');
                 }
                 Block::Separator => out.push_str("---\n\n"),
@@ -262,7 +254,7 @@ fn render_pptx(doc: &OoxmlDocument, options: RenderOptions) -> String {
         {
             out.push_str("### Notes\n");
             for paragraph in notes {
-                out.push_str(&render_paragraph(paragraph, false));
+                render_paragraph_into(paragraph, false, out);
                 out.push('\n');
             }
             out.push('\n');
@@ -271,13 +263,11 @@ fn render_pptx(doc: &OoxmlDocument, options: RenderOptions) -> String {
         if !slide.comments.is_empty() {
             out.push_str("### Comments\n");
             for note in &slide.comments {
-                render_comment(note, &mut out, true);
+                render_comment(note, out, true);
             }
             out.push('\n');
         }
     }
-
-    out
 }
 
 fn is_duplicate_slide_title_paragraph(paragraph: &Paragraph, title: &str) -> bool {
@@ -293,15 +283,13 @@ fn is_duplicate_slide_title_paragraph(paragraph: &Paragraph, title: &str) -> boo
     text.trim() == title.trim()
 }
 
-fn render_pdf(doc: &OoxmlDocument, options: RenderOptions) -> String {
-    let mut out = String::new();
-
+fn render_pdf(doc: &OoxmlDocument, options: RenderOptions, out: &mut String) {
     if options.include.document_properties {
-        render_properties(doc, &mut out, options);
+        render_properties(doc, out, options);
     }
 
     let Some(pdf) = &doc.pdf else {
-        return out;
+        return;
     };
 
     for page in &pdf.pages {
@@ -314,8 +302,6 @@ fn render_pdf(doc: &OoxmlDocument, options: RenderOptions) -> String {
             out.push('\n');
         }
     }
-
-    out
 }
 
 fn render_properties(doc: &OoxmlDocument, out: &mut String, options: RenderOptions) {
@@ -350,36 +336,47 @@ fn render_properties(doc: &OoxmlDocument, out: &mut String, options: RenderOptio
     }
 }
 
+#[cfg(test)]
 fn render_table(table: &Table, options: RenderOptions) -> String {
     let mut out = String::new();
+    render_table_into(table, options, &mut out);
+    out
+}
+
+fn render_table_into(table: &Table, options: RenderOptions, out: &mut String) {
     if let Some(caption) = &table.caption {
         let _ = writeln!(out, "### {caption}");
     }
 
-    let (header_labels, data_rows): (Vec<String>, &[Vec<TableCell>]) =
-        if options.table.first_row_as_header && !table.rows.is_empty() {
-            let labels = table.rows[0].iter().map(render_cell).collect();
-            (labels, &table.rows[1..])
-        } else {
-            (
-                table.headers.iter().map(|h| escape_pipes(h)).collect(),
-                &table.rows,
-            )
-        };
-
     // headers
     out.push('|');
-    for h in &header_labels {
-        out.push(' ');
-        out.push_str(h);
-        out.push(' ');
-        out.push('|');
-    }
+    let data_rows = if options.table.first_row_as_header && !table.rows.is_empty() {
+        for cell in &table.rows[0] {
+            out.push(' ');
+            render_cell_into(cell, out);
+            out.push(' ');
+            out.push('|');
+        }
+        &table.rows[1..]
+    } else {
+        for label in &table.headers {
+            out.push(' ');
+            out.push_str(&escape_pipes(label));
+            out.push(' ');
+            out.push('|');
+        }
+        &table.rows[..]
+    };
     out.push('\n');
 
     // separator
     out.push('|');
-    for _ in &header_labels {
+    let header_count = if options.table.first_row_as_header && !table.rows.is_empty() {
+        table.rows[0].len()
+    } else {
+        table.headers.len()
+    };
+    for _ in 0..header_count {
         out.push_str(" --- |");
     }
     out.push('\n');
@@ -388,33 +385,38 @@ fn render_table(table: &Table, options: RenderOptions) -> String {
         out.push('|');
         for cell in row {
             out.push(' ');
-            out.push_str(&render_cell(cell));
+            render_cell_into(cell, out);
             out.push(' ');
             out.push('|');
         }
         out.push('\n');
     }
-
-    out
 }
 
-fn render_cell(cell: &TableCell) -> String {
-    let mut out = String::new();
+fn render_cell_into(cell: &TableCell, out: &mut String) {
     for (i, para) in cell.content.iter().enumerate() {
         if i > 0 {
             out.push_str("<br>");
         }
-        out.push_str(&render_paragraph(para, true));
+        render_paragraph_into(para, true, out);
     }
-    out
 }
 
 fn render_paragraph(paragraph: &Paragraph, escape_pipes_in_text: bool) -> String {
     render_inlines(&paragraph.inlines, escape_pipes_in_text)
 }
 
+fn render_paragraph_into(paragraph: &Paragraph, escape_pipes_in_text: bool, out: &mut String) {
+    render_inlines_into(&paragraph.inlines, escape_pipes_in_text, out);
+}
+
 fn render_inlines(inlines: &[Inline], escape_pipes_in_text: bool) -> String {
     let mut buf = String::new();
+    render_inlines_into(inlines, escape_pipes_in_text, &mut buf);
+    buf
+}
+
+fn render_inlines_into(inlines: &[Inline], escape_pipes_in_text: bool, buf: &mut String) {
     for inline in inlines {
         match inline {
             Inline::Text(text) => buf.push_str(&escape_text(text, escape_pipes_in_text)),
@@ -431,7 +433,6 @@ fn render_inlines(inlines: &[Inline], escape_pipes_in_text: bool) -> String {
             }
         }
     }
-    buf
 }
 
 fn escape_text(s: &str, escape_pipes_in_text: bool) -> Cow<'_, str> {
