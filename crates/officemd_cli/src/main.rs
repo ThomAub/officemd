@@ -395,7 +395,8 @@ fn extract_ir_document(
             let mut options = XlsxExtractOptions::default();
             options.text.style_aware_values = common.xlsx.style_aware;
             options.text.streaming_rows = common.xlsx.streaming;
-            options.sheet_filter = common.sheets.as_deref().map(parse_sheet_filter);
+            options.sheet_filter =
+                build_sheet_filter(common.sheets.as_deref(), common.pages.as_deref())?;
             options.include.document_properties = common.include.document_properties
                 || common.output_format() == OutputFormatArg::Json;
             options.trim.empty_edges = matches!(common.markdown_style, MarkdownStyleArg::Compact);
@@ -454,6 +455,25 @@ fn parse_sheet_filter(spec: &str) -> SheetFilter {
         }
     }
     filter
+}
+
+fn build_sheet_filter(
+    sheets_spec: Option<&str>,
+    pages_spec: Option<&str>,
+) -> Result<Option<SheetFilter>, String> {
+    let mut filter = sheets_spec.map(parse_sheet_filter).unwrap_or_default();
+
+    if let Some(pages_spec) = pages_spec {
+        for index in parse_number_ranges(pages_spec)? {
+            filter.indices_1_based.insert(index);
+        }
+    }
+
+    if filter.names.is_empty() && filter.indices_1_based.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(filter))
+    }
 }
 
 fn parse_number_ranges(spec: &str) -> Result<Vec<usize>, String> {
@@ -765,11 +785,18 @@ fn default_output_path(input: &Path, output_format: OutputFormatArg) -> PathBuf 
     out
 }
 
+fn validate_xlsx_markdown_fast_path(common: &CommonOptions) -> Result<(), String> {
+    if common.slides.is_some() {
+        return Err("--slides can only be used with PPTX files".to_string());
+    }
+
+    Ok(())
+}
+
 fn extract_markdown_from_file(path: &Path, common: &CommonOptions) -> Result<String, String> {
     let bytes =
         std::fs::read(path).map_err(|e| format!("failed to read '{}': {e}", path.display()))?;
     let resolved = resolve_format(&bytes, Some(path), common.format)?;
-    let doc = extract_ir_document(&bytes, resolved, common)?;
 
     // Force markdown output regardless of --output-format
     let markdown_profile = match common.markdown_style {
@@ -788,7 +815,24 @@ fn extract_markdown_from_file(path: &Path, common: &CommonOptions) -> Result<Str
         },
         markdown_profile,
     };
-    let md = officemd_markdown::render_document_with_options(&doc, options);
+    let md = if resolved == DocumentFormat::Xlsx {
+        validate_xlsx_markdown_fast_path(common)?;
+
+        let mut extract_options = XlsxExtractOptions::default();
+        extract_options.text.style_aware_values = common.xlsx.style_aware;
+        extract_options.text.streaming_rows = common.xlsx.streaming;
+        extract_options.sheet_filter =
+            build_sheet_filter(common.sheets.as_deref(), common.pages.as_deref())?;
+        extract_options.include.document_properties = common.include.document_properties;
+        extract_options.trim.empty_edges =
+            matches!(common.markdown_style, MarkdownStyleArg::Compact);
+
+        officemd_xlsx::markdown_from_bytes_with_extract_options(&bytes, options, &extract_options)
+            .map_err(|e| e.to_string())?
+    } else {
+        let doc = extract_ir_document(&bytes, resolved, common)?;
+        officemd_markdown::render_document_with_options(&doc, options)
+    };
 
     // --pages for XLSX/CSV acts as sheet index selector: hint users to use --sheets
     if common.pages.is_some()
@@ -1274,6 +1318,25 @@ mod tests {
         let markdown = render_output(&doc, &common).expect("render markdown");
         assert!(markdown.contains("## Sheet: Summary"));
         assert!(markdown.contains("## Sheet: Data"));
+    }
+
+    #[test]
+    fn xlsx_markdown_fast_path_rejects_slides_option() {
+        let content = build_test_xlsx_for_inspect();
+        let mut path = std::env::temp_dir();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        path.push(format!("officemd-test-{unique}.xlsx"));
+        std::fs::write(&path, content).expect("write xlsx fixture");
+
+        let mut common = markdown_common_options();
+        common.slides = Some("1".to_string());
+        let err = extract_markdown_from_file(&path, &common).expect_err("slides should fail");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(err, "--slides can only be used with PPTX files");
     }
 
     #[test]

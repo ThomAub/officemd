@@ -192,7 +192,7 @@ pub fn extract_tables_ir_with_options(
 
 /// Strip trailing all-empty rows from the bottom and trailing all-empty
 /// columns from the right of the grid.
-fn trim_grid(grid: &mut SheetTextGrid) {
+pub(crate) fn trim_grid(grid: &mut SheetTextGrid) {
     // 1. Remove trailing all-empty rows.
     while grid
         .rows
@@ -288,7 +288,7 @@ pub fn extract_tables_ir_json_with_options(
 }
 
 /// Convert column number (1-based) to Excel column name (A, B, ..., AA).
-fn col_to_name(mut n: usize) -> String {
+pub(crate) fn col_to_name(mut n: usize) -> String {
     let mut reversed = Vec::new();
     while n > 0 {
         let rem = (n - 1) % 26;
@@ -300,7 +300,7 @@ fn col_to_name(mut n: usize) -> String {
     reversed.into_iter().rev().collect()
 }
 
-fn extract_props_map(
+pub(crate) fn extract_props_map(
     package: &mut OpcPackage<'_>,
     path: &str,
 ) -> Result<std::collections::HashMap<String, String>, XlsxError> {
