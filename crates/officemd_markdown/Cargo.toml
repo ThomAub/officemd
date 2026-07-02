@@ -1,6 +1,6 @@
 [package]
 name = "officemd_markdown"
-version = "0.1.7"
+version = "0.1.8"
 edition.workspace = true
 description = "Markdown renderer for OfficeMD document IR"
 license = "MIT"
