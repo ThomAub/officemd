@@ -187,6 +187,15 @@ enum Command {
         common: CommonOptions,
     },
 
+    /// Emit an agent-friendly parsing plan with follow-up commands.
+    Plan {
+        /// Input document path (.docx/.xlsx/.csv/.pptx/.pdf).
+        input: PathBuf,
+
+        #[command(flatten)]
+        common: CommonOptions,
+    },
+
     /// Create an Office document from markdown input.
     ///
     /// Reads officemd-flavored markdown and generates a .docx, .xlsx, or .pptx
@@ -295,6 +304,50 @@ struct PdfInfo {
     page_count: usize,
     pages_needing_ocr: Vec<usize>,
     has_encoding_issues: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentParsePlan {
+    format: String,
+    input: String,
+    inspect: InspectInfo,
+    commands: AgentCommandSet,
+    selectors: Vec<AgentSelector>,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentCommandSet {
+    inspect_json: Vec<String>,
+    extract_markdown: Vec<String>,
+    extract_json: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentSelector {
+    kind: String,
+    flag: String,
+    values: Vec<AgentSelectorValue>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentSelectorValue {
+    value: String,
+    label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rows: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cols: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    has_notes: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    comment_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    needs_ocr: Option<bool>,
+    extract_markdown: Vec<String>,
+    extract_json: Vec<String>,
 }
 
 impl CommonOptions {
@@ -424,7 +477,13 @@ fn extract_ir_document(
             officemd_pptx::extract_ir_with_options(content, options).map_err(|e| e.to_string())?
         }
         DocumentFormat::Pdf => {
-            officemd_pdf::extract_ir_force(content, common.pdf.force).map_err(|e| e.to_string())?
+            let page_numbers = common
+                .pages
+                .as_deref()
+                .map(parse_positive_u32_ranges)
+                .transpose()?;
+            officemd_pdf::extract_ir_force_pages(content, common.pdf.force, page_numbers.as_deref())
+                .map_err(|e| e.to_string())?
         }
     };
 
@@ -521,6 +580,19 @@ fn parse_number_ranges(spec: &str) -> Result<Vec<usize>, String> {
         }
     }
     Ok(numbers)
+}
+
+fn parse_positive_u32_ranges(spec: &str) -> Result<Vec<u32>, String> {
+    parse_number_ranges(spec)?
+        .into_iter()
+        .map(|n| {
+            if n == 0 {
+                Err("page numbers must be >= 1".to_string())
+            } else {
+                u32::try_from(n).map_err(|_| format!("page number {n} is too large"))
+            }
+        })
+        .collect()
 }
 
 fn render_output(doc: &OoxmlDocument, common: &CommonOptions) -> Result<String, String> {
@@ -768,6 +840,355 @@ fn render_inspect_text(info: &InspectInfo) -> String {
     out
 }
 
+fn build_agent_plan(
+    input: &Path,
+    resolved: DocumentFormat,
+    common: &CommonOptions,
+    inspect: InspectInfo,
+) -> AgentParsePlan {
+    let input_label = input.display().to_string();
+    let format_label = resolved.to_string();
+    let commands = AgentCommandSet {
+        inspect_json: build_extract_command(
+            "inspect",
+            &input_label,
+            resolved,
+            common,
+            OutputFormatArg::Json,
+            None,
+        ),
+        extract_markdown: build_extract_command(
+            "stream",
+            &input_label,
+            resolved,
+            common,
+            OutputFormatArg::Markdown,
+            None,
+        ),
+        extract_json: build_extract_command(
+            "stream",
+            &input_label,
+            resolved,
+            common,
+            OutputFormatArg::Json,
+            None,
+        ),
+    };
+
+    let selectors = build_agent_selectors(&input_label, resolved, common, &inspect);
+    let warnings = build_agent_warnings(&inspect);
+
+    AgentParsePlan {
+        format: format_label,
+        input: input_label,
+        inspect,
+        commands,
+        selectors,
+        warnings,
+    }
+}
+
+fn build_agent_selectors(
+    input_label: &str,
+    resolved: DocumentFormat,
+    common: &CommonOptions,
+    inspect: &InspectInfo,
+) -> Vec<AgentSelector> {
+    match resolved {
+        DocumentFormat::Xlsx => inspect.sheets.as_ref().map_or_else(Vec::new, |sheets| {
+            vec![AgentSelector {
+                kind: "sheet".to_string(),
+                flag: "--sheets".to_string(),
+                values: sheets
+                    .iter()
+                    .enumerate()
+                    .map(|(index, sheet)| {
+                        let value = (index + 1).to_string();
+                        AgentSelectorValue {
+                            value: value.clone(),
+                            label: sheet.name.clone(),
+                            rows: Some(sheet.rows),
+                            cols: Some(sheet.cols),
+                            title: None,
+                            has_notes: None,
+                            comment_count: None,
+                            needs_ocr: None,
+                            extract_markdown: build_extract_command(
+                                "stream",
+                                input_label,
+                                resolved,
+                                common,
+                                OutputFormatArg::Markdown,
+                                Some(("--sheets", &value)),
+                            ),
+                            extract_json: build_extract_command(
+                                "stream",
+                                input_label,
+                                resolved,
+                                common,
+                                OutputFormatArg::Json,
+                                Some(("--sheets", &value)),
+                            ),
+                        }
+                    })
+                    .collect(),
+            }]
+        }),
+        DocumentFormat::Pptx => inspect.slides.as_ref().map_or_else(Vec::new, |slides| {
+            vec![AgentSelector {
+                kind: "slide".to_string(),
+                flag: "--slides".to_string(),
+                values: slides
+                    .iter()
+                    .map(|slide| {
+                        let value = slide.number.to_string();
+                        AgentSelectorValue {
+                            value: value.clone(),
+                            label: slide
+                                .title
+                                .clone()
+                                .unwrap_or_else(|| format!("Slide {}", slide.number)),
+                            rows: None,
+                            cols: None,
+                            title: slide.title.clone(),
+                            has_notes: Some(slide.has_notes),
+                            comment_count: Some(slide.comment_count),
+                            needs_ocr: None,
+                            extract_markdown: build_extract_command(
+                                "stream",
+                                input_label,
+                                resolved,
+                                common,
+                                OutputFormatArg::Markdown,
+                                Some(("--slides", &value)),
+                            ),
+                            extract_json: build_extract_command(
+                                "stream",
+                                input_label,
+                                resolved,
+                                common,
+                                OutputFormatArg::Json,
+                                Some(("--slides", &value)),
+                            ),
+                        }
+                    })
+                    .collect(),
+            }]
+        }),
+        DocumentFormat::Pdf => inspect.pdf.as_ref().map_or_else(Vec::new, |pdf| {
+            if pdf.page_count == 0 {
+                return Vec::new();
+            }
+
+            let mut values = vec![pdf_page_selector_value(
+                input_label,
+                resolved,
+                common,
+                "1",
+                "first page",
+                pdf.pages_needing_ocr.contains(&1),
+            )];
+
+            if pdf.page_count > 1 {
+                let all_pages = format!("1-{}", pdf.page_count);
+                values.push(pdf_page_selector_value(
+                    input_label,
+                    resolved,
+                    common,
+                    &all_pages,
+                    "all pages",
+                    false,
+                ));
+            }
+
+            if !pdf.pages_needing_ocr.is_empty() {
+                let ocr_pages = pdf
+                    .pages_needing_ocr
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                values.push(pdf_page_selector_value(
+                    input_label,
+                    resolved,
+                    common,
+                    &ocr_pages,
+                    "pages needing OCR",
+                    true,
+                ));
+            }
+
+            vec![AgentSelector {
+                kind: "page".to_string(),
+                flag: "--pages".to_string(),
+                values,
+            }]
+        }),
+        DocumentFormat::Docx | DocumentFormat::Csv => Vec::new(),
+    }
+}
+
+fn pdf_page_selector_value(
+    input_label: &str,
+    resolved: DocumentFormat,
+    common: &CommonOptions,
+    value: &str,
+    label: &str,
+    needs_ocr: bool,
+) -> AgentSelectorValue {
+    AgentSelectorValue {
+        value: value.to_string(),
+        label: label.to_string(),
+        rows: None,
+        cols: None,
+        title: None,
+        has_notes: None,
+        comment_count: None,
+        needs_ocr: Some(needs_ocr),
+        extract_markdown: build_extract_command(
+            "stream",
+            input_label,
+            resolved,
+            common,
+            OutputFormatArg::Markdown,
+            Some(("--pages", value)),
+        ),
+        extract_json: build_extract_command(
+            "stream",
+            input_label,
+            resolved,
+            common,
+            OutputFormatArg::Json,
+            Some(("--pages", value)),
+        ),
+    }
+}
+
+fn build_agent_warnings(inspect: &InspectInfo) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if let Some(pdf) = &inspect.pdf {
+        if !pdf.pages_needing_ocr.is_empty() {
+            warnings.push(format!(
+                "PDF has pages that likely need OCR: {}",
+                pdf.pages_needing_ocr
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if pdf.has_encoding_issues {
+            warnings.push("PDF has font encoding issues; extracted text may be unreliable".into());
+        }
+    }
+    warnings
+}
+
+fn build_extract_command(
+    command: &str,
+    input_label: &str,
+    resolved: DocumentFormat,
+    common: &CommonOptions,
+    output_format: OutputFormatArg,
+    selector: Option<(&str, &str)>,
+) -> Vec<String> {
+    let mut args = vec![
+        "officemd".to_string(),
+        command.to_string(),
+        input_label.to_string(),
+        "--format".to_string(),
+        resolved.to_string(),
+        "--output-format".to_string(),
+        match output_format {
+            OutputFormatArg::Markdown => "markdown".to_string(),
+            OutputFormatArg::Json => "json".to_string(),
+        },
+    ];
+
+    if output_format == OutputFormatArg::Json || common.output.pretty {
+        args.push("--pretty".to_string());
+    }
+
+    push_agent_common_flags(&mut args, resolved, common, selector);
+    args
+}
+
+fn push_agent_common_flags(
+    args: &mut Vec<String>,
+    resolved: DocumentFormat,
+    common: &CommonOptions,
+    selector: Option<(&str, &str)>,
+) {
+    if let Some((flag, value)) = selector {
+        args.push(flag.to_string());
+        args.push(value.to_string());
+    } else {
+        match resolved {
+            DocumentFormat::Xlsx => {
+                if let Some(sheets) = &common.sheets {
+                    args.push("--sheets".to_string());
+                    args.push(sheets.clone());
+                }
+                if let Some(pages) = &common.pages {
+                    args.push("--pages".to_string());
+                    args.push(pages.clone());
+                }
+            }
+            DocumentFormat::Pptx => {
+                if let Some(slides) = &common.slides {
+                    args.push("--slides".to_string());
+                    args.push(slides.clone());
+                } else if let Some(pages) = &common.pages {
+                    args.push("--pages".to_string());
+                    args.push(pages.clone());
+                }
+            }
+            DocumentFormat::Pdf => {
+                if let Some(pages) = &common.pages {
+                    args.push("--pages".to_string());
+                    args.push(pages.clone());
+                }
+            }
+            DocumentFormat::Docx | DocumentFormat::Csv => {}
+        }
+    }
+
+    if common.pdf.force && resolved == DocumentFormat::Pdf {
+        args.push("--force".to_string());
+    }
+    if common.xlsx.style_aware && resolved == DocumentFormat::Xlsx {
+        args.push("--style-aware".to_string());
+    }
+    if common.xlsx.streaming && resolved == DocumentFormat::Xlsx {
+        args.push("--streaming".to_string());
+    }
+    if common.include.document_properties {
+        args.push("--include-document-properties".to_string());
+    }
+    if common.include.no_headers_footers {
+        args.push("--no-headers-footers".to_string());
+    }
+    if common.include.no_formulas {
+        args.push("--no-formulas".to_string());
+    }
+    if common.include.no_frontmatter {
+        args.push("--no-frontmatter".to_string());
+    }
+    if common.table.no_first_row_header {
+        args.push("--no-first-row-header".to_string());
+    }
+    if common.markdown_style != MarkdownStyleArg::Compact {
+        args.push("--markdown-style".to_string());
+        args.push(
+            match common.markdown_style {
+                MarkdownStyleArg::Compact => "compact",
+                MarkdownStyleArg::Human => "human",
+            }
+            .to_string(),
+        );
+    }
+}
+
 fn read_all_from_stdin() -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     std::io::stdin()
@@ -834,11 +1255,8 @@ fn extract_markdown_from_file(path: &Path, common: &CommonOptions) -> Result<Str
         officemd_markdown::render_document_with_options(&doc, options)
     };
 
-    // --pages for XLSX/CSV acts as sheet index selector: hint users to use --sheets
-    if common.pages.is_some()
-        && (resolved == DocumentFormat::Xlsx || resolved == DocumentFormat::Csv)
-    {
-        eprintln!("Hint: use --sheets for sheet selection with {resolved} files");
+    if common.pages.is_some() && resolved == DocumentFormat::Csv {
+        eprintln!("Hint: use --sheets for sheet selection with csv files");
     }
 
     // Warn about scanned PDFs
@@ -1027,6 +1445,16 @@ fn run_inspect_command(input: &Path, mut common: CommonOptions) -> Result<(), St
     write_stdout(&output)
 }
 
+fn run_plan_command(input: &Path, common: CommonOptions) -> Result<(), String> {
+    let bytes = std::fs::read(input)
+        .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?;
+    let resolved = resolve_format(&bytes, Some(input), common.format)?;
+    let inspect = inspect_input(&bytes, resolved, &common)?;
+    let plan = build_agent_plan(input, resolved, &common, inspect);
+    let output = serde_json::to_string_pretty(&plan).map_err(|e| e.to_string())?;
+    write_stdout(&output)
+}
+
 fn inspect_input(
     bytes: &[u8],
     resolved: DocumentFormat,
@@ -1124,6 +1552,7 @@ fn run() -> Result<(), String> {
         } => run_convert_command(&input, output, common)?,
         Command::Stream { input, common } => run_stream_command(&input, common)?,
         Command::Inspect { input, common } => run_inspect_command(&input, common)?,
+        Command::Plan { input, common } => run_plan_command(&input, common)?,
         Command::Create { output, input } => run_create_command(&output, &input)?,
     }
 
@@ -1300,6 +1729,23 @@ mod tests {
     }
 
     #[test]
+    fn builds_sheet_filter_from_pages_as_indices() {
+        let filter = build_sheet_filter(Some("Summary"), Some("2-3"))
+            .expect("valid sheet filter")
+            .expect("filter");
+        assert!(filter.names.contains("Summary"));
+        assert!(filter.indices_1_based.contains(&2));
+        assert!(filter.indices_1_based.contains(&3));
+    }
+
+    #[test]
+    fn parses_positive_u32_page_ranges() {
+        assert_eq!(parse_positive_u32_ranges("1,3-4").unwrap(), vec![1, 3, 4]);
+        let err = parse_positive_u32_ranges("0").expect_err("zero page should fail");
+        assert!(err.contains(">= 1"));
+    }
+
+    #[test]
     fn builds_xlsx_inspect_info_with_sheet_filter() {
         let content = build_test_xlsx_for_inspect();
         let info = build_xlsx_inspect_info(&content, Some("2")).expect("inspect xlsx");
@@ -1384,5 +1830,83 @@ mod tests {
         assert!(text.contains("PDF Diagnostics"));
         assert!(text.contains("Classification: Scanned"));
         assert!(text.contains("Pages needing OCR: 1, 2"));
+    }
+
+    #[test]
+    fn agent_plan_includes_sheet_selector_commands() {
+        let inspect = InspectInfo {
+            format: "xlsx".to_string(),
+            sections: None,
+            sheets: Some(vec![SheetInfo {
+                name: "Summary".to_string(),
+                rows: 2,
+                cols: 3,
+            }]),
+            slides: None,
+            pdf: None,
+        };
+        let common = markdown_common_options();
+
+        let plan = build_agent_plan(
+            Path::new("book.xlsx"),
+            DocumentFormat::Xlsx,
+            &common,
+            inspect,
+        );
+
+        assert_eq!(plan.format, "xlsx");
+        assert_eq!(plan.selectors.len(), 1);
+        let sheet = &plan.selectors[0].values[0];
+        assert_eq!(sheet.value, "1");
+        assert_eq!(sheet.label, "Summary");
+        assert_eq!(
+            sheet.extract_json,
+            vec![
+                "officemd",
+                "stream",
+                "book.xlsx",
+                "--format",
+                "xlsx",
+                "--output-format",
+                "json",
+                "--pretty",
+                "--sheets",
+                "1",
+            ]
+        );
+    }
+
+    #[test]
+    fn agent_plan_includes_pdf_page_selector_and_ocr_warning() {
+        let inspect = InspectInfo {
+            format: "pdf".to_string(),
+            sections: None,
+            sheets: None,
+            slides: None,
+            pdf: Some(PdfInfo {
+                classification: "Mixed".to_string(),
+                confidence: 0.8,
+                page_count: 3,
+                pages_needing_ocr: vec![2],
+                has_encoding_issues: true,
+            }),
+        };
+        let common = markdown_common_options();
+
+        let plan = build_agent_plan(
+            Path::new("report.pdf"),
+            DocumentFormat::Pdf,
+            &common,
+            inspect,
+        );
+
+        assert_eq!(plan.selectors[0].kind, "page");
+        assert!(
+            plan.selectors[0]
+                .values
+                .iter()
+                .any(|value| value.value == "2" && value.needs_ocr == Some(true))
+        );
+        assert_eq!(plan.warnings.len(), 2);
     }
 }
