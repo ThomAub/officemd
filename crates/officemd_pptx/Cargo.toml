@@ -1,6 +1,6 @@
 [package]
 name = "officemd_pptx"
-version = "0.1.7"
+version = "0.1.8"
 edition.workspace = true
 description = "PPTX extraction for OfficeMD"
 license = "MIT"
@@ -15,7 +15,7 @@ exclude = ["tests/*.py"]
 
 [dependencies]
 officemd_core = { version = "0.1.7", path = "../officemd_core", default-features = false }
-officemd_markdown = { version = "0.1.7", path = "../officemd_markdown" }
+officemd_markdown = { version = "0.1.8", path = "../officemd_markdown" }
 quick-xml = "0.37"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 thiserror = "2.0"
