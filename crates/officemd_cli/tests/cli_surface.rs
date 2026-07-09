@@ -27,16 +27,19 @@ fn top_level_help_snapshot() {
     Usage: officemd [OPTIONS] [COMMAND]
 
     Commands:
-      probe     Probe artifact identity, capabilities, and operational risks
-      markdown  Extract markdown, print to stdout
-      render    Extract markdown, render to terminal with ANSI formatting
-      diff      Diff markdown output of two documents
-      convert   Convert a document file to an output file
-      stream    Stream output to stdout from a file path or stdin
-      inspect   Inspect document metadata without full content rendering
-      plan      Emit an agent-friendly parsing plan with follow-up commands
-      create    Create an Office document from markdown input
-      help      Print this message or the help of the given subcommand(s)
+      probe            Probe artifact identity, capabilities, and operational risks
+      apply            Apply a typed agent patch plan to a new output artifact
+      render-artifact  Render an artifact into visual evidence images when a backend is available
+      verify           Verify semantic, structural, or visual artifact invariants
+      markdown         Extract markdown, print to stdout
+      render           Extract markdown, render to terminal with ANSI formatting
+      diff             Diff markdown output of two documents
+      convert          Convert a document file to an output file
+      stream           Stream output to stdout from a file path or stdin
+      inspect          Inspect document metadata without full content rendering
+      plan             Emit an agent-friendly parsing plan with follow-up commands
+      create           Create an Office document from markdown input
+      help             Print this message or the help of the given subcommand(s)
 
     Options:
           --help-tree [<DEPTH>]  Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
@@ -111,14 +114,14 @@ fn markdown_help_snapshot() {
               Use style-aware cell values for XLSX
           --streaming
               Use streaming row parser for XLSX
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --include-document-properties
               Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-frontmatter
               Omit the leading `<!-- officemd: ... -->` frontmatter comment
           --no-first-row-header
@@ -168,14 +171,14 @@ fn render_help_snapshot() {
               Use style-aware cell values for XLSX
           --streaming
               Use streaming row parser for XLSX
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --include-document-properties
               Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-frontmatter
               Omit the leading `<!-- officemd: ... -->` frontmatter comment
           --no-first-row-header
@@ -226,14 +229,14 @@ fn diff_help_snapshot() {
               Use style-aware cell values for XLSX
           --streaming
               Use streaming row parser for XLSX
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --include-document-properties
               Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-frontmatter
               Omit the leading `<!-- officemd: ... -->` frontmatter comment
           --no-first-row-header
@@ -283,14 +286,14 @@ fn convert_help_snapshot() {
               Force extraction even for scanned/image-based PDFs
           --style-aware
               Use style-aware cell values for XLSX
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --streaming
               Use streaming row parser for XLSX
           --include-document-properties
               Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-formulas
               Omit XLSX formula footnotes from markdown output
           --no-frontmatter
@@ -342,14 +345,14 @@ fn stream_help_snapshot() {
               Use style-aware cell values for XLSX
           --streaming
               Use streaming row parser for XLSX
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --include-document-properties
               Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-frontmatter
               Omit the leading `<!-- officemd: ... -->` frontmatter comment
           --no-first-row-header
@@ -399,14 +402,14 @@ fn inspect_help_snapshot() {
               Use style-aware cell values for XLSX
           --streaming
               Use streaming row parser for XLSX
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --include-document-properties
               Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-frontmatter
               Omit the leading `<!-- officemd: ... -->` frontmatter comment
           --no-first-row-header
@@ -458,14 +461,14 @@ fn plan_help_snapshot() {
               Use style-aware cell values for XLSX
           --streaming
               Use streaming row parser for XLSX
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --include-document-properties
               Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-frontmatter
               Omit the leading `<!-- officemd: ... -->` frontmatter comment
           --no-first-row-header

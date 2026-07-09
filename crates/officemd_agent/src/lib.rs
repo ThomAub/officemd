@@ -1,5 +1,6 @@
 //! Agent-facing OfficeMD artifact services.
 
+pub mod apply;
 pub mod artifact;
 pub mod capability;
 pub mod diagnostic;
@@ -12,6 +13,7 @@ pub mod verify;
 
 use std::path::Path;
 
+pub use apply::{ApplyPatchReport, ApplyPatchStatus, OperationReport, OperationStatus};
 pub use artifact::{AgentDocumentFormat, ArtifactFingerprint, ArtifactRef};
 pub use capability::{
     ArtifactCapabilityReport, ArtifactRisk, MutationKind, RenderBackendKind, RenderCapability,
@@ -24,6 +26,7 @@ pub use inspect::{
     InspectionReport, PdfPageInclude, XlsxRangeInclude,
 };
 pub use locator::{ArtifactLocator, DocxPartLocator, PdfBounds, XlsxCellLocator, XlsxSheetLocator};
+pub use patch_plan::{ApplyPatchRequest, ArtifactPatchPlan, PatchOperation, PatchPlanVersion};
 pub use render::{ArtifactRenderer, PageSelection, RenderReport, RenderRequest, RenderScale};
 pub use verify::{CheckReport, VerificationReport, VerificationStatus, VerifyRequest};
 
@@ -47,5 +50,17 @@ impl AgentService {
 
     pub fn inspect(&self, request: &InspectRequest) -> AgentResult<InspectionReport> {
         inspect::inspect(request)
+    }
+
+    pub fn apply_patch(&self, request: &ApplyPatchRequest) -> AgentResult<ApplyPatchReport> {
+        apply::apply_patch(request)
+    }
+
+    pub fn render(&self, request: &RenderRequest) -> AgentResult<RenderReport> {
+        render::render_unavailable(request)
+    }
+
+    pub fn verify(&self, request: &VerifyRequest) -> AgentResult<VerificationReport> {
+        verify::verify(request)
     }
 }

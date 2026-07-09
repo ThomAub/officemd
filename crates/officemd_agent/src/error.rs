@@ -17,6 +17,8 @@ pub enum AgentError {
     InvalidRequest(String),
     #[error("unsupported capability: {0}")]
     UnsupportedCapability(String),
+    #[error("patch precondition failed: {0}")]
+    PatchPreconditionFailed(String),
     #[error("rendering is unavailable: {0}")]
     RenderUnavailable(String),
     #[error("JSON error: {0}")]

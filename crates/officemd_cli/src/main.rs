@@ -1,5 +1,8 @@
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use officemd_agent::{AgentDocumentFormat, AgentService, InspectQuery, InspectRequest};
+use officemd_agent::{
+    AgentDocumentFormat, AgentService, ApplyPatchRequest, ArtifactPatchPlan, InspectQuery,
+    InspectRequest, RenderRequest, RenderScale, VerificationCheckKind, VerifyRequest,
+};
 use officemd_core::ir::OoxmlDocument;
 use officemd_core::opc::OpcPackage;
 use officemd_pptx::PptxExtractOptions;
@@ -137,6 +140,57 @@ enum Command {
         /// Explicitly set the document format.
         #[arg(long, value_enum)]
         format: Option<FormatArg>,
+    },
+
+    /// Apply a typed agent patch plan to a new output artifact.
+    Apply {
+        /// Input document path (.docx/.xlsx/.pptx).
+        input: PathBuf,
+
+        /// JSON file containing an ArtifactPatchPlan.
+        #[arg(long)]
+        patch: PathBuf,
+
+        /// Output artifact path. Must not already exist.
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Expected SHA-256 fingerprint of the source artifact.
+        #[arg(long)]
+        expected_source_sha256: String,
+
+        #[command(flatten)]
+        output_options: CommonOutputOptions,
+    },
+
+    /// Render an artifact into visual evidence images when a backend is available.
+    RenderArtifact {
+        /// Input document path (.docx/.xlsx/.pptx/.pdf).
+        input: PathBuf,
+
+        /// Directory for rendered image evidence.
+        #[arg(long)]
+        output_dir: PathBuf,
+
+        #[command(flatten)]
+        output: CommonOutputOptions,
+    },
+
+    /// Verify semantic, structural, or visual artifact invariants.
+    Verify {
+        /// Input document path (.docx/.xlsx/.csv/.pptx/.pdf).
+        input: PathBuf,
+
+        /// Comma-separated checks: structure, formula-references, visual-render.
+        #[arg(long)]
+        checks: Option<String>,
+
+        /// Directory for renderer-backed verification evidence.
+        #[arg(long)]
+        render_output_dir: Option<PathBuf>,
+
+        #[command(flatten)]
+        output: CommonOutputOptions,
     },
 
     /// Extract markdown, print to stdout.
@@ -1527,6 +1581,139 @@ fn run_agent_inspect_command(
     write_stdout(&output)
 }
 
+fn run_apply_command(
+    input: &Path,
+    patch_path: &Path,
+    output: &Path,
+    expected_source_sha256: String,
+    output_options: CommonOutputOptions,
+) -> Result<(), String> {
+    let patch_bytes = std::fs::read(patch_path)
+        .map_err(|e| format!("failed to read patch '{}': {e}", patch_path.display()))?;
+    let patch: ArtifactPatchPlan = serde_json::from_slice(&patch_bytes)
+        .map_err(|e| format!("failed to parse patch plan JSON: {e}"))?;
+    let request = ApplyPatchRequest {
+        input: input.to_path_buf(),
+        output: output.to_path_buf(),
+        expected_source_sha256,
+        patch,
+    };
+    let report = AgentService::new()
+        .apply_patch(&request)
+        .map_err(|e| e.to_string())?;
+    let output_text = match output_options
+        .output_format
+        .unwrap_or(OutputFormatArg::Json)
+    {
+        OutputFormatArg::Json if output_options.pretty => {
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        }
+        OutputFormatArg::Json => serde_json::to_string(&report).map_err(|e| e.to_string())?,
+        OutputFormatArg::Markdown => render_apply_text(&report),
+    };
+    write_stdout(&output_text)
+}
+
+fn run_render_artifact_command(
+    input: &Path,
+    output_dir: &Path,
+    output: CommonOutputOptions,
+) -> Result<(), String> {
+    let request = RenderRequest {
+        input: input.to_path_buf(),
+        output_dir: output_dir.to_path_buf(),
+        pages_or_slides: None,
+        scale: RenderScale::Screen,
+    };
+    let report = AgentService::new()
+        .render(&request)
+        .map_err(|e| e.to_string())?;
+    let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
+        OutputFormatArg::Json if output.pretty => {
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        }
+        OutputFormatArg::Json => serde_json::to_string(&report).map_err(|e| e.to_string())?,
+        OutputFormatArg::Markdown => render_render_report_text(&report),
+    };
+    write_stdout(&output_text)
+}
+
+fn run_verify_command(
+    input: &Path,
+    checks: Option<String>,
+    render_output_dir: Option<PathBuf>,
+    output: CommonOutputOptions,
+) -> Result<(), String> {
+    let request = VerifyRequest {
+        input: input.to_path_buf(),
+        checks: parse_verification_checks(checks.as_deref())?,
+        render_output_dir,
+    };
+    let report = AgentService::new()
+        .verify(&request)
+        .map_err(|e| e.to_string())?;
+    let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
+        OutputFormatArg::Json if output.pretty => {
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        }
+        OutputFormatArg::Json => serde_json::to_string(&report).map_err(|e| e.to_string())?,
+        OutputFormatArg::Markdown => render_verify_text(&report),
+    };
+    write_stdout(&output_text)
+}
+
+fn parse_verification_checks(spec: Option<&str>) -> Result<Vec<VerificationCheckKind>, String> {
+    let Some(spec) = spec else {
+        return Ok(vec![VerificationCheckKind::Structure]);
+    };
+    spec.split(',')
+        .map(|raw| match raw.trim() {
+            "structure" => Ok(VerificationCheckKind::Structure),
+            "formula-references" | "formula_references" => {
+                Ok(VerificationCheckKind::FormulaReferences)
+            }
+            "visual-render" | "visual_render" => Ok(VerificationCheckKind::VisualRender),
+            value => Err(format!(
+                "unknown verification check '{value}' (expected structure, formula-references, visual-render)"
+            )),
+        })
+        .collect()
+}
+
+fn render_apply_text(report: &officemd_agent::ApplyPatchReport) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Status: {:?}", report.status);
+    let _ = writeln!(out, "Source: {}", report.source.path.display());
+    if let Some(output) = &report.output {
+        let _ = writeln!(out, "Output: {}", output.path.display());
+    }
+    let _ = writeln!(out, "Operations: {}", report.operations.len());
+    out
+}
+
+fn render_render_report_text(report: &officemd_agent::RenderReport) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Backend: {:?}", report.backend);
+    let _ = writeln!(out, "Images: {}", report.images.len());
+    for diagnostic in &report.diagnostics {
+        let _ = writeln!(out, "{}: {}", diagnostic.code, diagnostic.message);
+    }
+    out
+}
+
+fn render_verify_text(report: &officemd_agent::VerificationReport) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Status: {:?}", report.status);
+    for check in &report.checks {
+        let _ = writeln!(
+            out,
+            "{:?}: {:?} - {}",
+            check.kind, check.status, check.message
+        );
+    }
+    out
+}
+
 fn render_agent_probe_text(report: &officemd_agent::InspectionReport) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "Format: {}", report.artifact.format);
@@ -1645,6 +1832,30 @@ fn run() -> Result<(), String> {
             output,
             format,
         } => run_probe_command(&input, output, format)?,
+        Command::Apply {
+            input,
+            patch,
+            output,
+            expected_source_sha256,
+            output_options,
+        } => run_apply_command(
+            &input,
+            &patch,
+            &output,
+            expected_source_sha256,
+            output_options,
+        )?,
+        Command::RenderArtifact {
+            input,
+            output_dir,
+            output,
+        } => run_render_artifact_command(&input, &output_dir, output)?,
+        Command::Verify {
+            input,
+            checks,
+            render_output_dir,
+            output,
+        } => run_verify_command(&input, checks, render_output_dir, output)?,
         Command::Markdown { file, common } | Command::Render { file, common } => {
             run_markdown_command(&file, &common)?;
         }
