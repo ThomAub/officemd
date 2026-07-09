@@ -27,6 +27,7 @@ fn top_level_help_snapshot() {
     Usage: officemd [OPTIONS] [COMMAND]
 
     Commands:
+      probe     Probe artifact identity, capabilities, and operational risks
       markdown  Extract markdown, print to stdout
       render    Extract markdown, render to terminal with ANSI formatting
       diff      Diff markdown output of two documents
@@ -44,6 +45,34 @@ fn top_level_help_snapshot() {
 
     ----- stderr -----
     "###,
+    );
+}
+
+#[test]
+fn probe_help_snapshot() {
+    let _guard = bind_common_filters();
+    assert_cmd_snapshot!(
+        cli().args(["probe", "--help"]),
+        @r#"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    Probe artifact identity, capabilities, and operational risks
+
+    Usage: officemd probe [OPTIONS] <INPUT>
+
+    Arguments:
+      <INPUT>  Input document path (.docx/.xlsx/.csv/.pptx/.pdf)
+
+    Options:
+          --output-format <OUTPUT_FORMAT>  Output format: markdown (default) or json [possible values: markdown, json]
+          --pretty                         Pretty-print JSON output
+          --format <FORMAT>                Explicitly set the document format [possible values: docx, xlsx, csv, pptx, pdf]
+          --help-tree [<DEPTH>]            Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
+      -h, --help                           Print help
+
+    ----- stderr -----
+    "#,
     );
 }
 
@@ -80,10 +109,10 @@ fn markdown_help_snapshot() {
               Force extraction even for scanned/image-based PDFs
           --style-aware
               Use style-aware cell values for XLSX
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --streaming
               Use streaming row parser for XLSX
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --include-document-properties
               Include document properties in markdown output
           --no-headers-footers
@@ -137,10 +166,10 @@ fn render_help_snapshot() {
               Force extraction even for scanned/image-based PDFs
           --style-aware
               Use style-aware cell values for XLSX
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --streaming
               Use streaming row parser for XLSX
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --include-document-properties
               Include document properties in markdown output
           --no-headers-footers
@@ -195,10 +224,10 @@ fn diff_help_snapshot() {
               Force extraction even for scanned/image-based PDFs
           --style-aware
               Use style-aware cell values for XLSX
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --streaming
               Use streaming row parser for XLSX
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --include-document-properties
               Include document properties in markdown output
           --no-headers-footers
@@ -252,10 +281,10 @@ fn convert_help_snapshot() {
               Filter PPTX slides by number or range (e.g. "1-3,5")
           --force
               Force extraction even for scanned/image-based PDFs
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --style-aware
               Use style-aware cell values for XLSX
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --streaming
               Use streaming row parser for XLSX
           --include-document-properties
@@ -311,10 +340,10 @@ fn stream_help_snapshot() {
               Force extraction even for scanned/image-based PDFs
           --style-aware
               Use style-aware cell values for XLSX
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --streaming
               Use streaming row parser for XLSX
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --include-document-properties
               Include document properties in markdown output
           --no-headers-footers
@@ -368,10 +397,10 @@ fn inspect_help_snapshot() {
               Force extraction even for scanned/image-based PDFs
           --style-aware
               Use style-aware cell values for XLSX
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --streaming
               Use streaming row parser for XLSX
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --include-document-properties
               Include document properties in markdown output
           --no-headers-footers
@@ -384,6 +413,8 @@ fn inspect_help_snapshot() {
               Use synthetic Col1/Col2 headers instead of first data row
           --markdown-style <MARKDOWN_STYLE>
               Markdown style profile [default: compact] [possible values: compact, human]
+          --agent-query <AGENT_QUERY>
+              JSON file containing an agent InspectQuery
       -h, --help
               Print help
 
@@ -425,10 +456,10 @@ fn plan_help_snapshot() {
               Force extraction even for scanned/image-based PDFs
           --style-aware
               Use style-aware cell values for XLSX
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --streaming
               Use streaming row parser for XLSX
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --include-document-properties
               Include document properties in markdown output
           --no-headers-footers

@@ -1,4 +1,5 @@
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use officemd_agent::{AgentDocumentFormat, AgentService, InspectQuery, InspectRequest};
 use officemd_core::ir::OoxmlDocument;
 use officemd_core::opc::OpcPackage;
 use officemd_pptx::PptxExtractOptions;
@@ -125,6 +126,19 @@ struct MarkdownTableCliOptions {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Probe artifact identity, capabilities, and operational risks.
+    Probe {
+        /// Input document path (.docx/.xlsx/.csv/.pptx/.pdf).
+        input: PathBuf,
+
+        #[command(flatten)]
+        output: CommonOutputOptions,
+
+        /// Explicitly set the document format.
+        #[arg(long, value_enum)]
+        format: Option<FormatArg>,
+    },
+
     /// Extract markdown, print to stdout.
     Markdown {
         /// Path to an input document.
@@ -185,6 +199,10 @@ enum Command {
 
         #[command(flatten)]
         common: CommonOptions,
+
+        /// JSON file containing an agent InspectQuery.
+        #[arg(long)]
+        agent_query: Option<PathBuf>,
     },
 
     /// Emit an agent-friendly parsing plan with follow-up commands.
@@ -246,6 +264,18 @@ enum DocumentFormat {
 }
 
 impl From<FormatArg> for DocumentFormat {
+    fn from(value: FormatArg) -> Self {
+        match value {
+            FormatArg::Docx => Self::Docx,
+            FormatArg::Xlsx => Self::Xlsx,
+            FormatArg::Csv => Self::Csv,
+            FormatArg::Pptx => Self::Pptx,
+            FormatArg::Pdf => Self::Pdf,
+        }
+    }
+}
+
+impl From<FormatArg> for AgentDocumentFormat {
     fn from(value: FormatArg) -> Self {
         match value {
             FormatArg::Docx => Self::Docx,
@@ -1445,6 +1475,79 @@ fn run_inspect_command(input: &Path, mut common: CommonOptions) -> Result<(), St
     write_stdout(&output)
 }
 
+fn run_probe_command(
+    input: &Path,
+    output: CommonOutputOptions,
+    format: Option<FormatArg>,
+) -> Result<(), String> {
+    let service = AgentService::new();
+    let request = InspectRequest {
+        input: input.to_path_buf(),
+        format: format.map(AgentDocumentFormat::from),
+        query: InspectQuery::DocumentSummary,
+    };
+    let report = service.inspect(&request).map_err(|e| e.to_string())?;
+    let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
+        OutputFormatArg::Json if output.pretty => {
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        }
+        OutputFormatArg::Json => serde_json::to_string(&report).map_err(|e| e.to_string())?,
+        OutputFormatArg::Markdown => render_agent_probe_text(&report),
+    };
+    write_stdout(&output_text)
+}
+
+fn run_agent_inspect_command(
+    input: &Path,
+    common: CommonOptions,
+    agent_query: &Path,
+) -> Result<(), String> {
+    let query_bytes = std::fs::read(agent_query).map_err(|e| {
+        format!(
+            "failed to read agent query '{}': {e}",
+            agent_query.display()
+        )
+    })?;
+    let query: InspectQuery = serde_json::from_slice(&query_bytes)
+        .map_err(|e| format!("failed to parse agent query JSON: {e}"))?;
+    let service = AgentService::new();
+    let request = InspectRequest {
+        input: input.to_path_buf(),
+        format: common.format.map(AgentDocumentFormat::from),
+        query,
+    };
+    let report = service.inspect(&request).map_err(|e| e.to_string())?;
+    let output = match common.output_format() {
+        OutputFormatArg::Json if common.output.pretty => {
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        }
+        OutputFormatArg::Json => serde_json::to_string(&report).map_err(|e| e.to_string())?,
+        OutputFormatArg::Markdown => render_agent_probe_text(&report),
+    };
+    write_stdout(&output)
+}
+
+fn render_agent_probe_text(report: &officemd_agent::InspectionReport) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Format: {}", report.artifact.format);
+    let _ = writeln!(out, "SHA-256: {}", report.artifact.fingerprint.sha256);
+    let _ = writeln!(out, "Bytes: {}", report.artifact.fingerprint.byte_length);
+    let _ = writeln!(out, "Readable: {}", report.capability.readable);
+    if report.capability.mutable_operations.is_empty() {
+        out.push_str("Mutable operations: none\n");
+    } else {
+        let operations = report
+            .capability
+            .mutable_operations
+            .iter()
+            .map(|op| format!("{op:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(out, "Mutable operations: {operations}");
+    }
+    out
+}
+
 fn run_plan_command(input: &Path, common: CommonOptions) -> Result<(), String> {
     let bytes = std::fs::read(input)
         .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?;
@@ -1537,6 +1640,11 @@ fn run() -> Result<(), String> {
     })?;
 
     match command {
+        Command::Probe {
+            input,
+            output,
+            format,
+        } => run_probe_command(&input, output, format)?,
         Command::Markdown { file, common } | Command::Render { file, common } => {
             run_markdown_command(&file, &common)?;
         }
@@ -1551,7 +1659,17 @@ fn run() -> Result<(), String> {
             common,
         } => run_convert_command(&input, output, common)?,
         Command::Stream { input, common } => run_stream_command(&input, common)?,
-        Command::Inspect { input, common } => run_inspect_command(&input, common)?,
+        Command::Inspect {
+            input,
+            common,
+            agent_query,
+        } => {
+            if let Some(agent_query) = agent_query {
+                run_agent_inspect_command(&input, common, &agent_query)?;
+            } else {
+                run_inspect_command(&input, common)?;
+            }
+        }
         Command::Plan { input, common } => run_plan_command(&input, common)?,
         Command::Create { output, input } => run_create_command(&output, &input)?,
     }

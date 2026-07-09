@@ -910,6 +910,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "officemd_agent"
+version = "0.1.8"
+dependencies = [
+ "officemd_core",
+ "officemd_csv",
+ "officemd_docx",
+ "officemd_pdf",
+ "officemd_pptx",
+ "officemd_xlsx",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "officemd_cli"
 version = "0.1.8"
 dependencies = [
@@ -917,12 +933,14 @@ dependencies = [
  "clap-ai",
  "insta",
  "insta-cmd",
+ "officemd_agent",
  "officemd_core",
  "officemd_csv",
  "officemd_docx",
  "officemd_markdown",
  "officemd_pdf",
  "officemd_pptx",
+ "officemd_renderer",
  "officemd_xlsx",
  "serde",
  "serde_json",
@@ -1067,6 +1085,13 @@ dependencies = [
  "rayon",
  "serde_json",
  "zip",
+]
+
+[[package]]
+name = "officemd_renderer"
+version = "0.1.8"
+dependencies = [
+ "officemd_agent",
 ]
 
 [[package]]
