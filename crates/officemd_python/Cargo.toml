@@ -31,7 +31,7 @@ officemd_docx = { version = "0.1.8", path = "../officemd_docx" }
 officemd_xlsx = { version = "0.1.8", path = "../officemd_xlsx" }
 officemd_csv = { version = "0.1.8", path = "../officemd_csv" }
 officemd_pptx = { version = "0.1.8", path = "../officemd_pptx" }
-officemd_pdf = { version = "0.1.8", path = "../officemd_pdf" }
+officemd_pdf = { version = "0.1.9", path = "../officemd_pdf" }
 officemd_markdown = { version = "0.1.8", path = "../officemd_markdown" }
 officemd_docling = { version = "0.1.7", path = "../officemd_docling" }
 
