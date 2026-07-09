@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.9] - 2026-07-09
+
+
 ## [0.1.8] - 2026-07-02
 
 ### Miscellaneous
