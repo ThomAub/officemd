@@ -1,9 +1,15 @@
-use std::path::Path;
+use std::{
+    collections::BTreeMap,
+    io::{Cursor, Read, Write},
+    path::Path,
+    sync::LazyLock,
+};
 
 use officemd_core::{
-    DocxPatch, DocxTextScope, PptxPatch, PptxTextScope, ScopedDocxReplace, ScopedPptxReplace,
-    ScopedXlsxReplace, TextReplace, XlsxPatch, XlsxSheetRename, XlsxTextScope,
+    PptxPatch, PptxTextScope, ScopedPptxReplace, ScopedXlsxReplace, TextReplace, XlsxPatch,
+    XlsxSheetRename, XlsxTextScope,
 };
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -128,25 +134,31 @@ fn apply_docx(
     source_bytes: &[u8],
     operations: &[PatchOperation],
 ) -> AgentResult<(Vec<u8>, Vec<OperationReport>)> {
-    let mut patch = DocxPatch::default();
     let mut reports = Vec::new();
+    let mut patched_bytes = source_bytes.to_vec();
     for (index, operation) in operations.iter().enumerate() {
         match operation {
             PatchOperation::ReplaceText {
                 target,
                 expected_text,
                 replacement,
-                preserve_formatting,
+                preserve_formatting: _,
             } if matches!(
                 target,
                 ArtifactLocator::DocxParagraph { .. } | ArtifactLocator::DocxTableCell { .. }
             ) =>
             {
-                patch.scoped_replacements.push(ScopedDocxReplace {
-                    scope: DocxTextScope::AllText,
-                    replace: TextReplace::all(expected_text, replacement)
-                        .with_preserve_formatting(*preserve_formatting),
-                });
+                let replacements = apply_docx_locator_replace(
+                    &mut patched_bytes,
+                    target,
+                    expected_text,
+                    replacement,
+                )?;
+                if replacements == 0 {
+                    return Err(AgentError::PatchPreconditionFailed(
+                        "no DOCX replacement matched expected text at locator".to_string(),
+                    ));
+                }
                 reports.push(operation_report(
                     index,
                     MutationKind::ReplaceText,
@@ -164,15 +176,230 @@ fn apply_docx(
     {
         return Ok((source_bytes.to_vec(), reports));
     }
-    let patched = officemd_core::patch_docx_with_report(source_bytes, &patch)
-        .map_err(|e| AgentError::Extraction(e.to_string()))?;
-    if patched.report.replacements_applied == 0 && !operations.is_empty() {
-        return Err(AgentError::PatchPreconditionFailed(
-            "no DOCX replacement matched expected text".to_string(),
-        ));
-    }
-    Ok((patched.content, reports))
+    Ok((patched_bytes, reports))
 }
+
+fn apply_docx_locator_replace(
+    content: &mut Vec<u8>,
+    target: &ArtifactLocator,
+    expected_text: &str,
+    replacement: &str,
+) -> AgentResult<usize> {
+    let (part, updated, replacements) = {
+        let parts = read_zip_parts(content)?;
+        let part = docx_locator_part(target)?;
+        let xml = parts
+            .get(&part)
+            .ok_or_else(|| AgentError::InvalidRequest(format!("DOCX part not found: {part}")))?;
+        let xml = String::from_utf8_lossy(xml);
+        let (updated, replacements) = match target {
+            ArtifactLocator::DocxParagraph {
+                paragraph_index, ..
+            } => replace_docx_paragraph(&xml, *paragraph_index, expected_text, replacement),
+            ArtifactLocator::DocxTableCell {
+                table_index,
+                row_index,
+                column_index,
+                ..
+            } => replace_docx_table_cell(
+                &xml,
+                *table_index,
+                *row_index,
+                *column_index,
+                expected_text,
+                replacement,
+            ),
+            _ => {
+                return Err(AgentError::InvalidRequest(
+                    "target must be a DOCX locator".into(),
+                ));
+            }
+        };
+        (part, updated, replacements)
+    };
+
+    if replacements > 0 {
+        replace_zip_part(content, &part, updated.as_bytes())?;
+    }
+    Ok(replacements)
+}
+
+fn docx_locator_part(target: &ArtifactLocator) -> AgentResult<String> {
+    let part = match target {
+        ArtifactLocator::DocxParagraph { part, .. }
+        | ArtifactLocator::DocxTableCell { part, .. } => part.part.as_str(),
+        _ => {
+            return Err(AgentError::InvalidRequest(
+                "target must be a DOCX locator".into(),
+            ));
+        }
+    };
+    Ok(match part {
+        "body" | "document" => "word/document.xml".to_string(),
+        "footnotes" => "word/footnotes.xml".to_string(),
+        "endnotes" => "word/endnotes.xml".to_string(),
+        path if path.starts_with("word/") => path.to_string(),
+        name => format!("word/{name}.xml"),
+    })
+}
+
+fn replace_docx_paragraph(
+    xml: &str,
+    paragraph_index: u32,
+    expected_text: &str,
+    replacement: &str,
+) -> (String, usize) {
+    let mut visible_index = 0u32;
+    replace_indexed_match(xml, &WORD_PARAGRAPH_RE, |block| {
+        if docx_text(block).trim().is_empty() {
+            return None;
+        }
+        let is_target = visible_index == paragraph_index;
+        visible_index = visible_index.saturating_add(1);
+        is_target.then(|| replace_docx_text_nodes(block, expected_text, replacement))
+    })
+}
+
+fn replace_docx_table_cell(
+    xml: &str,
+    table_index: u32,
+    row_index: u32,
+    column_index: u32,
+    expected_text: &str,
+    replacement: &str,
+) -> (String, usize) {
+    let mut current_table = 0u32;
+    replace_indexed_match(xml, &WORD_TABLE_RE, |table| {
+        let is_target_table = current_table == table_index;
+        current_table = current_table.saturating_add(1);
+        if !is_target_table {
+            return None;
+        }
+        let mut current_row = 0u32;
+        Some(replace_indexed_match(table, &WORD_ROW_RE, |row| {
+            let is_target_row = current_row == row_index;
+            current_row = current_row.saturating_add(1);
+            if !is_target_row {
+                return None;
+            }
+            let mut current_col = 0u32;
+            Some(replace_indexed_match(row, &WORD_CELL_RE, |cell| {
+                let is_target_col = current_col == column_index;
+                current_col = current_col.saturating_add(1);
+                is_target_col.then(|| replace_docx_text_nodes(cell, expected_text, replacement))
+            }))
+        }))
+    })
+}
+
+fn replace_indexed_match<F>(xml: &str, regex: &Regex, mut replacer: F) -> (String, usize)
+where
+    F: FnMut(&str) -> Option<(String, usize)>,
+{
+    let mut output = String::with_capacity(xml.len());
+    let mut last = 0usize;
+    let mut replacements = 0usize;
+    for mat in regex.find_iter(xml) {
+        output.push_str(&xml[last..mat.start()]);
+        if replacements == 0
+            && let Some((updated, count)) = replacer(mat.as_str())
+        {
+            output.push_str(&updated);
+            replacements = replacements.saturating_add(count);
+        } else {
+            output.push_str(mat.as_str());
+        }
+        last = mat.end();
+    }
+    output.push_str(&xml[last..]);
+    (output, replacements)
+}
+
+fn replace_docx_text_nodes(xml: &str, expected_text: &str, replacement: &str) -> (String, usize) {
+    let mut output = String::with_capacity(xml.len());
+    let mut last = 0usize;
+    let mut replacements = 0usize;
+    for captures in WORD_TEXT_NODE_RE.captures_iter(xml) {
+        let Some(mat) = captures.get(0) else {
+            continue;
+        };
+        let Some(text) = captures.get(1) else {
+            continue;
+        };
+        output.push_str(&xml[last..text.start()]);
+        let count = text.as_str().match_indices(expected_text).count();
+        if count == 0 {
+            output.push_str(text.as_str());
+        } else {
+            output.push_str(&text.as_str().replace(expected_text, replacement));
+            replacements = replacements.saturating_add(count);
+        }
+        output.push_str(&xml[text.end()..mat.end()]);
+        last = mat.end();
+    }
+    output.push_str(&xml[last..]);
+    (output, replacements)
+}
+
+fn docx_text(xml: &str) -> String {
+    WORD_TEXT_NODE_RE
+        .captures_iter(xml)
+        .filter_map(|captures| captures.get(1).map(|text| text.as_str()))
+        .collect()
+}
+
+fn read_zip_parts(content: &[u8]) -> AgentResult<BTreeMap<String, Vec<u8>>> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(content))
+        .map_err(|e| AgentError::Extraction(e.to_string()))?;
+    let mut parts = BTreeMap::new();
+    for index in 0..archive.len() {
+        let mut file = archive
+            .by_index(index)
+            .map_err(|e| AgentError::Extraction(e.to_string()))?;
+        if file.is_dir() {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)
+            .map_err(|e| AgentError::Extraction(e.to_string()))?;
+        parts.insert(file.name().to_string(), bytes);
+    }
+    Ok(parts)
+}
+
+fn replace_zip_part(content: &mut Vec<u8>, part: &str, replacement: &[u8]) -> AgentResult<()> {
+    let mut parts = read_zip_parts(content)?;
+    parts.insert(part.to_string(), replacement.to_vec());
+    let mut rewritten = Vec::new();
+    {
+        let mut writer = zip::ZipWriter::new(Cursor::new(&mut rewritten));
+        let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+        for (name, bytes) in parts {
+            writer
+                .start_file(name, options)
+                .map_err(|e| AgentError::Extraction(e.to_string()))?;
+            writer
+                .write_all(&bytes)
+                .map_err(|e| AgentError::Extraction(e.to_string()))?;
+        }
+        writer
+            .finish()
+            .map_err(|e| AgentError::Extraction(e.to_string()))?;
+    }
+    *content = rewritten;
+    Ok(())
+}
+
+static WORD_PARAGRAPH_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<w:p(?:\s+[^>]*)?>.*?</w:p>").unwrap());
+static WORD_TABLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<w:tbl(?:\s+[^>]*)?>.*?</w:tbl>").unwrap());
+static WORD_ROW_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<w:tr(?:\s+[^>]*)?>.*?</w:tr>").unwrap());
+static WORD_CELL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<w:tc(?:\s+[^>]*)?>.*?</w:tc>").unwrap());
+static WORD_TEXT_NODE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<w:t(?:\s+[^>]*)?>(.*?)</w:t>").unwrap());
 
 fn apply_xlsx(
     source_bytes: &[u8],

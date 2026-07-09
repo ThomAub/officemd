@@ -919,10 +919,12 @@ dependencies = [
  "officemd_pdf",
  "officemd_pptx",
  "officemd_xlsx",
+ "regex",
  "serde",
  "serde_json",
  "sha2",
  "thiserror",
+ "zip",
 ]
 
 [[package]]

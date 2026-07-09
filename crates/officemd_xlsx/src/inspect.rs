@@ -3,7 +3,8 @@ use quick_xml::Reader as XmlReader;
 use quick_xml::events::{BytesStart, Event};
 
 use crate::error::XlsxError;
-use crate::style_format::parse_cell_ref;
+use crate::sheet_reader::collect_sheet_text_grid;
+use crate::style_format::{StyleContext, ValueRenderMode, parse_cell_ref};
 use crate::table_ir::{SheetFilter, resolve_sheet_targets};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,6 +12,13 @@ pub struct XlsxSheetSummary {
     pub name: String,
     pub rows: usize,
     pub cols: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XlsxCellValue {
+    pub address: String,
+    pub value: Option<String>,
+    pub formula: Option<String>,
 }
 
 /// Inspect sheet dimensions (row and column counts) for each sheet.
@@ -46,6 +54,53 @@ pub fn inspect_sheet_summaries(
     }
 
     Ok(summaries)
+}
+
+/// Inspect absolute A1-addressed cells from a single sheet.
+///
+/// # Errors
+///
+/// Returns an error if the XLSX content cannot be parsed or the sheet is missing.
+pub fn inspect_cells(
+    content: &[u8],
+    sheet: &str,
+    addresses: &[String],
+) -> Result<Vec<XlsxCellValue>, XlsxError> {
+    let mut package = OpcPackage::from_bytes(content).map_err(XlsxError::from)?;
+    let style_context = StyleContext::load(&mut package)?;
+    let sheet_targets = resolve_sheet_targets(&mut package)?;
+    let (_, sheet_path) = sheet_targets
+        .iter()
+        .find(|(candidate, _)| candidate == sheet)
+        .ok_or_else(|| XlsxError::Xml(format!("sheet not found: {sheet}")))?;
+    let grid = collect_sheet_text_grid(
+        &mut package,
+        sheet_path,
+        &style_context,
+        ValueRenderMode::LegacyDefault,
+    )?;
+    let formulas = grid
+        .formulas
+        .into_iter()
+        .map(|note| (note.cell_ref, note.formula))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    Ok(addresses
+        .iter()
+        .map(|address| {
+            let parsed = parse_a1_ref(address);
+            let value = parsed
+                .and_then(|(row, col)| {
+                    absolute_cell_text(&grid.rows, &grid.row_indices, &grid.col_indices, row, col)
+                })
+                .filter(|value| !value.is_empty());
+            XlsxCellValue {
+                address: address.clone(),
+                value,
+                formula: formulas.get(address).cloned(),
+            }
+        })
+        .collect())
 }
 
 fn sheet_size_from_dimension_or_scan(xml: &[u8]) -> (usize, usize) {
@@ -102,6 +157,18 @@ fn parse_a1_ref(value: &str) -> Option<(usize, usize)> {
         }
     }
     parse_cell_ref(&normalized)
+}
+
+fn absolute_cell_text(
+    rows: &[Vec<String>],
+    row_indices: &[usize],
+    col_indices: &[usize],
+    row: usize,
+    col: usize,
+) -> Option<String> {
+    let row_idx = row_indices.binary_search(&row).ok()?;
+    let col_idx = col_indices.binary_search(&col).ok()?;
+    rows.get(row_idx).and_then(|row| row.get(col_idx)).cloned()
 }
 
 fn scan_max_row_col(xml: &[u8]) -> (usize, usize) {

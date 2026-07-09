@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use officemd_core::ir::{Block, Inline, OoxmlDocument, Paragraph, TableCell};
 use officemd_pptx::PptxExtractOptions;
-use officemd_xlsx::{SheetFilter, XlsxExtractOptions};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -312,56 +311,34 @@ fn inspect_xlsx_range(
     include: &XlsxRangeInclude,
 ) -> AgentResult<Vec<InspectionFinding>> {
     let (start_row, start_col, end_row, end_col) = parse_range(range)?;
-    let mut options = XlsxExtractOptions::default();
-    let mut filter = SheetFilter::default();
-    filter.names.insert(sheet.to_string());
-    options.sheet_filter = Some(filter);
-    options.include.document_properties = false;
-    let doc = officemd_xlsx::extract_tables_ir_with_options(bytes, &options)
-        .map_err(|e| AgentError::Extraction(e.to_string()))?;
-    let selected = doc
-        .sheets
-        .into_iter()
-        .find(|candidate| candidate.name == sheet)
-        .ok_or_else(|| AgentError::InvalidRequest(format!("sheet not found: {sheet}")))?;
-    let formulas = selected
-        .formulas
-        .into_iter()
-        .map(|note| (note.cell_ref, note.formula))
-        .collect::<std::collections::HashMap<_, _>>();
-    let Some(table) = selected.tables.first() else {
-        return Ok(Vec::new());
-    };
-
-    let mut findings = Vec::new();
+    let mut addresses = Vec::new();
     for row_idx in start_row..=end_row {
         for col_idx in start_col..=end_col {
-            let address = format!("{}{}", column_name(col_idx), row_idx + 1);
-            let value = table
-                .rows
-                .get(row_idx)
-                .and_then(|row| row.get(col_idx))
-                .map(cell_text)
-                .filter(|value| include.values || !value.is_empty());
-            let formula = if include.formulas {
-                formulas.get(&address).cloned()
-            } else {
-                None
-            };
-            findings.push(InspectionFinding {
-                locator: ArtifactLocator::XlsxCell {
-                    sheet: sheet.to_string(),
-                    address: address.clone(),
-                },
-                kind: "cell".to_string(),
-                payload: InspectionPayload::Cell {
-                    address,
-                    value,
-                    formula,
-                    number_format: None,
-                },
-            });
+            addresses.push(format!("{}{}", column_name(col_idx), row_idx + 1));
         }
+    }
+    let cells = officemd_xlsx::inspect_cells(bytes, sheet, &addresses)
+        .map_err(|e| AgentError::Extraction(e.to_string()))?;
+
+    let mut findings = Vec::new();
+    for cell in cells {
+        let value = cell
+            .value
+            .filter(|value| include.values || !value.is_empty());
+        let formula = include.formulas.then_some(cell.formula).flatten();
+        findings.push(InspectionFinding {
+            locator: ArtifactLocator::XlsxCell {
+                sheet: sheet.to_string(),
+                address: cell.address.clone(),
+            },
+            kind: "cell".to_string(),
+            payload: InspectionPayload::Cell {
+                address: cell.address,
+                value,
+                formula,
+                number_format: None,
+            },
+        });
     }
     Ok(findings)
 }

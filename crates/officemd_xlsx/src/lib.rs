@@ -14,7 +14,7 @@ pub mod write;
 
 pub use error::XlsxError;
 pub use extract_ir::extract_sheet_names;
-pub use inspect::{XlsxSheetSummary, inspect_sheet_summaries};
+pub use inspect::{XlsxCellValue, XlsxSheetSummary, inspect_cells, inspect_sheet_summaries};
 pub use render::{
     markdown_from_bytes, markdown_from_bytes_with_extract_options, markdown_from_bytes_with_options,
 };

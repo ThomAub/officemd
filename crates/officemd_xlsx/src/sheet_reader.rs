@@ -12,6 +12,8 @@ use crate::style_format::{StyleContext, ValueRenderMode, parse_cell_ref};
 pub(crate) struct SheetTextGrid {
     pub(crate) cols: usize,
     pub(crate) rows: Vec<Vec<String>>,
+    pub(crate) row_indices: Vec<usize>,
+    pub(crate) col_indices: Vec<usize>,
     pub(crate) formulas: Vec<FormulaNote>,
 }
 
@@ -188,7 +190,7 @@ pub(crate) fn collect_sheet_text_grid(
     let dense_cols = max_col.saturating_sub(min_col) + 1;
     let dense_cells = dense_rows.saturating_mul(dense_cols);
 
-    let (cols, rows) = if dense_cells <= MAX_DENSE_GRID_CELLS {
+    let (cols, rows, row_indices, col_indices) = if dense_cells <= MAX_DENSE_GRID_CELLS {
         let cols = dense_cols;
         let mut rows = Vec::with_capacity(dense_rows);
         for row_idx in min_row..=max_row {
@@ -202,7 +204,12 @@ pub(crate) fn collect_sheet_text_grid(
             }
             rows.push(row);
         }
-        (cols, rows)
+        (
+            cols,
+            rows,
+            (min_row..=max_row).collect(),
+            (min_col..=max_col).collect(),
+        )
     } else {
         let cols = unique_cols.len();
         let mut col_index = HashMap::with_capacity(cols);
@@ -211,9 +218,9 @@ pub(crate) fn collect_sheet_text_grid(
         }
 
         let mut rows = Vec::with_capacity(row_indices.len());
-        for row_idx in row_indices {
+        for row_idx in &row_indices {
             let mut row = vec![String::new(); cols];
-            if let Some(values) = rows_by_index.get(&row_idx) {
+            if let Some(values) = rows_by_index.get(row_idx) {
                 for (absolute_col, text) in &values.cells {
                     if let Some(dense_col) = col_index.get(absolute_col) {
                         row[*dense_col].clone_from(text);
@@ -222,12 +229,14 @@ pub(crate) fn collect_sheet_text_grid(
             }
             rows.push(row);
         }
-        (cols, rows)
+        (cols, rows, row_indices, unique_cols)
     };
 
     Ok(SheetTextGrid {
         cols,
         rows,
+        row_indices,
+        col_indices,
         formulas,
     })
 }

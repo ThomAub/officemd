@@ -69,11 +69,7 @@ pub enum ArtifactRisk {
 pub fn capability_for(format: AgentDocumentFormat) -> ArtifactCapabilityReport {
     let mutable_operations = match format {
         AgentDocumentFormat::Docx => vec![MutationKind::ReplaceText],
-        AgentDocumentFormat::Xlsx => vec![
-            MutationKind::SetXlsxCellValue,
-            MutationKind::SetXlsxCellFormula,
-            MutationKind::RenameXlsxSheet,
-        ],
+        AgentDocumentFormat::Xlsx => vec![MutationKind::ReplaceText, MutationKind::RenameXlsxSheet],
         AgentDocumentFormat::Pptx => vec![MutationKind::ReplacePptxShapeText],
         AgentDocumentFormat::Csv | AgentDocumentFormat::Pdf => Vec::new(),
     };
