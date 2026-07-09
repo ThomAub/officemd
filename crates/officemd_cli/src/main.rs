@@ -1229,8 +1229,22 @@ fn extract_markdown_from_file(path: &Path, common: &CommonOptions) -> Result<Str
         markdown_profile,
     };
 
-    let doc = extract_ir_document(&bytes, resolved, common)?;
-    let md = officemd_markdown::render_document_with_options(&doc, options);
+    let md = if resolved == DocumentFormat::Xlsx {
+        let mut extract_options = XlsxExtractOptions::default();
+        extract_options.text.style_aware_values = common.xlsx.style_aware;
+        extract_options.text.streaming_rows = common.xlsx.streaming;
+        extract_options.sheet_filter =
+            build_sheet_filter(common.sheets.as_deref(), common.pages.as_deref())?;
+        extract_options.include.document_properties = common.include.document_properties;
+        extract_options.trim.empty_edges =
+            matches!(common.markdown_style, MarkdownStyleArg::Compact);
+
+        officemd_xlsx::markdown_from_bytes_with_extract_options(&bytes, options, &extract_options)
+            .map_err(|e| e.to_string())?
+    } else {
+        let doc = extract_ir_document(&bytes, resolved, common)?;
+        officemd_markdown::render_document_with_options(&doc, options)
+    };
 
     if common.pages.is_some() && resolved == DocumentFormat::Csv {
         eprintln!("Hint: use --sheets for sheet selection with csv files");
