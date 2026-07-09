@@ -27,7 +27,9 @@ pub use inspect::{
 };
 pub use locator::{ArtifactLocator, DocxPartLocator, PdfBounds, XlsxCellLocator, XlsxSheetLocator};
 pub use patch_plan::{ApplyPatchRequest, ArtifactPatchPlan, PatchOperation, PatchPlanVersion};
-pub use render::{ArtifactRenderer, PageSelection, RenderReport, RenderRequest, RenderScale};
+pub use render::{
+    ArtifactRenderer, PageSelection, RenderReport, RenderRequest, RenderScale, RenderedImage,
+};
 pub use verify::{CheckReport, VerificationReport, VerificationStatus, VerifyRequest};
 
 #[derive(Debug, Clone, Default)]

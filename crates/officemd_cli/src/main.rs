@@ -1,7 +1,8 @@
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use officemd_agent::{
-    AgentDocumentFormat, AgentService, ApplyPatchRequest, ArtifactPatchPlan, InspectQuery,
-    InspectRequest, RenderRequest, RenderScale, VerificationCheckKind, VerifyRequest,
+    AgentDocumentFormat, AgentService, ApplyPatchRequest, ArtifactPatchPlan, ArtifactRenderer,
+    InspectQuery, InspectRequest, RenderRequest, RenderScale, VerificationCheckKind,
+    VerificationStatus, VerifyRequest,
 };
 use officemd_core::ir::OoxmlDocument;
 use officemd_core::opc::OpcPackage;
@@ -1540,7 +1541,8 @@ fn run_probe_command(
         format: format.map(AgentDocumentFormat::from),
         query: InspectQuery::DocumentSummary,
     };
-    let report = service.inspect(&request).map_err(|e| e.to_string())?;
+    let mut report = service.inspect(&request).map_err(|e| e.to_string())?;
+    report.capability.render_capability = officemd_renderer::discover();
     let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
         OutputFormatArg::Json if output.pretty => {
             serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
@@ -1625,7 +1627,7 @@ fn run_render_artifact_command(
         pages_or_slides: None,
         scale: RenderScale::Screen,
     };
-    let report = AgentService::new()
+    let report = officemd_renderer::SystemRenderer::discover()
         .render(&request)
         .map_err(|e| e.to_string())?;
     let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
@@ -1649,9 +1651,45 @@ fn run_verify_command(
         checks: parse_verification_checks(checks.as_deref())?,
         render_output_dir,
     };
-    let report = AgentService::new()
+    let mut report = AgentService::new()
         .verify(&request)
         .map_err(|e| e.to_string())?;
+    if request
+        .checks
+        .contains(&VerificationCheckKind::VisualRender)
+        && let Some(render_output_dir) = &request.render_output_dir
+    {
+        let render_request = RenderRequest {
+            input: input.to_path_buf(),
+            output_dir: render_output_dir.clone(),
+            pages_or_slides: None,
+            scale: RenderScale::Screen,
+        };
+        match officemd_renderer::SystemRenderer::discover().render(&render_request) {
+            Ok(rendered) => {
+                for check in &mut report.checks {
+                    if check.kind == VerificationCheckKind::VisualRender {
+                        check.status = VerificationStatus::Passed;
+                        check.message = format!(
+                            "rendered {} visual evidence image(s)",
+                            rendered.images.len()
+                        );
+                    }
+                }
+                report.rendered_evidence = Some(rendered);
+                report.status = aggregate_cli_verify_status(&report.checks);
+            }
+            Err(err) => {
+                for check in &mut report.checks {
+                    if check.kind == VerificationCheckKind::VisualRender {
+                        check.status = VerificationStatus::NotRunnable;
+                        check.message = err.to_string();
+                    }
+                }
+                report.status = aggregate_cli_verify_status(&report.checks);
+            }
+        }
+    }
     let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
         OutputFormatArg::Json if output.pretty => {
             serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
@@ -1660,6 +1698,22 @@ fn run_verify_command(
         OutputFormatArg::Markdown => render_verify_text(&report),
     };
     write_stdout(&output_text)
+}
+
+fn aggregate_cli_verify_status(checks: &[officemd_agent::CheckReport]) -> VerificationStatus {
+    if checks
+        .iter()
+        .any(|check| check.status == VerificationStatus::Failed)
+    {
+        VerificationStatus::Failed
+    } else if checks
+        .iter()
+        .any(|check| check.status == VerificationStatus::NotRunnable)
+    {
+        VerificationStatus::PassedWithWarnings
+    } else {
+        VerificationStatus::Passed
+    }
 }
 
 fn parse_verification_checks(spec: Option<&str>) -> Result<Vec<VerificationCheckKind>, String> {
