@@ -128,7 +128,10 @@ fn write_sheet(
     let SheetTextGrid {
         cols: grid_cols,
         rows,
+        row_indices: _,
+        col_indices: _,
         formulas,
+        number_formats: _,
     } = grid;
     let cols = grid_cols.max(1);
     let row_count = rows.len().max(1);

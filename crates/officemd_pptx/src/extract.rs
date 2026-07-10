@@ -227,6 +227,27 @@ fn collect_slide_rids(
     Ok(slide_entries)
 }
 
+pub(crate) fn resolve_slide_parts(content: &[u8]) -> Result<Vec<(usize, String)>, PptxError> {
+    let mut package = OpcPackage::from_bytes(content).map_err(PptxError::from)?;
+    let presentation_xml = read_required_part(&mut package, "ppt/presentation.xml")?;
+    let slide_rids = collect_slide_rids(&presentation_xml, None)?;
+    let presentation_rels = load_relationships_for_part(&mut package, "ppt/presentation.xml")
+        .map_err(PptxError::from)?;
+    let targets = build_rel_map(&presentation_rels, "ppt/presentation.xml");
+    slide_rids
+        .into_iter()
+        .map(|(number, relationship_id)| {
+            targets
+                .get(&relationship_id)
+                .cloned()
+                .map(|path| (number, path))
+                .ok_or_else(|| {
+                    PptxError::MissingPart(format!("presentation relationship {relationship_id}"))
+                })
+        })
+        .collect()
+}
+
 #[allow(clippy::too_many_lines)]
 fn parse_blocks(
     xml: &str,

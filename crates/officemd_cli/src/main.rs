@@ -1,4 +1,8 @@
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use officemd_agent::{
+    AgentDocumentFormat, AgentService, ApplyPatchRequest, ArtifactPatchPlan, DiffArtifactRequest,
+    InspectQuery, InspectRequest, RenderRequest, RenderScale, VerificationCheckKind, VerifyRequest,
+};
 use officemd_core::ir::OoxmlDocument;
 use officemd_core::opc::OpcPackage;
 use officemd_pptx::PptxExtractOptions;
@@ -125,6 +129,94 @@ struct MarkdownTableCliOptions {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Probe artifact identity, capabilities, and operational risks.
+    Probe {
+        /// Input document path (.docx/.xlsx/.csv/.pptx/.pdf).
+        input: PathBuf,
+
+        #[command(flatten)]
+        output: CommonOutputOptions,
+
+        /// Explicitly set the document format.
+        #[arg(long, value_enum)]
+        format: Option<FormatArg>,
+    },
+
+    /// Apply a typed agent patch plan to a new output artifact.
+    Apply {
+        /// Input document path (.docx/.xlsx/.pptx).
+        input: PathBuf,
+
+        /// JSON file containing an ArtifactPatchPlan.
+        #[arg(long)]
+        patch: PathBuf,
+
+        /// Output artifact path. Must not already exist.
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Expected SHA-256 fingerprint of the source artifact.
+        #[arg(long)]
+        expected_source_sha256: String,
+
+        #[command(flatten)]
+        output_options: CommonOutputOptions,
+    },
+
+    /// Render an artifact into visual evidence images when a backend is available.
+    RenderArtifact {
+        /// Input document path (.docx/.xlsx/.pptx/.pdf).
+        input: PathBuf,
+
+        /// Directory for rendered image evidence.
+        #[arg(long)]
+        output_dir: PathBuf,
+
+        #[command(flatten)]
+        output: CommonOutputOptions,
+    },
+
+    /// Verify semantic, structural, or visual artifact invariants.
+    Verify {
+        /// Input document path (.docx/.xlsx/.csv/.pptx/.pdf).
+        input: PathBuf,
+
+        /// Comma-separated checks: structure, formula-references, pptx-canvas-overflow, visual-render.
+        #[arg(long)]
+        checks: Option<String>,
+
+        /// Directory for renderer-backed verification evidence.
+        #[arg(long)]
+        render_output_dir: Option<PathBuf>,
+
+        #[command(flatten)]
+        output: CommonOutputOptions,
+    },
+
+    /// Compare artifacts through semantic projections and rendered evidence.
+    DiffArtifact {
+        /// Left input document path.
+        left: PathBuf,
+
+        /// Right input document path.
+        right: PathBuf,
+
+        /// Compare canonical semantic projections.
+        #[arg(long)]
+        semantic: bool,
+
+        /// Render and compare visual evidence images exactly.
+        #[arg(long)]
+        rendered: bool,
+
+        /// Root directory for left and right rendered evidence.
+        #[arg(long, default_value = "officemd-diff-evidence")]
+        output_dir: PathBuf,
+
+        #[command(flatten)]
+        output: CommonOutputOptions,
+    },
+
     /// Extract markdown, print to stdout.
     Markdown {
         /// Path to an input document.
@@ -185,6 +277,10 @@ enum Command {
 
         #[command(flatten)]
         common: CommonOptions,
+
+        /// JSON file containing an agent InspectQuery.
+        #[arg(long)]
+        agent_query: Option<PathBuf>,
     },
 
     /// Emit an agent-friendly parsing plan with follow-up commands.
@@ -246,6 +342,18 @@ enum DocumentFormat {
 }
 
 impl From<FormatArg> for DocumentFormat {
+    fn from(value: FormatArg) -> Self {
+        match value {
+            FormatArg::Docx => Self::Docx,
+            FormatArg::Xlsx => Self::Xlsx,
+            FormatArg::Csv => Self::Csv,
+            FormatArg::Pptx => Self::Pptx,
+            FormatArg::Pdf => Self::Pdf,
+        }
+    }
+}
+
+impl From<FormatArg> for AgentDocumentFormat {
     fn from(value: FormatArg) -> Self {
         match value {
             FormatArg::Docx => Self::Docx,
@@ -1445,6 +1553,271 @@ fn run_inspect_command(input: &Path, mut common: CommonOptions) -> Result<(), St
     write_stdout(&output)
 }
 
+fn run_probe_command(
+    input: &Path,
+    output: CommonOutputOptions,
+    format: Option<FormatArg>,
+) -> Result<(), String> {
+    let service = AgentService::with_renderer(officemd_renderer::SystemRenderer::discover());
+    let report = service
+        .probe_path_as(input, format.map(AgentDocumentFormat::from))
+        .map_err(|e| e.to_string())?;
+    let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
+        OutputFormatArg::Json if output.pretty => {
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        }
+        OutputFormatArg::Json => serde_json::to_string(&report).map_err(|e| e.to_string())?,
+        OutputFormatArg::Markdown => render_agent_probe_text(&report),
+    };
+    write_stdout(&output_text)
+}
+
+fn run_agent_inspect_command(
+    input: &Path,
+    common: CommonOptions,
+    agent_query: &Path,
+) -> Result<(), String> {
+    let query_bytes = std::fs::read(agent_query).map_err(|e| {
+        format!(
+            "failed to read agent query '{}': {e}",
+            agent_query.display()
+        )
+    })?;
+    let query: InspectQuery = serde_json::from_slice(&query_bytes)
+        .map_err(|e| format!("failed to parse agent query JSON: {e}"))?;
+    let service = AgentService::with_renderer(officemd_renderer::SystemRenderer::discover());
+    let request = InspectRequest {
+        input: input.to_path_buf(),
+        format: common.format.map(AgentDocumentFormat::from),
+        query,
+    };
+    let report = service.inspect(&request).map_err(|e| e.to_string())?;
+    let output = match common.output_format() {
+        OutputFormatArg::Json if common.output.pretty => {
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        }
+        OutputFormatArg::Json => serde_json::to_string(&report).map_err(|e| e.to_string())?,
+        OutputFormatArg::Markdown => render_agent_probe_text(&report),
+    };
+    write_stdout(&output)
+}
+
+fn run_apply_command(
+    input: &Path,
+    patch_path: &Path,
+    output: &Path,
+    expected_source_sha256: String,
+    output_options: CommonOutputOptions,
+) -> Result<(), String> {
+    let patch_bytes = std::fs::read(patch_path)
+        .map_err(|e| format!("failed to read patch '{}': {e}", patch_path.display()))?;
+    let patch: ArtifactPatchPlan = serde_json::from_slice(&patch_bytes)
+        .map_err(|e| format!("failed to parse patch plan JSON: {e}"))?;
+    let request = ApplyPatchRequest {
+        input: input.to_path_buf(),
+        output: output.to_path_buf(),
+        expected_source_sha256,
+        patch,
+    };
+    let report = AgentService::new()
+        .apply_patch(&request)
+        .map_err(|e| e.to_string())?;
+    let output_text = match output_options
+        .output_format
+        .unwrap_or(OutputFormatArg::Json)
+    {
+        OutputFormatArg::Json if output_options.pretty => {
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        }
+        OutputFormatArg::Json => serde_json::to_string(&report).map_err(|e| e.to_string())?,
+        OutputFormatArg::Markdown => render_apply_text(&report),
+    };
+    write_stdout(&output_text)?;
+    if matches!(
+        report.status,
+        officemd_agent::ApplyPatchStatus::Rejected | officemd_agent::ApplyPatchStatus::Failed
+    ) {
+        return Err("patch was not applied".to_string());
+    }
+    Ok(())
+}
+
+fn run_render_artifact_command(
+    input: &Path,
+    output_dir: &Path,
+    output: CommonOutputOptions,
+) -> Result<(), String> {
+    let request = RenderRequest {
+        input: input.to_path_buf(),
+        output_dir: output_dir.to_path_buf(),
+        pages_or_slides: None,
+        scale: RenderScale::Screen,
+    };
+    let report = AgentService::with_renderer(officemd_renderer::SystemRenderer::discover())
+        .render(&request)
+        .map_err(|e| e.to_string())?;
+    let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
+        OutputFormatArg::Json if output.pretty => {
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        }
+        OutputFormatArg::Json => serde_json::to_string(&report).map_err(|e| e.to_string())?,
+        OutputFormatArg::Markdown => render_render_report_text(&report),
+    };
+    write_stdout(&output_text)
+}
+
+fn run_verify_command(
+    input: &Path,
+    checks: Option<String>,
+    render_output_dir: Option<PathBuf>,
+    output: CommonOutputOptions,
+) -> Result<(), String> {
+    let request = VerifyRequest {
+        input: input.to_path_buf(),
+        checks: parse_verification_checks(checks.as_deref())?,
+        render_output_dir,
+    };
+    let report = AgentService::with_renderer(officemd_renderer::SystemRenderer::discover())
+        .verify(&request)
+        .map_err(|e| e.to_string())?;
+    let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
+        OutputFormatArg::Json if output.pretty => {
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        }
+        OutputFormatArg::Json => serde_json::to_string(&report).map_err(|e| e.to_string())?,
+        OutputFormatArg::Markdown => render_verify_text(&report),
+    };
+    write_stdout(&output_text)?;
+    if matches!(
+        report.status,
+        officemd_agent::VerificationStatus::Failed
+            | officemd_agent::VerificationStatus::NotRunnable
+    ) {
+        return Err("artifact verification did not pass".to_string());
+    }
+    Ok(())
+}
+
+fn run_diff_artifact_command(
+    left: &Path,
+    right: &Path,
+    semantic: bool,
+    rendered: bool,
+    output_dir: PathBuf,
+    output: CommonOutputOptions,
+) -> Result<(), String> {
+    let semantic = semantic || !rendered;
+    let request = DiffArtifactRequest {
+        left: left.to_path_buf(),
+        right: right.to_path_buf(),
+        semantic,
+        rendered,
+        render_output_dir: rendered.then_some(output_dir),
+    };
+    let report = AgentService::with_renderer(officemd_renderer::SystemRenderer::discover())
+        .diff_artifacts(&request)
+        .map_err(|error| error.to_string())?;
+    let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
+        OutputFormatArg::Json if output.pretty => {
+            serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+        }
+        OutputFormatArg::Json => {
+            serde_json::to_string(&report).map_err(|error| error.to_string())?
+        }
+        OutputFormatArg::Markdown => render_artifact_diff_text(&report),
+    };
+    write_stdout(&output_text)
+}
+
+fn parse_verification_checks(spec: Option<&str>) -> Result<Vec<VerificationCheckKind>, String> {
+    let Some(spec) = spec else {
+        return Ok(vec![VerificationCheckKind::Structure]);
+    };
+    spec.split(',')
+        .map(|raw| match raw.trim() {
+            "structure" => Ok(VerificationCheckKind::Structure),
+            "formula-references" | "formula_references" => {
+                Ok(VerificationCheckKind::FormulaReferences)
+            }
+            "pptx-canvas-overflow" | "pptx_canvas_overflow" => {
+                Ok(VerificationCheckKind::PptxCanvasOverflow)
+            }
+            "visual-render" | "visual_render" => Ok(VerificationCheckKind::VisualRender),
+            value => Err(format!(
+                "unknown verification check '{value}' (expected structure, formula-references, pptx-canvas-overflow, visual-render)"
+            )),
+        })
+        .collect()
+}
+
+fn render_apply_text(report: &officemd_agent::ApplyPatchReport) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Status: {:?}", report.status);
+    let _ = writeln!(out, "Source: {}", report.source.path.display());
+    if let Some(output) = &report.output {
+        let _ = writeln!(out, "Output: {}", output.path.display());
+    }
+    let _ = writeln!(out, "Operations: {}", report.operations.len());
+    out
+}
+
+fn render_render_report_text(report: &officemd_agent::RenderReport) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Backend: {:?}", report.backend);
+    let _ = writeln!(out, "Images: {}", report.images.len());
+    for diagnostic in &report.diagnostics {
+        let _ = writeln!(out, "{}: {}", diagnostic.code, diagnostic.message);
+    }
+    out
+}
+
+fn render_verify_text(report: &officemd_agent::VerificationReport) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Status: {:?}", report.status);
+    for check in &report.checks {
+        let _ = writeln!(
+            out,
+            "{:?}: {:?} - {}",
+            check.kind, check.status, check.message
+        );
+    }
+    out
+}
+
+fn render_artifact_diff_text(report: &officemd_agent::ArtifactDiffReport) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Equal: {}", report.equal);
+    if let Some(semantic) = &report.semantic {
+        let _ = writeln!(out, "Semantic equal: {}", semantic.equal);
+    }
+    if let Some(visual) = &report.visual {
+        let _ = writeln!(out, "Visual equal: {}", visual.equal);
+        let _ = writeln!(out, "Compared images: {}", visual.images.len());
+    }
+    out
+}
+
+fn render_agent_probe_text(report: &officemd_agent::InspectionReport) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Format: {}", report.artifact.format);
+    let _ = writeln!(out, "SHA-256: {}", report.artifact.fingerprint.sha256);
+    let _ = writeln!(out, "Bytes: {}", report.artifact.fingerprint.byte_length);
+    let _ = writeln!(out, "Readable: {}", report.capability.readable);
+    if report.capability.mutable_operations.is_empty() {
+        out.push_str("Mutable operations: none\n");
+    } else {
+        let operations = report
+            .capability
+            .mutable_operations
+            .iter()
+            .map(|op| format!("{op:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(out, "Mutable operations: {operations}");
+    }
+    out
+}
+
 fn run_plan_command(input: &Path, common: CommonOptions) -> Result<(), String> {
     let bytes = std::fs::read(input)
         .map_err(|e| format!("failed to read input '{}': {e}", input.display()))?;
@@ -1537,6 +1910,43 @@ fn run() -> Result<(), String> {
     })?;
 
     match command {
+        Command::Probe {
+            input,
+            output,
+            format,
+        } => run_probe_command(&input, output, format)?,
+        Command::Apply {
+            input,
+            patch,
+            output,
+            expected_source_sha256,
+            output_options,
+        } => run_apply_command(
+            &input,
+            &patch,
+            &output,
+            expected_source_sha256,
+            output_options,
+        )?,
+        Command::RenderArtifact {
+            input,
+            output_dir,
+            output,
+        } => run_render_artifact_command(&input, &output_dir, output)?,
+        Command::Verify {
+            input,
+            checks,
+            render_output_dir,
+            output,
+        } => run_verify_command(&input, checks, render_output_dir, output)?,
+        Command::DiffArtifact {
+            left,
+            right,
+            semantic,
+            rendered,
+            output_dir,
+            output,
+        } => run_diff_artifact_command(&left, &right, semantic, rendered, output_dir, output)?,
         Command::Markdown { file, common } | Command::Render { file, common } => {
             run_markdown_command(&file, &common)?;
         }
@@ -1551,7 +1961,17 @@ fn run() -> Result<(), String> {
             common,
         } => run_convert_command(&input, output, common)?,
         Command::Stream { input, common } => run_stream_command(&input, common)?,
-        Command::Inspect { input, common } => run_inspect_command(&input, common)?,
+        Command::Inspect {
+            input,
+            common,
+            agent_query,
+        } => {
+            if let Some(agent_query) = agent_query {
+                run_agent_inspect_command(&input, common, &agent_query)?;
+            } else {
+                run_inspect_command(&input, common)?;
+            }
+        }
         Command::Plan { input, common } => run_plan_command(&input, common)?,
         Command::Create { output, input } => run_create_command(&output, &input)?,
     }

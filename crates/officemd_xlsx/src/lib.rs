@@ -6,6 +6,7 @@
 pub mod error;
 pub mod extract_ir;
 pub mod inspect;
+pub mod mutate;
 pub mod render;
 mod sheet_reader;
 mod style_format;
@@ -14,7 +15,11 @@ pub mod write;
 
 pub use error::XlsxError;
 pub use extract_ir::extract_sheet_names;
-pub use inspect::{XlsxSheetSummary, inspect_sheet_summaries};
+pub use inspect::{
+    XlsxCellValue, XlsxFormulaError, XlsxSheetSummary, inspect_cells, inspect_formula_errors,
+    inspect_sheet_summaries,
+};
+pub use mutate::{XlsxCellUpdate, set_cell};
 pub use render::{
     markdown_from_bytes, markdown_from_bytes_with_extract_options, markdown_from_bytes_with_options,
 };

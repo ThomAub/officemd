@@ -12,7 +12,10 @@ use crate::style_format::{StyleContext, ValueRenderMode, parse_cell_ref};
 pub(crate) struct SheetTextGrid {
     pub(crate) cols: usize,
     pub(crate) rows: Vec<Vec<String>>,
+    pub(crate) row_indices: Vec<usize>,
+    pub(crate) col_indices: Vec<usize>,
     pub(crate) formulas: Vec<FormulaNote>,
+    pub(crate) number_formats: Vec<(String, String)>,
 }
 
 #[derive(Debug, Default)]
@@ -52,6 +55,7 @@ pub(crate) fn collect_sheet_text_grid(
 
     let mut rows_by_index: HashMap<usize, RowBuf> = HashMap::new();
     let mut formulas = Vec::new();
+    let mut number_formats = Vec::new();
 
     let mut current_row = 0usize;
     let mut next_row = 0usize;
@@ -102,6 +106,7 @@ pub(crate) fn collect_sheet_text_grid(
                         &mut rows_by_index,
                         cell,
                         &mut formulas,
+                        &mut number_formats,
                         style_context,
                         mode,
                     );
@@ -147,6 +152,7 @@ pub(crate) fn collect_sheet_text_grid(
                             &mut rows_by_index,
                             cell,
                             &mut formulas,
+                            &mut number_formats,
                             style_context,
                             mode,
                         );
@@ -188,7 +194,7 @@ pub(crate) fn collect_sheet_text_grid(
     let dense_cols = max_col.saturating_sub(min_col) + 1;
     let dense_cells = dense_rows.saturating_mul(dense_cols);
 
-    let (cols, rows) = if dense_cells <= MAX_DENSE_GRID_CELLS {
+    let (cols, rows, row_indices, col_indices) = if dense_cells <= MAX_DENSE_GRID_CELLS {
         let cols = dense_cols;
         let mut rows = Vec::with_capacity(dense_rows);
         for row_idx in min_row..=max_row {
@@ -202,7 +208,12 @@ pub(crate) fn collect_sheet_text_grid(
             }
             rows.push(row);
         }
-        (cols, rows)
+        (
+            cols,
+            rows,
+            (min_row..=max_row).collect(),
+            (min_col..=max_col).collect(),
+        )
     } else {
         let cols = unique_cols.len();
         let mut col_index = HashMap::with_capacity(cols);
@@ -211,9 +222,9 @@ pub(crate) fn collect_sheet_text_grid(
         }
 
         let mut rows = Vec::with_capacity(row_indices.len());
-        for row_idx in row_indices {
+        for row_idx in &row_indices {
             let mut row = vec![String::new(); cols];
-            if let Some(values) = rows_by_index.get(&row_idx) {
+            if let Some(values) = rows_by_index.get(row_idx) {
                 for (absolute_col, text) in &values.cells {
                     if let Some(dense_col) = col_index.get(absolute_col) {
                         row[*dense_col].clone_from(text);
@@ -222,13 +233,16 @@ pub(crate) fn collect_sheet_text_grid(
             }
             rows.push(row);
         }
-        (cols, rows)
+        (cols, rows, row_indices, unique_cols)
     };
 
     Ok(SheetTextGrid {
         cols,
         rows,
+        row_indices,
+        col_indices,
         formulas,
+        number_formats,
     })
 }
 
@@ -236,16 +250,21 @@ fn insert_streaming_cell(
     rows_by_index: &mut HashMap<usize, RowBuf>,
     mut cell: StreamingCell,
     formulas: &mut Vec<FormulaNote>,
+    number_formats: &mut Vec<(String, String)>,
     style_context: &StyleContext,
     mode: ValueRenderMode,
 ) {
+    let cell_ref = format!("{}{}", col_to_name(cell.col + 1), cell.row + 1);
     let formula_raw = std::mem::take(&mut cell.formula);
     let formula = formula_raw.trim();
     if !formula.is_empty() {
         formulas.push(FormulaNote {
-            cell_ref: format!("{}{}", col_to_name(cell.col + 1), cell.row + 1),
+            cell_ref: cell_ref.clone(),
             formula: formula.strip_prefix('=').unwrap_or(formula).to_string(),
         });
+    }
+    if let Some(number_format) = style_context.number_format_code(cell.style_index) {
+        number_formats.push((cell_ref, number_format));
     }
 
     let text = style_context.render_cell_text(

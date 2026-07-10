@@ -134,7 +134,10 @@ pub fn extract_tables_ir_with_options(
         let SheetTextGrid {
             cols: grid_cols,
             rows: grid_rows,
+            row_indices: _,
+            col_indices: _,
             formulas,
+            number_formats: _,
         } = grid;
 
         let cols = grid_cols.max(1);

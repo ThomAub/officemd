@@ -1,0 +1,30 @@
+[package]
+name = "officemd_agent"
+version = "0.1.8"
+edition.workspace = true
+rust-version = "1.93"
+description = "Agent-oriented OfficeMD artifact orchestration"
+license = "MIT"
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/officemd_agent"
+keywords = ["officemd", "agent", "docx", "xlsx", "pptx"]
+categories = ["text-processing"]
+
+[dependencies]
+officemd_core = { version = "0.1.7", path = "../officemd_core" }
+officemd_docx = { version = "0.1.8", path = "../officemd_docx" }
+officemd_xlsx = { version = "0.1.8", path = "../officemd_xlsx" }
+officemd_csv = { version = "0.1.8", path = "../officemd_csv" }
+officemd_pptx = { version = "0.1.8", path = "../officemd_pptx" }
+officemd_pdf = { version = "0.1.8", path = "../officemd_pdf" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tempfile = "3"
+png = "0.17"
+
+[dev-dependencies]
+officemd_core = { version = "0.1.7", path = "../officemd_core", features = ["test-helpers"] }

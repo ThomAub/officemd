@@ -1,0 +1,17 @@
+[package]
+name = "officemd_renderer"
+version = "0.1.8"
+edition.workspace = true
+rust-version = "1.93"
+description = "Optional renderer adapters for OfficeMD artifacts"
+license = "MIT"
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/officemd_renderer"
+keywords = ["officemd", "render", "pdf", "libreoffice"]
+categories = ["command-line-utilities", "text-processing"]
+
+[dependencies]
+officemd_agent = { version = "0.1.8", path = "../officemd_agent" }
+tempfile = "3"

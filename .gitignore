@@ -31,3 +31,5 @@ diff.md
 benchmark/corpus/
 benchmark/results/
 eng.traineddata
+demos/yc-pi-officemd/fixtures/
+demos/yc-pi-officemd/runs/
