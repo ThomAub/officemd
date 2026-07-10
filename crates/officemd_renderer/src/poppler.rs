@@ -35,6 +35,7 @@ impl PopplerRenderer {
                 .pages_or_slides
                 .as_ref()
                 .map(|selection| (selection.start, selection.end)),
+            &request.scale,
         )
     }
 
@@ -44,14 +45,31 @@ impl PopplerRenderer {
         artifact: ArtifactRef,
         output_dir: &Path,
         page_selection: Option<(u32, u32)>,
+        scale: &officemd_agent::RenderScale,
     ) -> AgentResult<RenderReport> {
+        if page_selection.is_some_and(|(start, end)| start == 0 || end < start) {
+            return Err(AgentError::InvalidRequest(
+                "render page selection must be 1-based and ordered".to_string(),
+            ));
+        }
         std::fs::create_dir_all(output_dir).map_err(|source| AgentError::Read {
             path: output_dir.display().to_string(),
             source,
         })?;
-        let prefix = output_dir.join(render_prefix(pdf_path));
+        let staging = tempfile::Builder::new()
+            .prefix(".officemd-render-")
+            .tempdir_in(output_dir)
+            .map_err(|source| AgentError::Write {
+                path: output_dir.display().to_string(),
+                source,
+            })?;
+        let prefix = staging.path().join(render_prefix(pdf_path));
         let mut command = Command::new(&self.executable);
-        command.arg("-png").arg("-r").arg("144");
+        let dpi = match scale {
+            officemd_agent::RenderScale::Screen => "144",
+            officemd_agent::RenderScale::Print => "300",
+        };
+        command.arg("-png").arg("-r").arg(dpi);
         if let Some((start, end)) = page_selection {
             command
                 .arg("-f")
@@ -65,15 +83,15 @@ impl PopplerRenderer {
             source,
         })?;
         if !output.status.success() {
-            return Err(AgentError::RenderUnavailable(format!(
+            return Err(AgentError::RenderBackendFailed(format!(
                 "pdftoppm failed: {}",
                 safe_stderr(&output.stderr)
             )));
         }
 
-        let mut images = find_rendered_pngs(output_dir, &prefix)?;
+        let mut images = find_rendered_pngs(staging.path(), &prefix)?;
         if images.is_empty() {
-            return Err(AgentError::RenderUnavailable(
+            return Err(AgentError::RenderBackendFailed(
                 "pdftoppm did not produce any PNG files".to_string(),
             ));
         }
@@ -81,14 +99,31 @@ impl PopplerRenderer {
         let rendered = images
             .into_iter()
             .enumerate()
-            .map(|(index, path)| {
+            .map(|(index, staged_path)| {
+                let file_name = staged_path.file_name().ok_or_else(|| {
+                    AgentError::RenderBackendFailed(
+                        "rendered image path has no file name".to_string(),
+                    )
+                })?;
+                let path = output_dir.join(file_name);
+                std::fs::copy(&staged_path, &path).map_err(|source| AgentError::Write {
+                    path: path.display().to_string(),
+                    source,
+                })?;
                 let (pixel_width, pixel_height) = png_dimensions(&path)?;
                 let page_number = page_selection
                     .map(|(start, _)| start)
                     .unwrap_or(1)
                     .saturating_add(u32::try_from(index).unwrap_or(u32::MAX));
+                let locator = if artifact.format == officemd_agent::AgentDocumentFormat::Pptx {
+                    ArtifactLocator::PptxSlide {
+                        slide_number: page_number,
+                    }
+                } else {
+                    ArtifactLocator::PdfPage { page_number }
+                };
                 Ok(RenderedImage {
-                    locator: ArtifactLocator::PdfPage { page_number },
+                    locator,
                     path,
                     pixel_width,
                     pixel_height,
@@ -97,6 +132,7 @@ impl PopplerRenderer {
             .collect::<AgentResult<Vec<_>>>()?;
 
         Ok(RenderReport {
+            schema_version: officemd_agent::AGENT_SCHEMA_VERSION,
             artifact,
             backend: RenderBackendKind::Poppler,
             images: rendered,
@@ -167,7 +203,7 @@ fn png_dimensions(path: &Path) -> AgentResult<(u32, u32)> {
         source,
     })?;
     if bytes.len() < 24 || &bytes[..8] != b"\x89PNG\r\n\x1a\n" {
-        return Err(AgentError::RenderUnavailable(format!(
+        return Err(AgentError::RenderBackendFailed(format!(
             "rendered image is not a PNG: {}",
             path.display()
         )));
@@ -180,9 +216,11 @@ fn png_dimensions(path: &Path) -> AgentResult<(u32, u32)> {
 fn safe_stderr(stderr: &[u8]) -> String {
     let text = String::from_utf8_lossy(stderr);
     let trimmed = text.trim();
-    if trimmed.len() > 400 {
-        format!("{}...", &trimmed[..400])
+    let mut chars = trimmed.chars();
+    let prefix = chars.by_ref().take(400).collect::<String>();
+    if chars.next().is_some() {
+        format!("{prefix}...")
     } else {
-        trimmed.to_string()
+        prefix
     }
 }

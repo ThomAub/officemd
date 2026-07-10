@@ -54,6 +54,7 @@ pub enum RenderUnavailableReason {
 pub enum VerificationCheckKind {
     Structure,
     FormulaReferences,
+    PptxCanvasOverflow,
     VisualRender,
 }
 
@@ -66,26 +67,74 @@ pub enum ArtifactRisk {
 }
 
 #[must_use]
-pub fn capability_for(format: AgentDocumentFormat) -> ArtifactCapabilityReport {
+pub fn capability_for(
+    format: AgentDocumentFormat,
+    discovered_rendering: RenderCapability,
+) -> ArtifactCapabilityReport {
     let mutable_operations = match format {
         AgentDocumentFormat::Docx => vec![MutationKind::ReplaceText],
-        AgentDocumentFormat::Xlsx => vec![MutationKind::ReplaceText, MutationKind::RenameXlsxSheet],
+        AgentDocumentFormat::Xlsx => vec![
+            MutationKind::SetXlsxCellValue,
+            MutationKind::SetXlsxCellFormula,
+            MutationKind::RenameXlsxSheet,
+        ],
         AgentDocumentFormat::Pptx => vec![MutationKind::ReplacePptxShapeText],
         AgentDocumentFormat::Csv | AgentDocumentFormat::Pdf => Vec::new(),
     };
 
-    let mut risks = vec![ArtifactRisk::MissingRenderingBackend];
+    let render_capability = capability_for_format(format, discovered_rendering);
+    let mut risks = Vec::new();
+    if matches!(render_capability, RenderCapability::Unavailable { .. }) {
+        risks.push(ArtifactRisk::MissingRenderingBackend);
+    }
     if format == AgentDocumentFormat::Xlsx {
         risks.push(ArtifactRisk::FormulaEvaluationUnavailable);
+    }
+    if format == AgentDocumentFormat::Pdf {
+        risks.push(ArtifactRisk::PdfMayRequireOcr);
+    }
+
+    let mut verification_checks = vec![VerificationCheckKind::Structure];
+    if format == AgentDocumentFormat::Xlsx {
+        verification_checks.push(VerificationCheckKind::FormulaReferences);
+    }
+    if format == AgentDocumentFormat::Pptx {
+        verification_checks.push(VerificationCheckKind::PptxCanvasOverflow);
+    }
+    if matches!(render_capability, RenderCapability::Available { .. }) {
+        verification_checks.push(VerificationCheckKind::VisualRender);
     }
 
     ArtifactCapabilityReport {
         readable: true,
         mutable_operations,
-        render_capability: RenderCapability::Unavailable {
+        render_capability,
+        verification_checks,
+        risks,
+    }
+}
+
+fn capability_for_format(
+    format: AgentDocumentFormat,
+    capability: RenderCapability,
+) -> RenderCapability {
+    match capability {
+        RenderCapability::Available { backend, formats } if formats.contains(&format) => {
+            let backend = if format == AgentDocumentFormat::Pdf
+                && backend == RenderBackendKind::LibreOffice
+            {
+                RenderBackendKind::Poppler
+            } else {
+                backend
+            };
+            RenderCapability::Available {
+                backend,
+                formats: vec![format],
+            }
+        }
+        RenderCapability::Available { .. } => RenderCapability::Unavailable {
             reason: RenderUnavailableReason::BackendNotConfigured,
         },
-        verification_checks: vec![VerificationCheckKind::Structure],
-        risks,
+        unavailable => unavailable,
     }
 }

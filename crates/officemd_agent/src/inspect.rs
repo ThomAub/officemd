@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     ArtifactRef,
     artifact::{AgentDocumentFormat, read_artifact, resolve_artifact},
-    capability::{ArtifactCapabilityReport, capability_for},
+    capability::{
+        ArtifactCapabilityReport, RenderCapability, RenderUnavailableReason, capability_for,
+    },
     diagnostic::Diagnostic,
     error::{AgentError, AgentResult},
     locator::{ArtifactLocator, DocxPartLocator},
@@ -64,6 +66,7 @@ pub struct PdfPageInclude {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InspectionReport {
+    pub schema_version: u32,
     pub artifact: ArtifactRef,
     pub capability: ArtifactCapabilityReport,
     pub findings: Vec<InspectionFinding>,
@@ -110,6 +113,11 @@ pub enum InspectionPayload {
         has_notes: bool,
         comment_count: usize,
     },
+    Shape {
+        slide_number: u32,
+        shape_id: u32,
+        text: String,
+    },
     PdfPage {
         number: u32,
         markdown: Option<String>,
@@ -127,15 +135,65 @@ pub struct CellPayload {
 pub fn inspect(request: &InspectRequest) -> AgentResult<InspectionReport> {
     let bytes = read_artifact(&request.input)?;
     let artifact = resolve_artifact(&request.input, &bytes, request.format)?;
-    let capability = capability_for(artifact.format);
+    let capability = capability_for(
+        artifact.format,
+        RenderCapability::Unavailable {
+            reason: RenderUnavailableReason::BackendNotConfigured,
+        },
+    );
     let findings = inspect_bytes(&bytes, &artifact, &request.query)?;
 
     Ok(InspectionReport {
+        schema_version: crate::AGENT_SCHEMA_VERSION,
         artifact,
         capability,
         findings,
         diagnostics: Vec::new(),
     })
+}
+
+pub fn probe(input: PathBuf, format: Option<AgentDocumentFormat>) -> AgentResult<InspectionReport> {
+    let bytes = read_artifact(&input)?;
+    let artifact = resolve_artifact(&input, &bytes, format)?;
+    validate_probe_structure(artifact.format, &bytes)?;
+    let capability = capability_for(
+        artifact.format,
+        RenderCapability::Unavailable {
+            reason: RenderUnavailableReason::BackendNotConfigured,
+        },
+    );
+    Ok(InspectionReport {
+        schema_version: crate::AGENT_SCHEMA_VERSION,
+        artifact,
+        capability,
+        findings: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+}
+
+fn validate_probe_structure(format: AgentDocumentFormat, bytes: &[u8]) -> AgentResult<()> {
+    match format {
+        AgentDocumentFormat::Docx | AgentDocumentFormat::Xlsx | AgentDocumentFormat::Pptx => {
+            let mut package = officemd_core::opc::OpcPackage::from_bytes(bytes)
+                .map_err(|error| AgentError::Extraction(error.to_string()))?;
+            let required_part = match format {
+                AgentDocumentFormat::Docx => "word/document.xml",
+                AgentDocumentFormat::Xlsx => "xl/workbook.xml",
+                AgentDocumentFormat::Pptx => "ppt/presentation.xml",
+                _ => unreachable!(),
+            };
+            if !package.has_part(required_part) {
+                return Err(AgentError::Extraction(format!(
+                    "required package part is missing: {required_part}"
+                )));
+            }
+            Ok(())
+        }
+        AgentDocumentFormat::Pdf if !officemd_pdf::looks_like_pdf_header(bytes) => Err(
+            AgentError::Extraction("artifact does not contain a PDF header".to_string()),
+        ),
+        AgentDocumentFormat::Csv | AgentDocumentFormat::Pdf => Ok(()),
+    }
 }
 
 fn inspect_bytes(
@@ -322,10 +380,12 @@ fn inspect_xlsx_range(
 
     let mut findings = Vec::new();
     for cell in cells {
-        let value = cell
-            .value
-            .filter(|value| include.values || !value.is_empty());
+        let value = include.values.then_some(cell.value).flatten();
         let formula = include.formulas.then_some(cell.formula).flatten();
+        let number_format = include
+            .number_formats
+            .then_some(cell.number_format)
+            .flatten();
         findings.push(InspectionFinding {
             locator: ArtifactLocator::XlsxCell {
                 sheet: sheet.to_string(),
@@ -336,7 +396,7 @@ fn inspect_xlsx_range(
                 address: cell.address,
                 value,
                 formula,
-                number_format: None,
+                number_format,
             },
         });
     }
@@ -362,7 +422,7 @@ fn inspect_pptx_slides(bytes: &[u8], start: u32, end: u32) -> AgentResult<Vec<In
         },
     )
     .map_err(|e| AgentError::Extraction(e.to_string()))?;
-    Ok(doc
+    let mut findings = doc
         .slides
         .into_iter()
         .map(|slide| InspectionFinding {
@@ -377,7 +437,25 @@ fn inspect_pptx_slides(bytes: &[u8], start: u32, end: u32) -> AgentResult<Vec<In
                 comment_count: slide.comments.len(),
             },
         })
-        .collect())
+        .collect::<Vec<_>>();
+    findings.extend(
+        officemd_pptx::inspect_shapes(bytes, start, end)
+            .map_err(|error| AgentError::Extraction(error.to_string()))?
+            .into_iter()
+            .map(|shape| InspectionFinding {
+                locator: ArtifactLocator::PptxShape {
+                    slide_number: shape.slide_number,
+                    shape_id: shape.shape_id,
+                },
+                kind: "shape".to_string(),
+                payload: InspectionPayload::Shape {
+                    slide_number: shape.slide_number,
+                    shape_id: shape.shape_id,
+                    text: shape.text,
+                },
+            }),
+    );
+    Ok(findings)
 }
 
 fn inspect_pdf_pages(

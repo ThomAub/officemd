@@ -91,6 +91,16 @@ officemd inspect report.pdf --output-format json --pretty
 officemd plan report.xlsx                      # JSON parse map with follow-up commands
 ```
 
+### Pi agent demo
+
+The reproducible YC demo compares Pi with and without the OfficeMD artifact skill on a GDPval XLSX task. It includes the isolated A/B runner, objective scorer, rendered evidence report, and presenter walkthrough:
+
+```bash
+./demos/yc-pi-officemd/run-demo.sh --provider openai --model gpt-5.5 --thinking high
+```
+
+See [demos/yc-pi-officemd/README.md](demos/yc-pi-officemd/README.md) and [demos/yc-pi-officemd/PRESENTATION.md](demos/yc-pi-officemd/PRESENTATION.md).
+
 ### Common options
 
 | Flag | Description |

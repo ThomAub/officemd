@@ -14,3 +14,4 @@ categories = ["command-line-utilities", "text-processing"]
 
 [dependencies]
 officemd_agent = { version = "0.1.8", path = "../officemd_agent" }
+tempfile = "3"

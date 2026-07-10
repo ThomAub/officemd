@@ -30,26 +30,23 @@ impl Default for SystemRenderer {
 
 impl ArtifactRenderer for SystemRenderer {
     fn capability(&self) -> RenderCapability {
-        let mut formats = Vec::new();
-        if self.poppler.is_some() {
-            formats.push(AgentDocumentFormat::Pdf);
-        }
-        if self.poppler.is_some() && self.libreoffice.is_some() {
-            formats.extend([
-                AgentDocumentFormat::Docx,
-                AgentDocumentFormat::Xlsx,
-                AgentDocumentFormat::Pptx,
-            ]);
-        }
-        if formats.is_empty() {
-            RenderCapability::Unavailable {
-                reason: RenderUnavailableReason::MissingExecutable,
-            }
-        } else {
-            RenderCapability::Available {
+        match (&self.poppler, &self.libreoffice) {
+            (Some(_), Some(_)) => RenderCapability::Available {
                 backend: RenderBackendKind::LibreOffice,
-                formats,
-            }
+                formats: vec![
+                    AgentDocumentFormat::Pdf,
+                    AgentDocumentFormat::Docx,
+                    AgentDocumentFormat::Xlsx,
+                    AgentDocumentFormat::Pptx,
+                ],
+            },
+            (Some(_), None) => RenderCapability::Available {
+                backend: RenderBackendKind::Poppler,
+                formats: vec![AgentDocumentFormat::Pdf],
+            },
+            _ => RenderCapability::Unavailable {
+                reason: RenderUnavailableReason::MissingExecutable,
+            },
         }
     }
 

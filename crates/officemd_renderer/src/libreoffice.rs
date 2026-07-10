@@ -1,7 +1,6 @@
 use std::{
     path::{Path, PathBuf},
     process::Command,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use officemd_agent::{
@@ -32,9 +31,15 @@ impl LibreOfficeRenderer {
         artifact: ArtifactRef,
         poppler: &PopplerRenderer,
     ) -> AgentResult<RenderReport> {
-        let temp = TempDir::new("officemd-libreoffice")?;
-        let profile = temp.path.join("profile");
-        let outdir = temp.path.join("out");
+        let temp = tempfile::Builder::new()
+            .prefix("officemd-libreoffice-")
+            .tempdir()
+            .map_err(|source| AgentError::Write {
+                path: std::env::temp_dir().display().to_string(),
+                source,
+            })?;
+        let profile = temp.path().join("profile");
+        let outdir = temp.path().join("out");
         std::fs::create_dir_all(&profile).map_err(|source| AgentError::Read {
             path: profile.display().to_string(),
             source,
@@ -65,8 +70,8 @@ impl LibreOfficeRenderer {
             })?;
 
         let pdf = find_converted_pdf(&outdir)?;
-        if pdf.is_none() || !output.status.success() {
-            return Err(AgentError::RenderUnavailable(format!(
+        if pdf.is_none() {
+            return Err(AgentError::RenderBackendFailed(format!(
                 "LibreOffice conversion failed: {}",
                 safe_stderr(&output.stderr)
             )));
@@ -80,6 +85,7 @@ impl LibreOfficeRenderer {
                 .pages_or_slides
                 .as_ref()
                 .map(|selection| (selection.start, selection.end)),
+            &request.scale,
         )?;
         report.backend = RenderBackendKind::LibreOffice;
         Ok(report)
@@ -102,30 +108,6 @@ impl ArtifactRenderer for LibreOfficeRenderer {
         Err(AgentError::RenderUnavailable(
             "LibreOffice rendering requires a Poppler renderer for PDF rasterization".to_string(),
         ))
-    }
-}
-
-struct TempDir {
-    path: PathBuf,
-}
-
-impl TempDir {
-    fn new(prefix: &str) -> AgentResult<Self> {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_nanos());
-        let path = std::env::temp_dir().join(format!("{prefix}-{}-{nonce}", std::process::id()));
-        std::fs::create_dir_all(&path).map_err(|source| AgentError::Read {
-            path: path.display().to_string(),
-            source,
-        })?;
-        Ok(Self { path })
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 
@@ -170,9 +152,11 @@ fn find_converted_pdf(outdir: &Path) -> AgentResult<Option<PathBuf>> {
 fn safe_stderr(stderr: &[u8]) -> String {
     let text = String::from_utf8_lossy(stderr);
     let trimmed = text.trim();
-    if trimmed.len() > 400 {
-        format!("{}...", &trimmed[..400])
+    let mut chars = trimmed.chars();
+    let prefix = chars.by_ref().take(400).collect::<String>();
+    if chars.next().is_some() {
+        format!("{prefix}...")
     } else {
-        trimmed.to_string()
+        prefix
     }
 }

@@ -50,6 +50,15 @@ impl StyleContext {
         };
         render_cell_value_with_mode(&cell, self, mode)
     }
+
+    pub(crate) fn number_format_code(&self, style_index: Option<usize>) -> Option<String> {
+        let format_id = *self.styles.cell_xf_num_fmt_ids.get(style_index?)?;
+        self.styles
+            .custom_num_formats
+            .get(&format_id)
+            .cloned()
+            .or_else(|| builtin_num_format_code(format_id).map(str::to_string))
+    }
 }
 
 #[derive(Debug, Default)]

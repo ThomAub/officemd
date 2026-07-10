@@ -9,6 +9,11 @@ pub enum AgentError {
         path: String,
         source: std::io::Error,
     },
+    #[error("failed to write artifact '{path}': {source}")]
+    Write {
+        path: String,
+        source: std::io::Error,
+    },
     #[error("unsupported or unrecognized artifact format: {0}")]
     Format(String),
     #[error("artifact extraction failed: {0}")]
@@ -21,6 +26,8 @@ pub enum AgentError {
     PatchPreconditionFailed(String),
     #[error("rendering is unavailable: {0}")]
     RenderUnavailable(String),
+    #[error("renderer backend failed: {0}")]
+    RenderBackendFailed(String),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 }

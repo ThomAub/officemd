@@ -8,7 +8,7 @@ use crate::{
     capability::VerificationCheckKind,
     error::{AgentError, AgentResult},
     locator::ArtifactLocator,
-    render::RenderReport,
+    render::{ArtifactRenderer, RenderReport, RenderRequest, RenderScale},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +21,7 @@ pub struct VerifyRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerificationReport {
+    pub schema_version: u32,
     pub artifact: ArtifactRef,
     pub status: VerificationStatus,
     pub checks: Vec<CheckReport>,
@@ -45,7 +46,10 @@ pub struct CheckReport {
     pub message: String,
 }
 
-pub fn verify(request: &VerifyRequest) -> AgentResult<VerificationReport> {
+pub fn verify(
+    request: &VerifyRequest,
+    renderer: &(dyn ArtifactRenderer + Send + Sync),
+) -> AgentResult<VerificationReport> {
     let bytes = read_artifact(&request.input)?;
     let artifact = resolve_artifact(&request.input, &bytes, None)?;
     let requested = if request.checks.is_empty() {
@@ -61,22 +65,82 @@ pub fn verify(request: &VerifyRequest) -> AgentResult<VerificationReport> {
             VerificationCheckKind::FormulaReferences => {
                 checks.push(formula_reference_check(&artifact, &bytes)?);
             }
-            VerificationCheckKind::VisualRender => checks.push(CheckReport {
-                kind: VerificationCheckKind::VisualRender,
-                status: VerificationStatus::NotRunnable,
-                locator: None,
-                message: "visual verification needs a configured renderer backend".to_string(),
-            }),
+            VerificationCheckKind::PptxCanvasOverflow => {
+                checks.push(pptx_canvas_overflow_check(&artifact, &bytes)?);
+            }
+            VerificationCheckKind::VisualRender => {}
         }
     }
 
+    let rendered_evidence = if request
+        .checks
+        .contains(&VerificationCheckKind::VisualRender)
+    {
+        let (check, evidence) = visual_render_check(request, renderer);
+        checks.push(check);
+        evidence
+    } else {
+        None
+    };
+
     Ok(VerificationReport {
+        schema_version: crate::AGENT_SCHEMA_VERSION,
         artifact,
         status: aggregate_status(&checks),
         checks,
         diagnostics: Vec::new(),
-        rendered_evidence: None,
+        rendered_evidence,
     })
+}
+
+fn visual_render_check(
+    request: &VerifyRequest,
+    renderer: &(dyn ArtifactRenderer + Send + Sync),
+) -> (CheckReport, Option<RenderReport>) {
+    let Some(output_dir) = &request.render_output_dir else {
+        return (
+            CheckReport {
+                kind: VerificationCheckKind::VisualRender,
+                status: VerificationStatus::NotRunnable,
+                locator: None,
+                message: "visual verification requires render_output_dir".to_string(),
+            },
+            None,
+        );
+    };
+    let render_request = RenderRequest {
+        input: request.input.clone(),
+        output_dir: output_dir.clone(),
+        pages_or_slides: None,
+        scale: RenderScale::Screen,
+    };
+    match renderer.render(&render_request) {
+        Ok(report) => (
+            CheckReport {
+                kind: VerificationCheckKind::VisualRender,
+                status: VerificationStatus::Passed,
+                locator: None,
+                message: format!("rendered {} visual evidence image(s)", report.images.len()),
+            },
+            Some(report),
+        ),
+        Err(error) => (
+            CheckReport {
+                kind: VerificationCheckKind::VisualRender,
+                status: if matches!(
+                    error,
+                    AgentError::RenderUnavailable(_) | AgentError::UnsupportedCapability(_)
+                ) {
+                    VerificationStatus::NotRunnable
+                } else {
+                    VerificationStatus::Failed
+                },
+                locator: None,
+                message: error.to_string(),
+            },
+            None,
+        ),
+    }
 }
 
 fn structure_check(artifact: &ArtifactRef, bytes: &[u8]) -> CheckReport {
@@ -122,22 +186,18 @@ fn formula_reference_check(artifact: &ArtifactRef, bytes: &[u8]) -> AgentResult<
             message: "formula reference checks only apply to XLSX artifacts".to_string(),
         });
     }
-    let doc = officemd_xlsx::extract_tables_ir(bytes)
-        .map_err(|e| AgentError::Extraction(e.to_string()))?;
-    for sheet in doc.sheets {
-        for formula in sheet.formulas {
-            if formula.formula.contains("#REF!") {
-                return Ok(CheckReport {
-                    kind: VerificationCheckKind::FormulaReferences,
-                    status: VerificationStatus::Failed,
-                    locator: Some(ArtifactLocator::XlsxCell {
-                        sheet: sheet.name,
-                        address: formula.cell_ref,
-                    }),
-                    message: "formula contains #REF!".to_string(),
-                });
-            }
-        }
+    let errors = officemd_xlsx::inspect_formula_errors(bytes)
+        .map_err(|error| AgentError::Extraction(error.to_string()))?;
+    if let Some(error) = errors.first() {
+        return Ok(CheckReport {
+            kind: VerificationCheckKind::FormulaReferences,
+            status: VerificationStatus::Failed,
+            locator: Some(ArtifactLocator::XlsxCell {
+                sheet: error.sheet.clone(),
+                address: error.address.clone(),
+            }),
+            message: format!("stored formula error detected: {}", error.error),
+        });
     }
     Ok(CheckReport {
         kind: VerificationCheckKind::FormulaReferences,
@@ -147,12 +207,51 @@ fn formula_reference_check(artifact: &ArtifactRef, bytes: &[u8]) -> AgentResult<
     })
 }
 
+fn pptx_canvas_overflow_check(artifact: &ArtifactRef, bytes: &[u8]) -> AgentResult<CheckReport> {
+    if artifact.format != AgentDocumentFormat::Pptx {
+        return Ok(CheckReport {
+            kind: VerificationCheckKind::PptxCanvasOverflow,
+            status: VerificationStatus::NotRunnable,
+            locator: None,
+            message: "canvas overflow checks only apply to PPTX artifacts".to_string(),
+        });
+    }
+    let overflows = officemd_pptx::inspect_canvas_overflows(bytes)
+        .map_err(|error| AgentError::Extraction(error.to_string()))?;
+    if let Some(first) = overflows.first() {
+        return Ok(CheckReport {
+            kind: VerificationCheckKind::PptxCanvasOverflow,
+            status: VerificationStatus::Failed,
+            locator: Some(ArtifactLocator::PptxShape {
+                slide_number: first.slide_number,
+                shape_id: first.shape_id,
+            }),
+            message: format!(
+                "{} shape(s) extend beyond the slide canvas",
+                overflows.len()
+            ),
+        });
+    }
+    Ok(CheckReport {
+        kind: VerificationCheckKind::PptxCanvasOverflow,
+        status: VerificationStatus::Passed,
+        locator: None,
+        message: "no shape canvas overflow detected".to_string(),
+    })
+}
+
 fn aggregate_status(checks: &[CheckReport]) -> VerificationStatus {
     if checks
         .iter()
         .any(|check| check.status == VerificationStatus::Failed)
     {
         VerificationStatus::Failed
+    } else if !checks.is_empty()
+        && checks
+            .iter()
+            .all(|check| check.status == VerificationStatus::NotRunnable)
+    {
+        VerificationStatus::NotRunnable
     } else if checks
         .iter()
         .any(|check| check.status == VerificationStatus::NotRunnable)

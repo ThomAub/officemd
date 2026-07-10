@@ -15,18 +15,23 @@ pub trait ArtifactRenderer {
     fn render(&self, request: &RenderRequest) -> AgentResult<RenderReport>;
 }
 
-pub fn render_unavailable(request: &RenderRequest) -> AgentResult<RenderReport> {
-    let bytes = read_artifact(&request.input)?;
-    let artifact = resolve_artifact(&request.input, &bytes, None)?;
-    Ok(RenderReport {
-        artifact,
-        backend: RenderBackendKind::Unavailable,
-        images: Vec::new(),
-        diagnostics: vec![Diagnostic::warning(
-            "render_unavailable",
-            "no renderer backend is configured",
-        )],
-    })
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct UnavailableRenderer;
+
+impl ArtifactRenderer for UnavailableRenderer {
+    fn capability(&self) -> RenderCapability {
+        RenderCapability::Unavailable {
+            reason: crate::RenderUnavailableReason::BackendNotConfigured,
+        }
+    }
+
+    fn render(&self, request: &RenderRequest) -> AgentResult<RenderReport> {
+        let bytes = read_artifact(&request.input)?;
+        let _artifact = resolve_artifact(&request.input, &bytes, None)?;
+        Err(crate::AgentError::RenderUnavailable(
+            "no renderer backend is configured".to_string(),
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +45,7 @@ pub struct RenderRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderReport {
+    pub schema_version: u32,
     pub artifact: ArtifactRef,
     pub backend: RenderBackendKind,
     pub images: Vec<RenderedImage>,

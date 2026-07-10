@@ -28,7 +28,7 @@ pub enum PatchPlanVersion {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PatchOperation {
     ReplaceText {
         target: ArtifactLocator,

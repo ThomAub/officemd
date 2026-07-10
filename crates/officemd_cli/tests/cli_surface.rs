@@ -31,6 +31,7 @@ fn top_level_help_snapshot() {
       apply            Apply a typed agent patch plan to a new output artifact
       render-artifact  Render an artifact into visual evidence images when a backend is available
       verify           Verify semantic, structural, or visual artifact invariants
+      diff-artifact    Compare artifacts through semantic projections and rendered evidence
       markdown         Extract markdown, print to stdout
       render           Extract markdown, render to terminal with ANSI formatting
       diff             Diff markdown output of two documents
@@ -120,10 +121,10 @@ fn markdown_help_snapshot() {
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-frontmatter
               Omit the leading `<!-- officemd: ... -->` frontmatter comment
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-first-row-header
               Use synthetic Col1/Col2 headers instead of first data row
           --markdown-style <MARKDOWN_STYLE>
@@ -177,10 +178,10 @@ fn render_help_snapshot() {
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-frontmatter
               Omit the leading `<!-- officemd: ... -->` frontmatter comment
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-first-row-header
               Use synthetic Col1/Col2 headers instead of first data row
           --markdown-style <MARKDOWN_STYLE>
@@ -235,10 +236,10 @@ fn diff_help_snapshot() {
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-frontmatter
               Omit the leading `<!-- officemd: ... -->` frontmatter comment
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-first-row-header
               Use synthetic Col1/Col2 headers instead of first data row
           --markdown-style <MARKDOWN_STYLE>
@@ -292,10 +293,10 @@ fn convert_help_snapshot() {
               Include document properties in markdown output
           --no-headers-footers
               Omit DOCX header/footer sections from markdown output
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-formulas
               Omit XLSX formula footnotes from markdown output
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-frontmatter
               Omit the leading `<!-- officemd: ... -->` frontmatter comment
           --no-first-row-header
@@ -351,10 +352,10 @@ fn stream_help_snapshot() {
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-frontmatter
               Omit the leading `<!-- officemd: ... -->` frontmatter comment
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-first-row-header
               Use synthetic Col1/Col2 headers instead of first data row
           --markdown-style <MARKDOWN_STYLE>
@@ -408,10 +409,10 @@ fn inspect_help_snapshot() {
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-frontmatter
               Omit the leading `<!-- officemd: ... -->` frontmatter comment
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-first-row-header
               Use synthetic Col1/Col2 headers instead of first data row
           --markdown-style <MARKDOWN_STYLE>
@@ -467,10 +468,10 @@ fn plan_help_snapshot() {
               Omit DOCX header/footer sections from markdown output
           --no-formulas
               Omit XLSX formula footnotes from markdown output
-          --help-tree [<DEPTH>]
-              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-frontmatter
               Omit the leading `<!-- officemd: ... -->` frontmatter comment
+          --help-tree [<DEPTH>]
+              Show commands and options in a tree format. Depth 1 shows commands only, depth 2 includes arguments and options
           --no-first-row-header
               Use synthetic Col1/Col2 headers instead of first data row
           --markdown-style <MARKDOWN_STYLE>

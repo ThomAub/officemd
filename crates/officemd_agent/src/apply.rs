@@ -1,30 +1,26 @@
 use std::{
-    collections::BTreeMap,
-    io::{Cursor, Read, Write},
-    path::Path,
-    sync::LazyLock,
+    ffi::OsString,
+    io::Write,
+    path::{Path, PathBuf},
 };
 
-use officemd_core::{
-    PptxPatch, PptxTextScope, ScopedPptxReplace, ScopedXlsxReplace, TextReplace, XlsxPatch,
-    XlsxSheetRename, XlsxTextScope,
-};
-use regex::Regex;
+use officemd_core::{XlsxPatch, XlsxSheetRename};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
     ArtifactRef,
-    artifact::{AgentDocumentFormat, fingerprint_bytes, read_artifact, resolve_artifact},
+    artifact::{AgentDocumentFormat, read_artifact, resolve_artifact},
     capability::MutationKind,
     diagnostic::Diagnostic,
     error::{AgentError, AgentResult},
     locator::ArtifactLocator,
-    patch_plan::{ApplyPatchRequest, PatchOperation},
+    patch_plan::{ApplyPatchRequest, CellValue, PatchOperation},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApplyPatchReport {
+    pub schema_version: u32,
     pub source: ArtifactRef,
     pub output: Option<ArtifactRef>,
     pub request_id: String,
@@ -62,6 +58,7 @@ pub enum OperationStatus {
 }
 
 pub fn apply_patch(request: &ApplyPatchRequest) -> AgentResult<ApplyPatchReport> {
+    validate_patch_request(request)?;
     let source_bytes = read_artifact(&request.input)?;
     let source = resolve_artifact(&request.input, &source_bytes, None)?;
     if source.fingerprint.sha256 != request.expected_source_sha256 {
@@ -70,19 +67,23 @@ pub fn apply_patch(request: &ApplyPatchRequest) -> AgentResult<ApplyPatchReport>
             request.expected_source_sha256, source.fingerprint.sha256
         )));
     }
-    if request.input == request.output {
+    if same_path(&request.input, &request.output) {
         return Err(AgentError::PatchPreconditionFailed(
             "output path must differ from input path".to_string(),
         ));
     }
-    if request.output.exists() {
+    let patch_sha256 = patch_sha256(&request.patch)?;
+    let sidecar = sidecar_path(&request.output);
+    if request.output.exists() || sidecar.exists() {
+        if let Some(report) = matching_existing_report(request, &source, &patch_sha256, &sidecar)? {
+            return Ok(report);
+        }
         return Err(AgentError::PatchPreconditionFailed(format!(
-            "output already exists: {}",
+            "output or patch sidecar already exists with conflicting provenance: {}",
             request.output.display()
         )));
     }
 
-    let patch_sha256 = patch_sha256(&request.patch)?;
     let (patched_bytes, operations) = match source.format {
         AgentDocumentFormat::Docx => apply_docx(&source_bytes, &request.patch.operations)?,
         AgentDocumentFormat::Xlsx => apply_xlsx(&source_bytes, &request.patch.operations)?,
@@ -101,7 +102,20 @@ pub fn apply_patch(request: &ApplyPatchRequest) -> AgentResult<ApplyPatchReport>
             OperationStatus::Failed | OperationStatus::Unsupported
         )
     }) {
+        let operations = operations
+            .into_iter()
+            .map(|mut operation| {
+                if operation.status == OperationStatus::Applied {
+                    operation.status = OperationStatus::Skipped;
+                    operation.message =
+                        "operation was not committed because the patch plan was rejected"
+                            .to_string();
+                }
+                operation
+            })
+            .collect();
         return Ok(ApplyPatchReport {
+            schema_version: crate::AGENT_SCHEMA_VERSION,
             source,
             output: None,
             request_id: request.patch.request_id.clone(),
@@ -112,14 +126,13 @@ pub fn apply_patch(request: &ApplyPatchRequest) -> AgentResult<ApplyPatchReport>
         });
     }
 
-    write_atomic(&request.output, &patched_bytes)?;
-    let output = ArtifactRef {
-        path: request.output.clone(),
-        format: source.format,
-        fingerprint: fingerprint_bytes(&patched_bytes),
-    };
+    validate_output(source.format, &patched_bytes)?;
+    write_atomic(&request.output, &patched_bytes, &request.patch.request_id)?;
+    let persisted_bytes = read_artifact(&request.output)?;
+    let output = resolve_artifact(&request.output, &persisted_bytes, Some(source.format))?;
 
-    Ok(ApplyPatchReport {
+    let report = ApplyPatchReport {
+        schema_version: crate::AGENT_SCHEMA_VERSION,
         source,
         output: Some(output),
         request_id: request.patch.request_id.clone(),
@@ -127,7 +140,89 @@ pub fn apply_patch(request: &ApplyPatchRequest) -> AgentResult<ApplyPatchReport>
         status: ApplyPatchStatus::Applied,
         operations,
         diagnostics: Vec::new(),
-    })
+    };
+    if let Err(error) = write_sidecar(&sidecar, &report, &request.patch.request_id) {
+        let _ = std::fs::remove_file(&request.output);
+        return Err(error);
+    }
+    Ok(report)
+}
+
+fn validate_patch_request(request: &ApplyPatchRequest) -> AgentResult<()> {
+    if request.patch.request_id.trim().is_empty() {
+        return Err(AgentError::InvalidRequest(
+            "patch request_id must not be empty".to_string(),
+        ));
+    }
+    if request.patch.operations.is_empty() {
+        return Err(AgentError::InvalidRequest(
+            "patch plan must contain at least one operation".to_string(),
+        ));
+    }
+    for operation in &request.patch.operations {
+        match operation {
+            PatchOperation::ReplaceText { expected_text, .. }
+            | PatchOperation::ReplacePptxShapeText { expected_text, .. }
+                if expected_text.is_empty() =>
+            {
+                return Err(AgentError::InvalidRequest(
+                    "replacement expected_text must not be empty".to_string(),
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn sidecar_path(output: &Path) -> PathBuf {
+    let mut value = OsString::from(output.as_os_str());
+    value.push(".officemd.json");
+    PathBuf::from(value)
+}
+
+fn matching_existing_report(
+    request: &ApplyPatchRequest,
+    source: &ArtifactRef,
+    patch_sha256: &str,
+    sidecar: &Path,
+) -> AgentResult<Option<ApplyPatchReport>> {
+    if !request.output.is_file() || !sidecar.is_file() {
+        return Ok(None);
+    }
+    let sidecar_bytes = std::fs::read(sidecar).map_err(|source| AgentError::Read {
+        path: sidecar.display().to_string(),
+        source,
+    })?;
+    let mut report: ApplyPatchReport = serde_json::from_slice(&sidecar_bytes)?;
+    let output_bytes = read_artifact(&request.output)?;
+    let actual_output = resolve_artifact(&request.output, &output_bytes, Some(source.format))?;
+    let matches = report.schema_version == crate::AGENT_SCHEMA_VERSION
+        && report.request_id == request.patch.request_id
+        && report.patch_sha256 == patch_sha256
+        && report.source.fingerprint.sha256 == source.fingerprint.sha256
+        && report.output.as_ref().is_some_and(|recorded| {
+            recorded.path == request.output && recorded.fingerprint == actual_output.fingerprint
+        });
+    if !matches {
+        return Ok(None);
+    }
+    report.status = ApplyPatchStatus::AlreadyApplied;
+    for operation in &mut report.operations {
+        operation.status = OperationStatus::Skipped;
+        operation.message = "identical patch was already applied".to_string();
+    }
+    Ok(Some(report))
 }
 
 fn apply_docx(
@@ -142,7 +237,7 @@ fn apply_docx(
                 target,
                 expected_text,
                 replacement,
-                preserve_formatting: _,
+                preserve_formatting,
             } if matches!(
                 target,
                 ArtifactLocator::DocxParagraph { .. } | ArtifactLocator::DocxTableCell { .. }
@@ -153,6 +248,7 @@ fn apply_docx(
                     target,
                     expected_text,
                     replacement,
+                    *preserve_formatting,
                 )?;
                 if replacements == 0 {
                     return Err(AgentError::PatchPreconditionFailed(
@@ -184,237 +280,112 @@ fn apply_docx_locator_replace(
     target: &ArtifactLocator,
     expected_text: &str,
     replacement: &str,
+    preserve_formatting: bool,
 ) -> AgentResult<usize> {
-    let (part, updated, replacements) = {
-        let parts = read_zip_parts(content)?;
-        let part = docx_locator_part(target)?;
-        let xml = parts
-            .get(&part)
-            .ok_or_else(|| AgentError::InvalidRequest(format!("DOCX part not found: {part}")))?;
-        let xml = String::from_utf8_lossy(xml);
-        let (updated, replacements) = match target {
-            ArtifactLocator::DocxParagraph {
-                paragraph_index, ..
-            } => replace_docx_paragraph(&xml, *paragraph_index, expected_text, replacement),
-            ArtifactLocator::DocxTableCell {
-                table_index,
-                row_index,
-                column_index,
-                ..
-            } => replace_docx_table_cell(
-                &xml,
-                *table_index,
-                *row_index,
-                *column_index,
-                expected_text,
-                replacement,
-            ),
-            _ => {
-                return Err(AgentError::InvalidRequest(
-                    "target must be a DOCX locator".into(),
-                ));
-            }
-        };
-        (part, updated, replacements)
-    };
-
-    if replacements > 0 {
-        replace_zip_part(content, &part, updated.as_bytes())?;
-    }
-    Ok(replacements)
-}
-
-fn docx_locator_part(target: &ArtifactLocator) -> AgentResult<String> {
-    let part = match target {
-        ArtifactLocator::DocxParagraph { part, .. }
-        | ArtifactLocator::DocxTableCell { part, .. } => part.part.as_str(),
+    let locator = match target {
+        ArtifactLocator::DocxParagraph {
+            part,
+            paragraph_index,
+        } => officemd_docx::DocxLocator::Paragraph {
+            part: part.part.clone(),
+            paragraph_index: *paragraph_index,
+        },
+        ArtifactLocator::DocxTableCell {
+            part,
+            table_index,
+            row_index,
+            column_index,
+        } => officemd_docx::DocxLocator::TableCell {
+            part: part.part.clone(),
+            table_index: *table_index,
+            row_index: *row_index,
+            column_index: *column_index,
+        },
         _ => {
             return Err(AgentError::InvalidRequest(
-                "target must be a DOCX locator".into(),
+                "target must be a DOCX locator".to_string(),
             ));
         }
     };
-    Ok(match part {
-        "body" | "document" => "word/document.xml".to_string(),
-        "footnotes" => "word/footnotes.xml".to_string(),
-        "endnotes" => "word/endnotes.xml".to_string(),
-        path if path.starts_with("word/") => path.to_string(),
-        name => format!("word/{name}.xml"),
-    })
-}
-
-fn replace_docx_paragraph(
-    xml: &str,
-    paragraph_index: u32,
-    expected_text: &str,
-    replacement: &str,
-) -> (String, usize) {
-    let mut visible_index = 0u32;
-    replace_indexed_match(xml, &WORD_PARAGRAPH_RE, |block| {
-        if docx_text(block).trim().is_empty() {
-            return None;
-        }
-        let is_target = visible_index == paragraph_index;
-        visible_index = visible_index.saturating_add(1);
-        is_target.then(|| replace_docx_text_nodes(block, expected_text, replacement))
-    })
-}
-
-fn replace_docx_table_cell(
-    xml: &str,
-    table_index: u32,
-    row_index: u32,
-    column_index: u32,
-    expected_text: &str,
-    replacement: &str,
-) -> (String, usize) {
-    let mut current_table = 0u32;
-    replace_indexed_match(xml, &WORD_TABLE_RE, |table| {
-        let is_target_table = current_table == table_index;
-        current_table = current_table.saturating_add(1);
-        if !is_target_table {
-            return None;
-        }
-        let mut current_row = 0u32;
-        Some(replace_indexed_match(table, &WORD_ROW_RE, |row| {
-            let is_target_row = current_row == row_index;
-            current_row = current_row.saturating_add(1);
-            if !is_target_row {
-                return None;
-            }
-            let mut current_col = 0u32;
-            Some(replace_indexed_match(row, &WORD_CELL_RE, |cell| {
-                let is_target_col = current_col == column_index;
-                current_col = current_col.saturating_add(1);
-                is_target_col.then(|| replace_docx_text_nodes(cell, expected_text, replacement))
-            }))
-        }))
-    })
-}
-
-fn replace_indexed_match<F>(xml: &str, regex: &Regex, mut replacer: F) -> (String, usize)
-where
-    F: FnMut(&str) -> Option<(String, usize)>,
-{
-    let mut output = String::with_capacity(xml.len());
-    let mut last = 0usize;
-    let mut replacements = 0usize;
-    for mat in regex.find_iter(xml) {
-        output.push_str(&xml[last..mat.start()]);
-        if replacements == 0
-            && let Some((updated, count)) = replacer(mat.as_str())
-        {
-            output.push_str(&updated);
-            replacements = replacements.saturating_add(count);
-        } else {
-            output.push_str(mat.as_str());
-        }
-        last = mat.end();
+    let (rewritten, replacements) = officemd_docx::replace_locator_text(
+        content,
+        &locator,
+        expected_text,
+        replacement,
+        preserve_formatting,
+    )
+    .map_err(|error| AgentError::PatchPreconditionFailed(error.to_string()))?;
+    if replacements > 0 {
+        *content = rewritten;
     }
-    output.push_str(&xml[last..]);
-    (output, replacements)
+    Ok(replacements)
 }
-
-fn replace_docx_text_nodes(xml: &str, expected_text: &str, replacement: &str) -> (String, usize) {
-    let mut output = String::with_capacity(xml.len());
-    let mut last = 0usize;
-    let mut replacements = 0usize;
-    for captures in WORD_TEXT_NODE_RE.captures_iter(xml) {
-        let Some(mat) = captures.get(0) else {
-            continue;
-        };
-        let Some(text) = captures.get(1) else {
-            continue;
-        };
-        output.push_str(&xml[last..text.start()]);
-        let count = text.as_str().match_indices(expected_text).count();
-        if count == 0 {
-            output.push_str(text.as_str());
-        } else {
-            output.push_str(&text.as_str().replace(expected_text, replacement));
-            replacements = replacements.saturating_add(count);
-        }
-        output.push_str(&xml[text.end()..mat.end()]);
-        last = mat.end();
-    }
-    output.push_str(&xml[last..]);
-    (output, replacements)
-}
-
-fn docx_text(xml: &str) -> String {
-    WORD_TEXT_NODE_RE
-        .captures_iter(xml)
-        .filter_map(|captures| captures.get(1).map(|text| text.as_str()))
-        .collect()
-}
-
-fn read_zip_parts(content: &[u8]) -> AgentResult<BTreeMap<String, Vec<u8>>> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(content))
-        .map_err(|e| AgentError::Extraction(e.to_string()))?;
-    let mut parts = BTreeMap::new();
-    for index in 0..archive.len() {
-        let mut file = archive
-            .by_index(index)
-            .map_err(|e| AgentError::Extraction(e.to_string()))?;
-        if file.is_dir() {
-            continue;
-        }
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
-            .map_err(|e| AgentError::Extraction(e.to_string()))?;
-        parts.insert(file.name().to_string(), bytes);
-    }
-    Ok(parts)
-}
-
-fn replace_zip_part(content: &mut Vec<u8>, part: &str, replacement: &[u8]) -> AgentResult<()> {
-    let mut parts = read_zip_parts(content)?;
-    parts.insert(part.to_string(), replacement.to_vec());
-    let mut rewritten = Vec::new();
-    {
-        let mut writer = zip::ZipWriter::new(Cursor::new(&mut rewritten));
-        let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
-        for (name, bytes) in parts {
-            writer
-                .start_file(name, options)
-                .map_err(|e| AgentError::Extraction(e.to_string()))?;
-            writer
-                .write_all(&bytes)
-                .map_err(|e| AgentError::Extraction(e.to_string()))?;
-        }
-        writer
-            .finish()
-            .map_err(|e| AgentError::Extraction(e.to_string()))?;
-    }
-    *content = rewritten;
-    Ok(())
-}
-
-static WORD_PARAGRAPH_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)<w:p(?:\s+[^>]*)?>.*?</w:p>").unwrap());
-static WORD_TABLE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)<w:tbl(?:\s+[^>]*)?>.*?</w:tbl>").unwrap());
-static WORD_ROW_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)<w:tr(?:\s+[^>]*)?>.*?</w:tr>").unwrap());
-static WORD_CELL_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)<w:tc(?:\s+[^>]*)?>.*?</w:tc>").unwrap());
-static WORD_TEXT_NODE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)<w:t(?:\s+[^>]*)?>(.*?)</w:t>").unwrap());
 
 fn apply_xlsx(
     source_bytes: &[u8],
     operations: &[PatchOperation],
 ) -> AgentResult<(Vec<u8>, Vec<OperationReport>)> {
-    let mut patch = XlsxPatch::default();
+    let mut patched_bytes = source_bytes.to_vec();
     let mut reports = Vec::new();
     for (index, operation) in operations.iter().enumerate() {
         match operation {
+            PatchOperation::SetXlsxCellValue { target, value } => {
+                let update = match value {
+                    CellValue::Text(value) => officemd_xlsx::XlsxCellUpdate::Text(value.clone()),
+                    CellValue::Number(value) => officemd_xlsx::XlsxCellUpdate::Number(*value),
+                    CellValue::Bool(value) => officemd_xlsx::XlsxCellUpdate::Bool(*value),
+                    CellValue::Blank => officemd_xlsx::XlsxCellUpdate::Blank,
+                };
+                patched_bytes = officemd_xlsx::set_cell(
+                    &patched_bytes,
+                    &target.sheet,
+                    &target.address,
+                    &update,
+                )
+                .map_err(|error| AgentError::PatchPreconditionFailed(error.to_string()))?;
+                reports.push(operation_report(
+                    index,
+                    MutationKind::SetXlsxCellValue,
+                    ArtifactLocator::XlsxCell {
+                        sheet: target.sheet.clone(),
+                        address: target.address.clone(),
+                    },
+                    OperationStatus::Applied,
+                    "set XLSX cell value",
+                ));
+            }
+            PatchOperation::SetXlsxCellFormula { target, formula } => {
+                patched_bytes = officemd_xlsx::set_cell(
+                    &patched_bytes,
+                    &target.sheet,
+                    &target.address,
+                    &officemd_xlsx::XlsxCellUpdate::Formula(formula.clone()),
+                )
+                .map_err(|error| AgentError::PatchPreconditionFailed(error.to_string()))?;
+                reports.push(operation_report(
+                    index,
+                    MutationKind::SetXlsxCellFormula,
+                    ArtifactLocator::XlsxCell {
+                        sheet: target.sheet.clone(),
+                        address: target.address.clone(),
+                    },
+                    OperationStatus::Applied,
+                    "set XLSX cell formula",
+                ));
+            }
             PatchOperation::RenameXlsxSheet { target, new_name } => {
-                patch.rename_sheets.push(XlsxSheetRename {
-                    from: target.name.clone(),
-                    to: new_name.clone(),
-                    update_references: true,
-                });
+                validate_xlsx_sheet_rename(&patched_bytes, &target.name, new_name)?;
+                let patch = XlsxPatch {
+                    rename_sheets: vec![XlsxSheetRename {
+                        from: target.name.clone(),
+                        to: new_name.clone(),
+                        update_references: true,
+                    }],
+                    ..Default::default()
+                };
+                patched_bytes = officemd_core::patch_xlsx_with_report(&patched_bytes, &patch)
+                    .map_err(|error| AgentError::PatchPreconditionFailed(error.to_string()))?
+                    .content;
                 reports.push(operation_report(
                     index,
                     MutationKind::RenameXlsxSheet,
@@ -422,25 +393,7 @@ fn apply_xlsx(
                         name: target.name.clone(),
                     },
                     OperationStatus::Applied,
-                    "queued XLSX sheet rename",
-                ));
-            }
-            PatchOperation::ReplaceText {
-                target,
-                expected_text,
-                replacement,
-                preserve_formatting: _,
-            } => {
-                patch.scoped_replacements.push(ScopedXlsxReplace {
-                    scope: XlsxTextScope::AllText,
-                    replace: TextReplace::all(expected_text, replacement),
-                });
-                reports.push(operation_report(
-                    index,
-                    MutationKind::ReplaceText,
-                    target.clone(),
-                    OperationStatus::Applied,
-                    "queued XLSX text replacement",
+                    "renamed XLSX sheet",
                 ));
             }
             _ => reports.push(unsupported_operation(index, operation)),
@@ -452,16 +405,46 @@ fn apply_xlsx(
     {
         return Ok((source_bytes.to_vec(), reports));
     }
-    let patched = officemd_core::patch_xlsx_with_report(source_bytes, &patch)
-        .map_err(|e| AgentError::Extraction(e.to_string()))?;
-    Ok((patched.content, reports))
+    Ok((patched_bytes, reports))
+}
+
+fn validate_xlsx_sheet_rename(content: &[u8], from: &str, to: &str) -> AgentResult<()> {
+    if to.trim().is_empty() || to.chars().count() > 31 {
+        return Err(AgentError::InvalidRequest(
+            "XLSX sheet name must contain between 1 and 31 characters".to_string(),
+        ));
+    }
+    if to
+        .chars()
+        .any(|character| matches!(character, ':' | '\\' | '/' | '?' | '*' | '[' | ']'))
+    {
+        return Err(AgentError::InvalidRequest(
+            "XLSX sheet name contains a forbidden character".to_string(),
+        ));
+    }
+    let sheets = officemd_xlsx::inspect_sheet_summaries(content, None)
+        .map_err(|error| AgentError::Extraction(error.to_string()))?;
+    if !sheets.iter().any(|sheet| sheet.name == from) {
+        return Err(AgentError::PatchPreconditionFailed(format!(
+            "XLSX sheet not found: {from}"
+        )));
+    }
+    if sheets
+        .iter()
+        .any(|sheet| sheet.name.eq_ignore_ascii_case(to) && !sheet.name.eq_ignore_ascii_case(from))
+    {
+        return Err(AgentError::PatchPreconditionFailed(format!(
+            "XLSX sheet already exists: {to}"
+        )));
+    }
+    Ok(())
 }
 
 fn apply_pptx(
     source_bytes: &[u8],
     operations: &[PatchOperation],
 ) -> AgentResult<(Vec<u8>, Vec<OperationReport>)> {
-    let mut patch = PptxPatch::default();
+    let mut patched_bytes = source_bytes.to_vec();
     let mut reports = Vec::new();
     for (index, operation) in operations.iter().enumerate() {
         match operation {
@@ -470,16 +453,28 @@ fn apply_pptx(
                 expected_text,
                 replacement,
             } => {
-                patch.scoped_replacements.push(ScopedPptxReplace {
-                    scope: PptxTextScope::AllText,
-                    replace: TextReplace::all(expected_text, replacement),
-                });
+                let ArtifactLocator::PptxShape {
+                    slide_number,
+                    shape_id,
+                } = target
+                else {
+                    reports.push(unsupported_operation(index, operation));
+                    continue;
+                };
+                patched_bytes = officemd_pptx::replace_shape_text(
+                    &patched_bytes,
+                    *slide_number,
+                    *shape_id,
+                    expected_text,
+                    replacement,
+                )
+                .map_err(|error| AgentError::PatchPreconditionFailed(error.to_string()))?;
                 reports.push(operation_report(
                     index,
                     MutationKind::ReplacePptxShapeText,
                     target.clone(),
                     OperationStatus::Applied,
-                    "queued PPTX text replacement",
+                    "replaced PPTX shape text",
                 ));
             }
             _ => reports.push(unsupported_operation(index, operation)),
@@ -491,14 +486,7 @@ fn apply_pptx(
     {
         return Ok((source_bytes.to_vec(), reports));
     }
-    let patched = officemd_core::patch_pptx_with_report(source_bytes, &patch)
-        .map_err(|e| AgentError::Extraction(e.to_string()))?;
-    if patched.report.replacements_applied == 0 && !operations.is_empty() {
-        return Err(AgentError::PatchPreconditionFailed(
-            "no PPTX replacement matched expected text".to_string(),
-        ));
-    }
-    Ok((patched.content, reports))
+    Ok((patched_bytes, reports))
 }
 
 fn unsupported_operation(index: usize, operation: &PatchOperation) -> OperationReport {
@@ -533,7 +521,7 @@ fn unsupported_operation(index: usize, operation: &PatchOperation) -> OperationR
         kind,
         target,
         OperationStatus::Unsupported,
-        "operation is not supported by this implementation slice",
+        "operation is not supported for this artifact format",
     )
 }
 
@@ -560,19 +548,64 @@ fn patch_sha256(patch: &crate::ArtifactPatchPlan) -> AgentResult<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn write_atomic(output: &Path, bytes: &[u8]) -> AgentResult<()> {
+fn validate_output(format: AgentDocumentFormat, bytes: &[u8]) -> AgentResult<()> {
+    match format {
+        AgentDocumentFormat::Docx => officemd_docx::extract_ir(bytes)
+            .map(|_| ())
+            .map_err(|error| AgentError::Extraction(error.to_string())),
+        AgentDocumentFormat::Xlsx => officemd_xlsx::extract_tables_ir(bytes)
+            .map(|_| ())
+            .map_err(|error| AgentError::Extraction(error.to_string())),
+        AgentDocumentFormat::Pptx => officemd_pptx::extract_ir(bytes)
+            .map(|_| ())
+            .map_err(|error| AgentError::Extraction(error.to_string())),
+        AgentDocumentFormat::Csv | AgentDocumentFormat::Pdf => Err(
+            AgentError::UnsupportedCapability(format!("{format} mutation is not supported")),
+        ),
+    }
+}
+
+fn write_atomic(output: &Path, bytes: &[u8], request_id: &str) -> AgentResult<()> {
     let parent = output.parent().unwrap_or_else(|| Path::new("."));
     let file_name = output
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("artifact");
-    let tmp = parent.join(format!(".{file_name}.officemd-tmp-{}", std::process::id()));
-    std::fs::write(&tmp, bytes).map_err(|source| AgentError::Read {
-        path: tmp.display().to_string(),
-        source,
-    })?;
-    std::fs::rename(&tmp, output).map_err(|source| AgentError::Read {
-        path: output.display().to_string(),
-        source,
-    })
+    let safe_request_id = request_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let prefix = format!(".{file_name}.officemd-{safe_request_id}-");
+    let mut temporary = tempfile::Builder::new()
+        .prefix(&prefix)
+        .tempfile_in(parent)
+        .map_err(|source| AgentError::Write {
+            path: parent.display().to_string(),
+            source,
+        })?;
+    temporary
+        .write_all(bytes)
+        .and_then(|()| temporary.as_file().sync_all())
+        .map_err(|source| AgentError::Write {
+            path: temporary.path().display().to_string(),
+            source,
+        })?;
+    temporary
+        .persist_noclobber(output)
+        .map_err(|error| AgentError::Write {
+            path: output.display().to_string(),
+            source: error.error,
+        })?;
+    Ok(())
+}
+
+fn write_sidecar(sidecar: &Path, report: &ApplyPatchReport, request_id: &str) -> AgentResult<()> {
+    let bytes = serde_json::to_vec_pretty(report)?;
+    write_atomic(sidecar, &bytes, request_id)
 }

@@ -19,6 +19,14 @@ pub struct XlsxCellValue {
     pub address: String,
     pub value: Option<String>,
     pub formula: Option<String>,
+    pub number_format: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XlsxFormulaError {
+    pub sheet: String,
+    pub address: String,
+    pub error: String,
 }
 
 /// Inspect sheet dimensions (row and column counts) for each sheet.
@@ -84,6 +92,10 @@ pub fn inspect_cells(
         .into_iter()
         .map(|note| (note.cell_ref, note.formula))
         .collect::<std::collections::HashMap<_, _>>();
+    let number_formats = grid
+        .number_formats
+        .into_iter()
+        .collect::<std::collections::HashMap<_, _>>();
 
     Ok(addresses
         .iter()
@@ -98,9 +110,102 @@ pub fn inspect_cells(
                 address: address.clone(),
                 value,
                 formula: formulas.get(address).cloned(),
+                number_format: number_formats.get(address).cloned(),
             }
         })
         .collect())
+}
+
+/// Inspect stored spreadsheet error values and invalid formula references.
+///
+/// # Errors
+///
+/// Returns an error if workbook or worksheet XML cannot be read.
+pub fn inspect_formula_errors(content: &[u8]) -> Result<Vec<XlsxFormulaError>, XlsxError> {
+    let mut package = OpcPackage::from_bytes(content).map_err(XlsxError::from)?;
+    let targets = resolve_sheet_targets(&mut package)?;
+    let mut errors = Vec::new();
+    for (sheet, path) in targets {
+        let xml = package
+            .read_part_bytes(&path)
+            .map_err(XlsxError::from)?
+            .ok_or_else(|| XlsxError::MissingPart(path.clone()))?;
+        errors.extend(parse_formula_errors(&xml, &sheet)?);
+    }
+    Ok(errors)
+}
+
+fn parse_formula_errors(xml: &[u8], sheet: &str) -> Result<Vec<XlsxFormulaError>, XlsxError> {
+    let mut reader = XmlReader::from_reader(std::io::Cursor::new(xml));
+    reader.config_mut().trim_text(false);
+    let mut buffer = Vec::new();
+    let mut address = None;
+    let mut is_error_cell = false;
+    let mut in_value = false;
+    let mut in_formula = false;
+    let mut value = String::new();
+    let mut formula = String::new();
+    let mut errors = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(ref event)) if local_name(event.name().as_ref()) == b"c" => {
+                address = attr_string(event, b"r");
+                is_error_cell = attr_string(event, b"t").as_deref() == Some("e");
+                value.clear();
+                formula.clear();
+            }
+            Ok(Event::Start(ref event)) if local_name(event.name().as_ref()) == b"v" => {
+                in_value = true;
+            }
+            Ok(Event::Start(ref event)) if local_name(event.name().as_ref()) == b"f" => {
+                in_formula = true;
+            }
+            Ok(Event::Text(event)) if in_value => {
+                value.push_str(
+                    &event
+                        .unescape()
+                        .map_err(|error| XlsxError::Xml(error.to_string()))?,
+                );
+            }
+            Ok(Event::Text(event)) if in_formula => {
+                formula.push_str(
+                    &event
+                        .unescape()
+                        .map_err(|error| XlsxError::Xml(error.to_string()))?,
+                );
+            }
+            Ok(Event::End(ref event)) if local_name(event.name().as_ref()) == b"v" => {
+                in_value = false;
+            }
+            Ok(Event::End(ref event)) if local_name(event.name().as_ref()) == b"f" => {
+                in_formula = false;
+            }
+            Ok(Event::End(ref event)) if local_name(event.name().as_ref()) == b"c" => {
+                if let Some(address) = address.take() {
+                    let error = if is_error_cell && !value.trim().is_empty() {
+                        Some(value.trim().to_string())
+                    } else if formula.contains("#REF!") {
+                        Some("#REF!".to_string())
+                    } else {
+                        None
+                    };
+                    if let Some(error) = error {
+                        errors.push(XlsxFormulaError {
+                            sheet: sheet.to_string(),
+                            address,
+                            error,
+                        });
+                    }
+                }
+                is_error_cell = false;
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(XlsxError::Xml(error.to_string())),
+        }
+        buffer.clear();
+    }
+    Ok(errors)
 }
 
 fn sheet_size_from_dimension_or_scan(xml: &[u8]) -> (usize, usize) {

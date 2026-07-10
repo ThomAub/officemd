@@ -1,8 +1,7 @@
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use officemd_agent::{
-    AgentDocumentFormat, AgentService, ApplyPatchRequest, ArtifactPatchPlan, ArtifactRenderer,
-    InspectQuery, InspectRequest, RenderRequest, RenderScale, VerificationCheckKind,
-    VerificationStatus, VerifyRequest,
+    AgentDocumentFormat, AgentService, ApplyPatchRequest, ArtifactPatchPlan, DiffArtifactRequest,
+    InspectQuery, InspectRequest, RenderRequest, RenderScale, VerificationCheckKind, VerifyRequest,
 };
 use officemd_core::ir::OoxmlDocument;
 use officemd_core::opc::OpcPackage;
@@ -182,13 +181,37 @@ enum Command {
         /// Input document path (.docx/.xlsx/.csv/.pptx/.pdf).
         input: PathBuf,
 
-        /// Comma-separated checks: structure, formula-references, visual-render.
+        /// Comma-separated checks: structure, formula-references, pptx-canvas-overflow, visual-render.
         #[arg(long)]
         checks: Option<String>,
 
         /// Directory for renderer-backed verification evidence.
         #[arg(long)]
         render_output_dir: Option<PathBuf>,
+
+        #[command(flatten)]
+        output: CommonOutputOptions,
+    },
+
+    /// Compare artifacts through semantic projections and rendered evidence.
+    DiffArtifact {
+        /// Left input document path.
+        left: PathBuf,
+
+        /// Right input document path.
+        right: PathBuf,
+
+        /// Compare canonical semantic projections.
+        #[arg(long)]
+        semantic: bool,
+
+        /// Render and compare visual evidence images exactly.
+        #[arg(long)]
+        rendered: bool,
+
+        /// Root directory for left and right rendered evidence.
+        #[arg(long, default_value = "officemd-diff-evidence")]
+        output_dir: PathBuf,
 
         #[command(flatten)]
         output: CommonOutputOptions,
@@ -1535,14 +1558,10 @@ fn run_probe_command(
     output: CommonOutputOptions,
     format: Option<FormatArg>,
 ) -> Result<(), String> {
-    let service = AgentService::new();
-    let request = InspectRequest {
-        input: input.to_path_buf(),
-        format: format.map(AgentDocumentFormat::from),
-        query: InspectQuery::DocumentSummary,
-    };
-    let mut report = service.inspect(&request).map_err(|e| e.to_string())?;
-    report.capability.render_capability = officemd_renderer::discover();
+    let service = AgentService::with_renderer(officemd_renderer::SystemRenderer::discover());
+    let report = service
+        .probe_path_as(input, format.map(AgentDocumentFormat::from))
+        .map_err(|e| e.to_string())?;
     let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
         OutputFormatArg::Json if output.pretty => {
             serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
@@ -1566,7 +1585,7 @@ fn run_agent_inspect_command(
     })?;
     let query: InspectQuery = serde_json::from_slice(&query_bytes)
         .map_err(|e| format!("failed to parse agent query JSON: {e}"))?;
-    let service = AgentService::new();
+    let service = AgentService::with_renderer(officemd_renderer::SystemRenderer::discover());
     let request = InspectRequest {
         input: input.to_path_buf(),
         format: common.format.map(AgentDocumentFormat::from),
@@ -1613,7 +1632,14 @@ fn run_apply_command(
         OutputFormatArg::Json => serde_json::to_string(&report).map_err(|e| e.to_string())?,
         OutputFormatArg::Markdown => render_apply_text(&report),
     };
-    write_stdout(&output_text)
+    write_stdout(&output_text)?;
+    if matches!(
+        report.status,
+        officemd_agent::ApplyPatchStatus::Rejected | officemd_agent::ApplyPatchStatus::Failed
+    ) {
+        return Err("patch was not applied".to_string());
+    }
+    Ok(())
 }
 
 fn run_render_artifact_command(
@@ -1627,7 +1653,7 @@ fn run_render_artifact_command(
         pages_or_slides: None,
         scale: RenderScale::Screen,
     };
-    let report = officemd_renderer::SystemRenderer::discover()
+    let report = AgentService::with_renderer(officemd_renderer::SystemRenderer::discover())
         .render(&request)
         .map_err(|e| e.to_string())?;
     let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
@@ -1651,45 +1677,9 @@ fn run_verify_command(
         checks: parse_verification_checks(checks.as_deref())?,
         render_output_dir,
     };
-    let mut report = AgentService::new()
+    let report = AgentService::with_renderer(officemd_renderer::SystemRenderer::discover())
         .verify(&request)
         .map_err(|e| e.to_string())?;
-    if request
-        .checks
-        .contains(&VerificationCheckKind::VisualRender)
-        && let Some(render_output_dir) = &request.render_output_dir
-    {
-        let render_request = RenderRequest {
-            input: input.to_path_buf(),
-            output_dir: render_output_dir.clone(),
-            pages_or_slides: None,
-            scale: RenderScale::Screen,
-        };
-        match officemd_renderer::SystemRenderer::discover().render(&render_request) {
-            Ok(rendered) => {
-                for check in &mut report.checks {
-                    if check.kind == VerificationCheckKind::VisualRender {
-                        check.status = VerificationStatus::Passed;
-                        check.message = format!(
-                            "rendered {} visual evidence image(s)",
-                            rendered.images.len()
-                        );
-                    }
-                }
-                report.rendered_evidence = Some(rendered);
-                report.status = aggregate_cli_verify_status(&report.checks);
-            }
-            Err(err) => {
-                for check in &mut report.checks {
-                    if check.kind == VerificationCheckKind::VisualRender {
-                        check.status = VerificationStatus::NotRunnable;
-                        check.message = err.to_string();
-                    }
-                }
-                report.status = aggregate_cli_verify_status(&report.checks);
-            }
-        }
-    }
     let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
         OutputFormatArg::Json if output.pretty => {
             serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
@@ -1697,23 +1687,46 @@ fn run_verify_command(
         OutputFormatArg::Json => serde_json::to_string(&report).map_err(|e| e.to_string())?,
         OutputFormatArg::Markdown => render_verify_text(&report),
     };
-    write_stdout(&output_text)
+    write_stdout(&output_text)?;
+    if matches!(
+        report.status,
+        officemd_agent::VerificationStatus::Failed
+            | officemd_agent::VerificationStatus::NotRunnable
+    ) {
+        return Err("artifact verification did not pass".to_string());
+    }
+    Ok(())
 }
 
-fn aggregate_cli_verify_status(checks: &[officemd_agent::CheckReport]) -> VerificationStatus {
-    if checks
-        .iter()
-        .any(|check| check.status == VerificationStatus::Failed)
-    {
-        VerificationStatus::Failed
-    } else if checks
-        .iter()
-        .any(|check| check.status == VerificationStatus::NotRunnable)
-    {
-        VerificationStatus::PassedWithWarnings
-    } else {
-        VerificationStatus::Passed
-    }
+fn run_diff_artifact_command(
+    left: &Path,
+    right: &Path,
+    semantic: bool,
+    rendered: bool,
+    output_dir: PathBuf,
+    output: CommonOutputOptions,
+) -> Result<(), String> {
+    let semantic = semantic || !rendered;
+    let request = DiffArtifactRequest {
+        left: left.to_path_buf(),
+        right: right.to_path_buf(),
+        semantic,
+        rendered,
+        render_output_dir: rendered.then_some(output_dir),
+    };
+    let report = AgentService::with_renderer(officemd_renderer::SystemRenderer::discover())
+        .diff_artifacts(&request)
+        .map_err(|error| error.to_string())?;
+    let output_text = match output.output_format.unwrap_or(OutputFormatArg::Json) {
+        OutputFormatArg::Json if output.pretty => {
+            serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+        }
+        OutputFormatArg::Json => {
+            serde_json::to_string(&report).map_err(|error| error.to_string())?
+        }
+        OutputFormatArg::Markdown => render_artifact_diff_text(&report),
+    };
+    write_stdout(&output_text)
 }
 
 fn parse_verification_checks(spec: Option<&str>) -> Result<Vec<VerificationCheckKind>, String> {
@@ -1726,9 +1739,12 @@ fn parse_verification_checks(spec: Option<&str>) -> Result<Vec<VerificationCheck
             "formula-references" | "formula_references" => {
                 Ok(VerificationCheckKind::FormulaReferences)
             }
+            "pptx-canvas-overflow" | "pptx_canvas_overflow" => {
+                Ok(VerificationCheckKind::PptxCanvasOverflow)
+            }
             "visual-render" | "visual_render" => Ok(VerificationCheckKind::VisualRender),
             value => Err(format!(
-                "unknown verification check '{value}' (expected structure, formula-references, visual-render)"
+                "unknown verification check '{value}' (expected structure, formula-references, pptx-canvas-overflow, visual-render)"
             )),
         })
         .collect()
@@ -1764,6 +1780,19 @@ fn render_verify_text(report: &officemd_agent::VerificationReport) -> String {
             "{:?}: {:?} - {}",
             check.kind, check.status, check.message
         );
+    }
+    out
+}
+
+fn render_artifact_diff_text(report: &officemd_agent::ArtifactDiffReport) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Equal: {}", report.equal);
+    if let Some(semantic) = &report.semantic {
+        let _ = writeln!(out, "Semantic equal: {}", semantic.equal);
+    }
+    if let Some(visual) = &report.visual {
+        let _ = writeln!(out, "Visual equal: {}", visual.equal);
+        let _ = writeln!(out, "Compared images: {}", visual.images.len());
     }
     out
 }
@@ -1910,6 +1939,14 @@ fn run() -> Result<(), String> {
             render_output_dir,
             output,
         } => run_verify_command(&input, checks, render_output_dir, output)?,
+        Command::DiffArtifact {
+            left,
+            right,
+            semantic,
+            rendered,
+            output_dir,
+            output,
+        } => run_diff_artifact_command(&left, &right, semantic, rendered, output_dir, output)?,
         Command::Markdown { file, common } | Command::Render { file, common } => {
             run_markdown_command(&file, &common)?;
         }

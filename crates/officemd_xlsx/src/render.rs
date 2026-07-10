@@ -131,6 +131,7 @@ fn write_sheet(
         row_indices: _,
         col_indices: _,
         formulas,
+        number_formats: _,
     } = grid;
     let cols = grid_cols.max(1);
     let row_count = rows.len().max(1);
