@@ -601,15 +601,18 @@ fn has_text(paragraph: &Paragraph) -> bool {
     })
 }
 
+/// The part of a qualified name after its prefix (`w:p` -> `p`).
+///
+/// Every reader here parses a `&str`, so a name is valid UTF-8 and only its
+/// local part needs decoding. `:` and `}` are ASCII, so they are found in the
+/// bytes at the same place as in the decoded name.
 fn local_name(name: &[u8]) -> &str {
-    let s = std::str::from_utf8(name).unwrap_or("");
-    if let Some(idx) = s.rfind(':') {
-        &s[idx + 1..]
-    } else if let Some(idx) = s.rfind('}') {
-        &s[idx + 1..]
-    } else {
-        s
-    }
+    let start = name
+        .iter()
+        .rposition(|&byte| byte == b':')
+        .or_else(|| name.iter().rposition(|&byte| byte == b'}'))
+        .map_or(0, |idx| idx + 1);
+    std::str::from_utf8(&name[start..]).unwrap_or("")
 }
 
 fn attr_value(e: &BytesStart<'_>, key: &str) -> Option<String> {
