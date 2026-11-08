@@ -235,7 +235,12 @@ struct PartState<'a> {
     section_comments: Vec<CommentNote>,
     seen_comments: HashSet<String>,
     current_paragraph: Option<ParagraphBuilder>,
-    current_table: Option<TableBuilder>,
+    /// Paragraphs started and not yet ended. A text box holds paragraphs
+    /// inside a paragraph, and the outer one goes on after the box.
+    open_paragraphs: usize,
+    /// Open tables, outermost first. A cell may hold a table, so a table
+    /// starts inside another one and must not replace it.
+    tables: Vec<TableBuilder>,
     current_link: Option<LinkContext>,
     collect_instr_text: bool,
     in_text_run: bool,
@@ -255,7 +260,8 @@ impl<'a> PartState<'a> {
             section_comments: Vec::new(),
             seen_comments: HashSet::new(),
             current_paragraph: None,
-            current_table: None,
+            open_paragraphs: 0,
+            tables: Vec::new(),
             current_link: None,
             collect_instr_text: false,
             in_text_run: false,
@@ -287,7 +293,7 @@ impl<'a> PartState<'a> {
         match local_name(e.name().as_ref()) {
             "p" => {
                 self.start_paragraph();
-                self.finish_paragraph();
+                self.end_paragraph();
             }
             "tbl" => {
                 self.start_table();
@@ -319,7 +325,7 @@ impl<'a> PartState<'a> {
 
     fn handle_end(&mut self, e: &quick_xml::events::BytesEnd<'_>) {
         match local_name(e.name().as_ref()) {
-            "p" => self.finish_paragraph(),
+            "p" => self.end_paragraph(),
             "tbl" => self.finish_table(),
             "tr" => self.finish_row(),
             "tc" => self.finish_cell(),
@@ -350,12 +356,24 @@ impl<'a> PartState<'a> {
 
     fn finish_all(&mut self) {
         self.finish_paragraph();
-        self.finish_table();
+        while !self.tables.is_empty() {
+            self.finish_table();
+        }
     }
 
     fn start_paragraph(&mut self) {
         self.finish_paragraph();
+        self.open_paragraphs += 1;
         self.current_paragraph = Some(ParagraphBuilder::default());
+    }
+
+    fn end_paragraph(&mut self) {
+        self.finish_paragraph();
+        self.open_paragraphs = self.open_paragraphs.saturating_sub(1);
+        if self.open_paragraphs > 0 {
+            // The paragraph that holds the text box continues after it.
+            self.current_paragraph = Some(ParagraphBuilder::default());
+        }
     }
 
     fn finish_paragraph(&mut self) {
@@ -364,7 +382,7 @@ impl<'a> PartState<'a> {
             let paragraph = Paragraph {
                 inlines: builder.inlines,
             };
-            if let Some(table) = &mut self.current_table {
+            if let Some(table) = self.tables.last_mut() {
                 table.push_paragraph(paragraph);
             } else if !paragraph.inlines.is_empty() {
                 self.blocks.push(Block::Paragraph(paragraph));
@@ -374,13 +392,24 @@ impl<'a> PartState<'a> {
 
     fn start_table(&mut self) {
         self.finish_paragraph();
-        self.current_table = Some(TableBuilder::default());
+        self.tables.push(TableBuilder::default());
     }
 
     fn finish_table(&mut self) {
-        if let Some(mut table) = self.current_table.take() {
+        if let Some(mut table) = self.tables.pop() {
             table.finish_cell();
             table.finish_row();
+            if let Some(parent) = self.tables.last_mut() {
+                // Markdown has no nested tables. Keep the nested table's text
+                // in the cell that holds it, one paragraph per line, in
+                // reading order.
+                for paragraph in table.rows.into_iter().flatten().flat_map(|cell| cell.content) {
+                    if has_text(&paragraph) {
+                        parent.push_paragraph(paragraph);
+                    }
+                }
+                return;
+            }
             let mut rows = table.rows;
             let mut max_cols = rows.iter().map(std::vec::Vec::len).max().unwrap_or(0);
             if max_cols == 0 {
@@ -411,25 +440,25 @@ impl<'a> PartState<'a> {
     }
 
     fn start_row(&mut self) {
-        if let Some(table) = &mut self.current_table {
+        if let Some(table) = self.tables.last_mut() {
             table.start_row();
         }
     }
 
     fn finish_row(&mut self) {
-        if let Some(table) = &mut self.current_table {
+        if let Some(table) = self.tables.last_mut() {
             table.finish_row();
         }
     }
 
     fn start_cell(&mut self) {
-        if let Some(table) = &mut self.current_table {
+        if let Some(table) = self.tables.last_mut() {
             table.start_cell();
         }
     }
 
     fn finish_cell(&mut self) {
-        if let Some(table) = &mut self.current_table {
+        if let Some(table) = self.tables.last_mut() {
             table.finish_cell();
         }
     }
@@ -558,6 +587,13 @@ impl<'a> PartState<'a> {
             }
         }
     }
+}
+
+fn has_text(paragraph: &Paragraph) -> bool {
+    paragraph.inlines.iter().any(|inline| match inline {
+        Inline::Text(text) => !text.is_empty(),
+        Inline::Link(_) => true,
+    })
 }
 
 fn local_name(name: &[u8]) -> &str {
