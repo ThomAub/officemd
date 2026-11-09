@@ -403,7 +403,12 @@ impl<'a> PartState<'a> {
                 // Markdown has no nested tables. Keep the nested table's text
                 // in the cell that holds it, one paragraph per line, in
                 // reading order.
-                for paragraph in table.rows.into_iter().flatten().flat_map(|cell| cell.content) {
+                for paragraph in table
+                    .rows
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|cell| cell.content)
+                {
                     if has_text(&paragraph) {
                         parent.push_paragraph(paragraph);
                     }
