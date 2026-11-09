@@ -241,7 +241,11 @@ fn nested_table_keeps_every_outer_row() {
 
     let doc = extract_ir(&content).expect("extract");
     let blocks = &doc.sections[0].blocks;
-    assert_eq!(table_count(blocks), 1, "nested text stays inside the outer table");
+    assert_eq!(
+        table_count(blocks),
+        1,
+        "nested text stays inside the outer table"
+    );
     let Block::Table(outer) = &blocks[0] else {
         panic!("expected the outer table");
     };
@@ -250,7 +254,13 @@ fn nested_table_keeps_every_outer_row() {
     let markdown = markdown_from_bytes(&content).expect("markdown");
     assert_once_in_order(
         &markdown,
-        &["Alex Fernsby", "Jordan Pell", "Gate 4", "Harbor Inn", "Quinn Vale"],
+        &[
+            "Alex Fernsby",
+            "Jordan Pell",
+            "Gate 4",
+            "Harbor Inn",
+            "Quinn Vale",
+        ],
     );
     assert!(
         markdown.contains("| Day<br>Flight<br>Hotel<br>Mon<br>Gate 4<br>Harbor Inn<br> |"),
@@ -280,9 +290,7 @@ fn tables_nested_three_deep_keep_every_level() {
     let deepest = table(1, &row(&["Riley Ash"]));
     let middle = table(
         2,
-        &(row(&["Morgan Hale", "Desk"])
-            + &spanning_row(2, &deepest)
-            + &row(&["Sam Drew", "Desk"])),
+        &(row(&["Morgan Hale", "Desk"]) + &spanning_row(2, &deepest) + &row(&["Sam Drew", "Desk"])),
     );
     let body = table(
         2,
@@ -297,7 +305,13 @@ fn tables_nested_three_deep_keep_every_level() {
     let markdown = markdown_from_bytes(&content).expect("markdown");
     assert_once_in_order(
         &markdown,
-        &["Alex Fernsby", "Morgan Hale", "Riley Ash", "Sam Drew", "Quinn Vale"],
+        &[
+            "Alex Fernsby",
+            "Morgan Hale",
+            "Riley Ash",
+            "Sam Drew",
+            "Quinn Vale",
+        ],
     );
 }
 
@@ -316,7 +330,10 @@ fn nested_table_beside_a_vertical_merge_keeps_every_row() {
     );
     let markdown = markdown_from_bytes(&docx_with_body(&body)).expect("markdown");
 
-    assert_once_in_order(&markdown, &["Team", "Alex Fernsby", "Harbor Inn", "Quinn Vale"]);
+    assert_once_in_order(
+        &markdown,
+        &["Team", "Alex Fernsby", "Harbor Inn", "Quinn Vale"],
+    );
 }
 
 #[test]
@@ -351,8 +368,14 @@ fn text_after_a_text_box_stays_in_its_paragraph() {
 #[test]
 fn a_text_box_in_a_table_cell_keeps_the_cell_text_after_it() {
     let boxed = r#"<w:tc><w:p><w:r><w:t>Owner</w:t></w:r><w:r><w:pict><v:shape xmlns:v="urn:schemas-microsoft-com:vml"><v:textbox><w:txbxContent><w:p><w:r><w:t>Boxed Jordan Pell</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict></w:r><w:r><w:t>Alex Fernsby</w:t></w:r></w:p></w:tc>"#;
-    let body = table(2, &(format!("<w:tr>{boxed}{}</w:tr>", cell("Desk")) + &row(&["Signed", "Quinn Vale"])));
+    let body = table(
+        2,
+        &(format!("<w:tr>{boxed}{}</w:tr>", cell("Desk")) + &row(&["Signed", "Quinn Vale"])),
+    );
     let markdown = markdown_from_bytes(&docx_with_body(&body)).expect("markdown");
 
-    assert_once_in_order(&markdown, &["Owner", "Boxed Jordan Pell", "Alex Fernsby", "Quinn Vale"]);
+    assert_once_in_order(
+        &markdown,
+        &["Owner", "Boxed Jordan Pell", "Alex Fernsby", "Quinn Vale"],
+    );
 }
