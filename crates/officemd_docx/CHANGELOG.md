@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.9] - 2026-11-09
+
+### Bug Fixes
+
+- *(docx)* Keep table rows and paragraph text around nested content ([311f13a](https://github.com/ThomAub/officemd/commit/311f13a6bd00b477715996f331965041d28c88ae))
+
+### Performance
+
+- *(docx)* Decode only the local part of each XML name ([c456480](https://github.com/ThomAub/officemd/commit/c45648023b88b0f5a3ef8cc42dc449f335289e41))
+
+### Style
+
+- *(docx)* Apply rustfmt to the nested-content fix ([a114842](https://github.com/ThomAub/officemd/commit/a114842629f682ea208efb46a9e5c4bc1956d3cb))
+
+
 ## [0.1.8] - 2026-07-02
 
 ### Miscellaneous
